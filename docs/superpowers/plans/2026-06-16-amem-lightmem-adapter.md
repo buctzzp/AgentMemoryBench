@@ -930,7 +930,7 @@ Expected: collection failure，原因是 `lightmem_adapter` 不存在。
 
 ```toml
 # LightMem 官方 conversation-QA profile。
-# smoke 使用较小 retrieve_limit；official_full 保留官方 LoCoMo 脚本的核心模型路径和参数。
+# smoke 使用较小 retrieve_limit；official_full 保留 LightMem LoCoMo 脚本的核心模型路径和参数。
 
 [smoke]
 llm_model = "gpt-4o-mini"

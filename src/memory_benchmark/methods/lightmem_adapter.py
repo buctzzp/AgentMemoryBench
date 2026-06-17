@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 import hashlib
 import importlib
+import importlib.util
 import io
 from pathlib import Path
 import re
@@ -32,6 +33,7 @@ from memory_benchmark.core import (
     Conversation,
     Question,
     Session,
+    Turn,
 )
 from memory_benchmark.core.interfaces import BaseMemorySystem
 from memory_benchmark.observability.efficiency import (
@@ -62,6 +64,10 @@ class LightMemConfig:
         retrieve_limit: method 内部检索条数，不进入统一接口参数。
         max_workers: runner 可读取的建议 conversation 并发数。
         pre_compress: 是否启用官方预压缩。
+        compression_rate: LLMLingua-2 预压缩率；LightMem Table 2/3 的
+            official-mini profile 使用 0.7。
+        stm_threshold: STM buffer 容量阈值。当前 vendored LightMem 源码硬编码
+            512 tokens，因此 adapter 只允许显式声明 512。
         topic_segment: 是否启用官方 topic segmentation。
         text_summary: 是否启用文本摘要。
         suppress_official_stdout: 是否压制第三方 stdout。
@@ -74,6 +80,8 @@ class LightMemConfig:
     retrieve_limit: int
     max_workers: int
     pre_compress: bool = True
+    compression_rate: float = 0.7
+    stm_threshold: int = 512
     topic_segment: bool = True
     text_summary: bool = True
     embedding_dimensions: int = 384
@@ -98,6 +106,15 @@ class LightMemConfig:
             raise ConfigurationError("LightMem max_workers must be positive")
         if self.embedding_dimensions < 1:
             raise ConfigurationError("LightMem embedding_dimensions must be positive")
+        if self.compression_rate <= 0 or self.compression_rate > 1:
+            raise ConfigurationError(
+                "LightMem compression_rate must be in the range (0, 1]"
+            )
+        if self.stm_threshold != 512:
+            raise ConfigurationError(
+                "LightMem stm_threshold currently must be 512 because the vendored "
+                "LightMem ShortMemBufferManager hardcodes max_tokens=512"
+            )
         if self.extraction_mode not in {"flat", "event"}:
             raise ConfigurationError("LightMem extraction_mode must be flat or event")
 
@@ -196,6 +213,8 @@ def build_lightmem_source_identity(
         "src/lightmem/memory/lightmem.py",
         "experiments/locomo/add_locomo.py",
         "experiments/locomo/search_locomo.py",
+        "experiments/locomo/prompts.py",
+        "experiments/longmemeval/run_lightmem_gpt.py",
     ]
     source_files = [lightmem_root / relative_path for relative_path in required_files]
     missing = [path for path in source_files if not path.is_file()]
@@ -264,6 +283,7 @@ class LightMem(BaseMemorySystem):
         self._answer_client = answer_client
         self._efficiency_collector = efficiency_collector
         self._backends: dict[str, Any] = {}
+        self._conversation_metadata: dict[str, dict[str, Any]] = {}
         if self._backend_factory is None:
             self.config.validate_required_local_resources(self.path_settings)
 
@@ -318,7 +338,7 @@ class LightMem(BaseMemorySystem):
                     },
                     "compress_config": {
                         "instruction": "",
-                        "rate": 0.6,
+                        "rate": config.compression_rate,
                         "target_token": -1,
                     },
                 },
@@ -374,6 +394,10 @@ class LightMem(BaseMemorySystem):
                 "log_dir": str(root / "logs" / collection_name),
             },
             "extraction_mode": config.extraction_mode,
+            "lightmem_profile": {
+                "compression_rate": config.compression_rate,
+                "stm_threshold": config.stm_threshold,
+            },
         }
 
     def add(self, conversations: list[Conversation]) -> AddResult:
@@ -382,13 +406,27 @@ class LightMem(BaseMemorySystem):
         conversation_ids: list[str] = []
         for conversation in conversations:
             backend = self._get_or_create_backend(conversation.conversation_id)
-            messages = self._conversation_to_lightmem_messages(conversation)
-            self._suppress_stdout_if_needed(
-                backend.add_memory,
-                messages,
-                force_segment=True,
-                force_extract=True,
+            self._conversation_metadata[conversation.conversation_id] = {
+                **conversation.metadata,
+                "conversation_id": conversation.conversation_id,
+            }
+            batches = self._conversation_to_lightmem_batches(conversation)
+            locomo_metadata_prompt = self._locomo_metadata_prompt_if_needed(
+                conversation
             )
+            for batch_index, messages in enumerate(batches):
+                is_last_batch = batch_index == len(batches) - 1
+                kwargs: dict[str, Any] = {
+                    "force_segment": is_last_batch,
+                    "force_extract": is_last_batch,
+                }
+                if locomo_metadata_prompt is not None:
+                    kwargs["METADATA_GENERATE_PROMPT"] = locomo_metadata_prompt
+                self._suppress_stdout_if_needed(
+                    backend.add_memory,
+                    messages,
+                    **kwargs,
+                )
             conversation_ids.append(conversation.conversation_id)
         return AddResult(conversation_ids=conversation_ids)
 
@@ -424,7 +462,7 @@ class LightMem(BaseMemorySystem):
                     self.config.llm_model,
                 ),
             )
-        prompt = self._build_answer_prompt(question, memory_context)
+        prompt = self._build_answer_prompt(question, memories)
         answer_started_ns = perf_counter_ns()
         if collector is not None and collector.enabled:
             with collector.operation_stage(EfficiencyStage.ANSWER):
@@ -475,42 +513,166 @@ class LightMem(BaseMemorySystem):
         )
         return self._suppress_stdout_if_needed(lightmemory_cls.from_config, backend_config)
 
-    def _conversation_to_lightmem_messages(
+    def _conversation_to_lightmem_batches(
         self,
         conversation: Conversation,
-    ) -> list[dict[str, object]]:
-        """把统一 conversation 转换为官方 LightMem message 列表。"""
+    ) -> list[list[dict[str, object]]]:
+        """把统一 conversation 转换为官方 `add_memory()` 调用批次。
 
-        messages: list[dict[str, object]] = []
-        for session in conversation.sessions:
-            messages.extend(self._session_to_lightmem_messages(session))
-        return messages
+        LightMem 的 LoCoMo 脚本把每条原始发言包装为 `user(content)+assistant("")`；
+        LongMemEval 脚本按真实 `user+assistant` pair 写入。这里根据公开
+        source metadata 选择对应转换，避免把整个 conversation 一次性喂给
+        LightMemory。
+        """
 
-    def _session_to_lightmem_messages(self, session: Session) -> list[dict[str, object]]:
-        """把单个 session 转换为 LightMem message 列表。"""
-
-        messages: list[dict[str, object]] = []
-        for turn in session.turns:
-            timestamp = turn.turn_time or session.session_time
-            messages.append(
-                {
-                    "role": "user",
-                    "content": turn.content,
-                    "speaker_id": turn.speaker,
-                    "speaker_name": turn.speaker,
-                    "time_stamp": timestamp,
-                }
+        if _is_longmemeval_conversation(conversation):
+            batches = self._conversation_to_longmemeval_batches(conversation)
+        else:
+            batches = self._conversation_to_locomo_batches(conversation)
+        if not batches:
+            raise ConfigurationError(
+                f"LightMem conversation has no addable turn batches: "
+                f"{conversation.conversation_id}"
             )
-        return messages
+        return batches
 
-    def _build_answer_prompt(self, question: Question, memory_context: str) -> str:
-        """构造不含 gold answer 的固定 reader prompt。"""
+    def _conversation_to_locomo_batches(
+        self,
+        conversation: Conversation,
+    ) -> list[list[dict[str, object]]]:
+        """按 LightMem 的 LoCoMo 脚本生成单 turn + 空 assistant 批次。"""
 
-        return (
-            "Based on the retrieved memories below, answer the question with a short "
-            "phrase whenever possible.\n\n"
-            f"Memories:\n{memory_context}\n\n"
-            f"Question: {question.text}\nShort answer:"
+        batches: list[list[dict[str, object]]] = []
+        for session in conversation.sessions:
+            for turn in session.turns:
+                timestamp = _turn_timestamp(turn, session)
+                speaker_id = _locomo_speaker_id(conversation, turn)
+                speaker_name = turn.speaker
+                batches.append(
+                    [
+                        {
+                            "role": "user",
+                            "content": turn.content,
+                            "speaker_id": speaker_id,
+                            "speaker_name": speaker_name,
+                            "time_stamp": timestamp,
+                        },
+                        {
+                            "role": "assistant",
+                            "content": "",
+                            "speaker_id": speaker_id,
+                            "speaker_name": speaker_name,
+                            "time_stamp": timestamp,
+                        },
+                    ]
+                )
+        return batches
+
+    def _conversation_to_longmemeval_batches(
+        self,
+        conversation: Conversation,
+    ) -> list[list[dict[str, object]]]:
+        """按 LongMemEval 官方脚本生成真实 user+assistant pair 批次。"""
+
+        batches: list[list[dict[str, object]]] = []
+        for session in conversation.sessions:
+            messages = [
+                self._turn_to_role_message(turn, session)
+                for turn in session.turns
+            ]
+            while messages and messages[0]["role"] != "user":
+                messages.pop(0)
+            if len(messages) % 2 != 0:
+                raise ConfigurationError(
+                    f"LightMem LongMemEval session has odd message count after "
+                    f"normalization: {conversation.conversation_id}/{session.session_id}"
+                )
+            for index in range(0, len(messages), 2):
+                pair = messages[index : index + 2]
+                if pair[0]["role"] != "user" or pair[1]["role"] != "assistant":
+                    raise ConfigurationError(
+                        "LightMem LongMemEval session must be user/assistant pairs: "
+                        f"{conversation.conversation_id}/{session.session_id}"
+                    )
+                batches.append(pair)
+        return batches
+
+    def _turn_to_role_message(
+        self,
+        turn: Turn,
+        session: Session,
+    ) -> dict[str, object]:
+        """把 LongMemEval turn 转成保留真实 role 的 LightMem message。"""
+
+        role = turn.normalized_role or turn.metadata.get("role") or turn.speaker
+        normalized_role = str(role).strip().lower()
+        if normalized_role not in {"user", "assistant"}:
+            raise ConfigurationError(
+                f"LightMem LongMemEval turn role must be user or assistant: {turn.turn_id}"
+            )
+        timestamp = _turn_timestamp(turn, session)
+        return {
+            "role": normalized_role,
+            "content": turn.content,
+            "speaker_id": turn.speaker,
+            "speaker_name": turn.speaker,
+            "time_stamp": timestamp,
+        }
+
+    def _locomo_metadata_prompt_if_needed(
+        self,
+        conversation: Conversation,
+    ) -> str | None:
+        """LoCoMo official profile 传入官方抽取 prompt，其他数据不传。"""
+
+        if not _is_locomo_conversation(conversation):
+            return None
+        return _load_lightmem_locomo_prompt(
+            self.path_settings,
+            "METADATA_GENERATE_PROMPT_locomo",
+        )
+
+    def _build_answer_prompt(
+        self,
+        question: Question,
+        memories: list[Any],
+    ) -> str:
+        """构造不含 gold answer 的 LightMem reader prompt。"""
+
+        if _is_longmemeval_question(question, self._conversation_metadata):
+            memory_context = "\n".join(str(memory) for memory in memories)
+            return (
+                f"Question time:{question.question_time} and question:{question.text}\n"
+                "Please answer the question based on the following memories: "
+                f"{memory_context}"
+            )
+        return self._build_locomo_answer_prompt(question, memories)
+
+    def _build_locomo_answer_prompt(
+        self,
+        question: Question,
+        memories: list[Any],
+    ) -> str:
+        """使用 LightMem LoCoMo `ANSWER_PROMPT` 的 speaker 分组布局。"""
+
+        metadata = self._conversation_metadata.get(question.conversation_id, {})
+        speaker_a = str(metadata.get("speaker_a") or "Speaker 1")
+        speaker_b = str(metadata.get("speaker_b") or "Speaker 2")
+        speaker_a_memories, speaker_b_memories = _split_memories_by_speaker(
+            memories,
+            speaker_a,
+            speaker_b,
+        )
+        answer_prompt = _load_lightmem_locomo_prompt(
+            self.path_settings,
+            "ANSWER_PROMPT",
+        )
+        return answer_prompt.format(
+            speaker_1_name=speaker_a,
+            speaker_1_memories=speaker_a_memories,
+            speaker_2_name=speaker_b,
+            speaker_2_memories=speaker_b_memories,
+            question=question.text,
         )
 
     def _call_answer_client(self, prompt: str, question: Question) -> str:
@@ -577,6 +739,152 @@ def _count_openai_tokens(text: str, model_name: str) -> int:
     if not text:
         return 0
     return _TiktokenCounter(model_name).count_tokens(text)
+
+
+def _is_locomo_conversation(conversation: Conversation) -> bool:
+    """根据公开 metadata 判断 conversation 是否来自 LoCoMo。"""
+
+    source_path = str(conversation.metadata.get("source_path") or "").lower()
+    return "locomo" in source_path
+
+
+def _is_longmemeval_conversation(conversation: Conversation) -> bool:
+    """根据公开 metadata/session metadata 判断 conversation 是否来自 LongMemEval。"""
+
+    source_path = str(conversation.metadata.get("source_path") or "").lower()
+    if "longmemeval" in source_path:
+        return True
+    return any(
+        str(session.metadata.get("source_format") or "").startswith("longmemeval")
+        for session in conversation.sessions
+    )
+
+
+def _is_longmemeval_question(
+    question: Question,
+    conversation_metadata: dict[str, dict[str, Any]],
+) -> bool:
+    """判断问题是否应使用 LongMemEval 官方 reader prompt。"""
+
+    metadata = conversation_metadata.get(question.conversation_id, {})
+    source_path = str(metadata.get("source_path") or "").lower()
+    return "longmemeval" in source_path or question.question_time is not None
+
+
+def _turn_timestamp(turn: Turn, session: Session) -> str:
+    """读取 LightMem 必需的 `time_stamp` 字段。"""
+
+    timestamp = turn.turn_time or session.session_time
+    if not timestamp:
+        raise ConfigurationError(
+            f"LightMem requires turn_time or session_time for turn {turn.turn_id}"
+        )
+    return timestamp
+
+
+def _locomo_speaker_id(conversation: Conversation, turn: Turn) -> str:
+    """按 LightMem LoCoMo 脚本的 speaker_a/speaker_b 语义生成 speaker_id。"""
+
+    speaker_a = conversation.metadata.get("speaker_a")
+    speaker_b = conversation.metadata.get("speaker_b")
+    if speaker_a and turn.speaker == speaker_a:
+        return "speaker_a"
+    if speaker_b and turn.speaker == speaker_b:
+        return "speaker_b"
+    return turn.speaker
+
+
+def _load_lightmem_locomo_prompt(
+    path_settings: PathSettings,
+    prompt_name: str,
+) -> str:
+    """从 vendored LightMem LoCoMo prompt 文件读取指定 prompt 常量。"""
+
+    prompt_path = (
+        path_settings.resolve_third_party_method_path(LIGHTMEM_METHOD_DIRECTORY)
+        / "experiments"
+        / "locomo"
+        / "prompts.py"
+    )
+    if not prompt_path.is_file():
+        raise ConfigurationError(f"LightMem LoCoMo prompt file missing: {prompt_path}")
+    module_name = f"_memory_benchmark_lightmem_prompts_{prompt_name}"
+    spec = importlib.util.spec_from_file_location(module_name, prompt_path)
+    if spec is None or spec.loader is None:
+        raise ConfigurationError(f"LightMem prompt file cannot be loaded: {prompt_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    prompt = getattr(module, prompt_name, None)
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ConfigurationError(
+            f"LightMem LoCoMo prompt '{prompt_name}' is missing or empty"
+        )
+    return prompt
+
+
+def _split_memories_by_speaker(
+    memories: list[Any],
+    speaker_a: str,
+    speaker_b: str,
+) -> tuple[str, str]:
+    """把检索 memory 粗分到 LoCoMo 官方 prompt 的两个 speaker 区域。
+
+    LightMem 的 `search_locomo.py` 直接读取 Qdrant payload，可按 speaker_name 精确分组；
+    `LightMemory.retrieve()` 返回格式化字符串时不保留 payload。对字符串 fallback，
+    这里放入 speaker_a 区域，同时保留 speaker_b 的空上下文标题。
+    """
+
+    speaker_a_lines: list[str] = []
+    speaker_b_lines: list[str] = []
+    for memory in memories:
+        speaker_name = _memory_speaker_name(memory)
+        formatted = _format_lightmem_memory(memory)
+        if speaker_name == speaker_b:
+            speaker_b_lines.append(formatted)
+        else:
+            speaker_a_lines.append(formatted)
+    return (
+        "\n\n".join(speaker_a_lines) or "No memories available.",
+        "\n\n".join(speaker_b_lines) or "No memories available.",
+    )
+
+
+def _memory_speaker_name(memory: Any) -> str | None:
+    """从可能的 LightMem retrieval entry 中读取 speaker_name。"""
+
+    if not isinstance(memory, dict):
+        return None
+    payload = memory.get("payload")
+    if isinstance(payload, dict):
+        speaker_name = payload.get("speaker_name")
+        if speaker_name is not None:
+            return str(speaker_name)
+    speaker_name = memory.get("_retrieved_speaker") or memory.get("speaker_name")
+    if speaker_name is None:
+        return None
+    return str(speaker_name)
+
+
+def _format_lightmem_memory(memory: Any) -> str:
+    """把 LightMem retrieval item 格式化为 reader prompt 可读文本。"""
+
+    if not isinstance(memory, dict):
+        return str(memory)
+    payload = memory.get("payload")
+    source = payload if isinstance(payload, dict) else memory
+    time_stamp = source.get("time_stamp", "")
+    weekday = source.get("weekday", "")
+    memory_text = (
+        source.get("memory")
+        or source.get("original_memory")
+        or source.get("compressed_memory")
+        or memory.get("memory")
+        or ""
+    )
+    prefix = " ".join(str(value) for value in (time_stamp, weekday) if value)
+    if prefix:
+        return f"{prefix} {memory_text}".strip()
+    return str(memory_text or memory)
 
 
 class _OpenAIAnswerClient:

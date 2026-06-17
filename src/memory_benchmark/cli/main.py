@@ -20,9 +20,11 @@ from memory_benchmark.evaluators.registry import list_metrics
 from memory_benchmark.methods.registry import list_methods
 
 from .commands import (
+    CalibrationSmokeCommand,
     EvaluateCommand,
     PredictCommand,
     RunCommand,
+    execute_calibrate_smoke,
     execute_evaluate,
     execute_predict,
     execute_run,
@@ -47,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     _print_result(result)
-    return 0
+    return _exit_code_for_result(result)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -107,6 +109,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default="compact",
         choices=["compact", "detailed"],
     )
+
+    calibration_parser = subparsers.add_parser(
+        "calibrate-smoke",
+        help="Run a tiny method × benchmark smoke matrix for API cost calibration.",
+    )
+    _add_calibration_arguments(calibration_parser)
     return parser
 
 
@@ -149,6 +157,53 @@ def _add_prediction_arguments(parser: argparse.ArgumentParser) -> None:
         choices=[1, 2],
         default=None,
     )
+    parser.add_argument(
+        "--enable-efficiency-observability",
+        action="store_true",
+        help="Write raw token/latency observations for this prediction run.",
+    )
+
+
+def _add_calibration_arguments(parser: argparse.ArgumentParser) -> None:
+    """为成本校准 smoke 添加矩阵调度参数。"""
+
+    _add_common_root_argument(parser)
+    parser.add_argument(
+        "--method",
+        action="append",
+        required=True,
+        choices=list_methods(),
+        dest="methods",
+        help="Method to include; repeat for multiple methods.",
+    )
+    parser.add_argument(
+        "--benchmark",
+        action="append",
+        required=True,
+        choices=list_prediction_benchmarks(),
+        dest="benchmarks",
+        help="Benchmark to include; repeat for multiple benchmarks.",
+    )
+    parser.add_argument("--run-prefix", required=True)
+    parser.add_argument("--confirm-api", action="store_true")
+    parser.add_argument(
+        "--no-resume",
+        action="store_false",
+        dest="resume",
+        default=True,
+        help="Start child runs without resume; default is resume enabled.",
+    )
+    parser.add_argument(
+        "--smoke-turn-limit",
+        type=int,
+        default=20,
+    )
+    parser.add_argument(
+        "--max-parallel-runs",
+        type=int,
+        choices=[1, 2],
+        default=2,
+    )
 
 
 def _dispatch(args: argparse.Namespace) -> Any:
@@ -174,6 +229,19 @@ def _dispatch(args: argparse.Namespace) -> Any:
                 judge_profile=args.judge_profile,
             )
         )
+    if args.command == "calibrate-smoke":
+        return execute_calibrate_smoke(
+            CalibrationSmokeCommand(
+                project_root=Path(args.root),
+                methods=tuple(args.methods),
+                benchmarks=tuple(args.benchmarks),
+                run_prefix=args.run_prefix,
+                resume=args.resume,
+                confirm_api=args.confirm_api,
+                smoke_turn_limit=args.smoke_turn_limit,
+                max_parallel_runs=args.max_parallel_runs,
+            )
+        )
     raise MemoryBenchmarkError(f"Unsupported command: {args.command}")
 
 
@@ -193,6 +261,7 @@ def _prediction_command_from_args(args: argparse.Namespace) -> PredictCommand:
         smoke_turn_limit=args.smoke_turn_limit,
         smoke_conversation_limit=args.smoke_conversation_limit,
         smoke_max_workers=args.smoke_max_workers,
+        enable_efficiency_observability=args.enable_efficiency_observability,
     )
 
 
@@ -201,6 +270,16 @@ def _print_result(result: Any) -> None:
 
     payload = _to_json_value(result)
     CONSOLE.print_json(json.dumps(payload, ensure_ascii=False))
+
+
+def _exit_code_for_result(result: Any) -> int:
+    """根据 command summary 返回 shell 退出码。"""
+
+    failed_count = getattr(result, "failed_count", 0)
+    try:
+        return 1 if int(failed_count) > 0 else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 def _to_json_value(value: Any) -> Any:

@@ -25,8 +25,211 @@
 | --- | --- | --- | --- | --- |
 | MemoryOS | OpenAI-compatible API；`sentence-transformers/all-MiniLM-L6-v2` 可由 sentence-transformers 缓存/下载 | STM queue=7，MTM max segment=200，User KB/Agent Traits=100，heat threshold=5，retrieval top-m=5，LoCoMo dialogue page top-k=10 | `configs/methods/memoryos.toml` 的 smoke 与 official-full 已一致 | 无新增资源阻塞 |
 | Mem0 | OpenAI-compatible API；API embedding `text-embedding-3-small` | OSS benchmark 默认 fact extraction `gpt-4o-mini`、embedding `text-embedding-3-small`；benchmark top-k 默认 200 | `configs/methods/mem0.toml` 的 smoke 与 official-full 均为 `top_k=200` | 需要确认 API 余额和小样本 run_id |
-| A-Mem | OpenAI-compatible API；`all-MiniLM-L6-v2` 本地/缓存模型；`rank-bm25`、`litellm` 已安装 | 官方 robust 脚本默认 `retrieve_k=10`，LLM `gpt-4o-mini`，embedding `all-MiniLM-L6-v2` | `configs/methods/amem.toml` 的 smoke 与 official-full 均为 `retrieve_k=10` | 首次运行可能自动下载/加载 `all-MiniLM-L6-v2` |
-| LightMem | OpenAI-compatible API；本地 `models/all-MiniLM-L6-v2`；本地 `models/llmlingua-2-bert-base-multilingual-cased-meetingbank` | LoCoMo reported setting 使用 combined retrieval，`total-limit=60`；README 要求 LLMLingua2 和 all-MiniLM-L6-v2 | `configs/methods/lightmem.toml` 的 smoke 与 official-full 均为 `retrieve_limit=60` | 本地模型已补齐；真实运行仍需用户确认 method、benchmark、样本规模和 run_id |
+| A-Mem | OpenAI-compatible API；`all-MiniLM-L6-v2` 本地/缓存模型；`rank-bm25`、`litellm` 已安装 | A-Mem Table 1 使用 LoCoMo 五类 QA、F1/BLEU-1；GPT-4o-mini 行的 A-Mem 需要按类别调 `k`：Multi Hop=40、Temporal=40、Open Domain=50、Single Hop=50、Adversarial=40；embedding 为 `all-minilm-l6-v2`；官方 LoCoMo robust 脚本还会先用 LLM 生成 query keywords 再检索 | 当前 TOML 只配置固定 `retrieve_k=10`；当前 adapter 已调用官方 `RobustAgenticMemorySystem` 写入/检索，但 QA wrapper 直接用原始 question 检索，未复刻官方 query-keyword generation；也未按类别选择 Table 8 的 `k` | **阻塞真实 smoke**：需要先决定并实现“Table 1 GPT-4o-mini profile”，否则不能宣称 A-Mem 参数/流程已对齐 |
+| LightMem | OpenAI-compatible API；本地 `models/all-MiniLM-L6-v2`；本地 `models/llmlingua-2-bert-base-multilingual-cased-meetingbank` | Table 2 LongMemEval-S 和 Table 3 LoCoMo 使用 GPT-4o-mini backbone 与 GPT-4o-mini judge；LLMLingua-2 预压缩，attention topic segmentation 也来自 LLMLingua-2；embedding 为 `all-MiniLM-L6-v2`；Table 2 GPT-4o-mini 最优在线行是 `r=0.7, th=512`，另报告 OP-update；Table 3 LoCoMo 报告 `LightMem(0.7,512)`、`LightMem(0.7,768)`、`LightMem(0.8,768)`，ACC 为 offline update 后结果；LightMem LoCoMo README reported retrieval 为 combined `total-limit=60` | 已按用户指定采用 `(r=0.7, th=512)` official-mini：TOML 和 backend config 显式 `compression_rate=0.7`、`stm_threshold=512`；adapter 已按 LightMem 的 LoCoMo / LongMemEval 脚本改为增量批次写入；LongMemEval reader prompt 已包含 `question_time`；LightMem LoCoMo reader prompt 已使用 speaker memory 布局 | 仍需决定是否完全复刻 LightMem 针对 LoCoMo 的 `search_locomo.py` Qdrant payload 检索路径，以及是否在真实 smoke 前接入 offline update 顺序；未确认前不要宣称完全复现 Table 3 |
+
+## A-Mem Table 1 对齐记录
+
+事实来源：
+
+- 论文：`third_party/methods/A-mem/A-mem.pdf`
+- 复现实验脚本：`third_party/methods/A-mem/test_advanced_robust.py`
+- k 扫描脚本：`third_party/methods/A-mem/run_k_sweep.sh`
+- 当前 adapter：`src/memory_benchmark/methods/amem_adapter.py`
+
+论文 Table 1 评测对象是 LoCoMo 五类 QA：Multi Hop、Temporal、Open Domain、Single Hop、
+Adversarial。Table 1 的 GPT-4o-mini + A-Mem 结果为：
+
+| Category | F1 | BLEU-1 | Table 8 `k` |
+| --- | ---: | ---: | ---: |
+| Multi Hop | 27.02 | 20.09 | 40 |
+| Temporal | 45.85 | 36.67 | 40 |
+| Open Domain | 12.14 | 12.00 | 50 |
+| Single Hop | 44.65 | 37.06 | 50 |
+| Adversarial | 50.03 | 49.47 | 40 |
+
+论文 4.2 写明：主要使用 `k=10` 以保持计算效率，但会针对特定类别调整 `k` 以优化性能；
+Appendix A.5 / Table 8 给出具体类别和模型的 `k`。因此：
+
+- `retrieve_k=10` 是官方 robust 脚本默认值和低成本默认值。
+- Table 1 的 GPT-4o-mini 结果不是固定 `k=10` 的结果，而是按 Table 8 类别选择 `k`。
+- 仓库 README 也说明需要运行 k-sweep，并按结果调整 `k` 才能达到论文最优表现。
+
+官方 robust QA 调用路径是：
+
+```text
+question
+-> generate_query_llm(question)
+-> retrieve_memory(generated_keywords, k=category/model specific k)
+-> category-specific answer prompt
+-> answer LLM
+```
+
+当前 adapter 调用路径是：
+
+```text
+question
+-> find_related_memories_raw(question, k=10)
+-> category-specific answer prompt
+-> answer LLM
+```
+
+结论：当前 adapter 调用了官方 A-Mem 记忆系统，但 QA wrapper 没有完全复刻官方 Table 1 的
+LoCoMo QA 流程。真实 smoke 前必须修正或明确降级为 `custom/default-k` profile。
+
+## LightMem Table 2 / Table 3 对齐记录
+
+事实来源：
+
+- 论文：`third_party/methods/LightMem/lightmem.pdf`
+- 论文文本抽取：`tmp/pdf_text/lightmem-pymupdf.txt`
+- LoCoMo 复现说明：`third_party/methods/LightMem/experiments/locomo/readme.md`
+- LoCoMo 构建脚本：`third_party/methods/LightMem/experiments/locomo/add_locomo.py`
+- LoCoMo 检索脚本：`third_party/methods/LightMem/experiments/locomo/search_locomo.py`
+- LongMemEval 脚本：`third_party/methods/LightMem/experiments/longmemeval/run_lightmem_gpt.py`
+- LongMemEval offline update 脚本：
+  `third_party/methods/LightMem/experiments/longmemeval/offline_update.py`
+- README：`third_party/methods/LightMem/README.md`
+- 当前 adapter：`src/memory_benchmark/methods/lightmem_adapter.py`
+
+论文实验设置要点：
+
+- 使用 Incremental Dialogue Turn Feeding：对话历史按 turn 级别逐步输入。
+- 使用 LLMLingua-2 做 pre-compressor，topic segmentation 的 attention scores 也来自
+  LLMLingua-2。
+- sensory memory buffer size 为 512 tokens。
+- 使用 LongMemEval-S 和 LoCoMo。
+- Table 2 / Table 3 的 GPT 组使用 `gpt-4o-mini` backbone；LLM judge 也是
+  `gpt-4o-mini`。
+- 效率指标主要统计 memory bank construction 阶段的 Summary / Update token、calls 和
+  runtime；retrieval 和 usage 阶段不是论文效率比较重点。
+- 论文 Table 4 / Table 5 进一步明确：`fseg()` 是 turn-level granularity input；
+  `findex()` 使用 `all-MiniLM-L6-v2`；`fpre_compress()` 和 `ftopic()` 使用
+  LLMLingua-2；`fchat()`、`fsum/extract()` 和 `fupdate()` 使用系统 backbone
+  `gpt-4o-mini` 等模型。
+- Appendix C.1 说明 topic segmentation 主要抽取 user sentences，因为 user 句子通常更
+  简洁，assistant responses 在同一 turn 内保持主题一致；官方源码配置中
+  `messages_use="user_only"` 与该描述一致。
+
+Table 2 LongMemEval-S 的 GPT-4o-mini LightMem 配置：
+
+| Row | ACC | Summary In/Out(k) | Update In/Out(k) | Total(k) | Calls | Runtime(s) |
+| --- | ---: | --- | --- | ---: | ---: | ---: |
+| `r=0.5, th=256` | 64.29 | 20.80 / 10.01 | - | 30.81 | 25.67 | 302.69 |
+| OP-update for `r=0.5, th=256` | 64.69 | - | 44.46 / 2.56 | 47.02 | 70.23 | 342.63 |
+| `r=0.6, th=256` | 67.78 | 24.58 / 10.53 | - | 35.11 | 30.47 | 329.61 |
+| OP-update for `r=0.6, th=256` | 65.39 | - | 53.98 / 3.18 | 57.16 | 85.07 | 411.56 |
+| `r=0.7, th=512` | 68.64 | 18.88 / 9.37 | - | 28.25 | 18.43 | 283.76 |
+| OP-update for `r=0.7, th=512` | 67.07 | - | 79.38 / 4.06 | 83.44 | 125.47 | 496.03 |
+
+Table 3 LoCoMo 的 GPT-4o-mini LightMem 配置：
+
+| Row | ACC | Summary In/Out(k) | Update In/Out(k) | Total(k) | Calls | Runtime(s) |
+| --- | ---: | --- | --- | ---: | ---: | ---: |
+| `LightMem(0.7,512)` | 71.95 | 73.19 / 20.13 | 6.05 / 0.40 | 99.76 | 41.65 | 848.49 |
+| `LightMem(0.7,768)` | 70.26 | 57.54 / 18.92 | 3.79 / 0.23 | 80.48 | 29.55 | 737.80 |
+| `LightMem(0.8,768)` | 72.99 | 62.82 / 17.95 | 4.14 / 0.28 | 85.19 | 29.83 | 815.32 |
+
+仓库 LoCoMo README 额外说明 reported retrieval 使用：
+
+```text
+--retrieval-mode combined
+--total-limit 60
+--embedder huggingface
+--embedding-model-path all-MiniLM-L6-v2
+--llm-model gpt-4o-mini
+--judge-model gpt-4o-mini
+```
+
+当前对齐状态：
+
+- 用户已指定 LoCoMo / 阶段一 LightMem profile 使用 `(r=0.7, th=512)`。
+- `configs/methods/lightmem.toml` 和 `LightMemConfig` 已显式记录
+  `compression_rate=0.7`、`stm_threshold=512`。
+- backend config 已将 `compress_config.rate` 从旧值 `0.6` 改为 profile 中的
+  `0.7`。
+- 当前 LightMem 核心初始化 `ShortMemBufferManager(max_tokens=512)` 是源码硬编码；
+  因此 adapter 只允许 `th=512`，不会静默运行 Table 3 的 `th=768` 行。
+- adapter 已把 `Conversation` 展开成官方脚本粒度：
+  LoCoMo 每条原始 turn -> `user(content)+assistant("")`；
+  LongMemEval 每个真实 `user+assistant` pair -> 一次 `add_memory()`。
+- 只有最后一批写入使用 `force_segment=True, force_extract=True`。
+- LoCoMo 写入会传入官方 `METADATA_GENERATE_PROMPT_locomo`。
+- LongMemEval reader prompt 已复刻脚本中的
+  `Question time:{question_date} and question:{question}` 格式。
+- LoCoMo reader prompt 已使用官方 `ANSWER_PROMPT` 的 speaker-organized memory 布局。
+
+仍未完全对齐的点：
+
+- LightMem 的 LoCoMo `search_locomo.py` 不直接调用 `LightMemory.retrieve()`，而是加载 Qdrant
+  entries、按 speaker payload 分组并用 `VectorRetriever` 重新检索；当前 adapter 仍调用
+  `LightMemory.retrieve()`，其返回值是格式化字符串，通常不带 speaker payload。因此当前
+  LightMem LoCoMo reader prompt 结构已对齐，但 retrieval/search 路径还不是 `search_locomo.py`
+  的完全复刻。
+- LoCoMo 写入后的 offline update 顺序尚未在 adapter 中执行：
+  `construct_update_queue_all_entries()` 和
+  `offline_update_all_entries(score_threshold=0.9)`。LongMemEval 的 OP-update 也仍需单独
+  决定是否作为当前 official-mini profile 的默认步骤。
+
+结论：LightMem fake/offline contract 已覆盖 `(0.7,512)` profile、增量写入和官方 reader
+prompt 方向；真实 API smoke 前仍需用户确认是否先接受当前 `LightMemory.retrieve()` 路径，
+还是继续实现 LightMem LoCoMo `search_locomo.py` 级别的 Qdrant payload 检索。
+
+### LightMem `add_memory()` 调用粒度证据
+
+LightMem 原生接口：
+
+```text
+LightMemory.add_memory(
+    messages,
+    METADATA_GENERATE_PROMPT=None,
+    force_segment=False,
+    force_extract=False,
+    boundmem_tags=None,
+) -> dict
+```
+
+接口层面 `messages` 可以是一个 message dict 或 `list[dict]`，所以“整段 conversation 一次性
+传入”在 Python 类型上可以调用成功；但它不符合论文和复现实验脚本。
+
+论文证据：
+
+- Section 5.1 Experimental Details 写明实验采用 Incremental Dialogue Turn Feeding：
+  dialogue history 按 turn level、one turn at a time 喂入。
+- Table 4 / Table 5 写明 `fseg()` 是 turn-level granularity input。
+
+README 证据：
+
+- `README.md` 的 Add Memory 示例遍历 `session["turns"]`，对每个 `turn_messages` 添加
+  `time_stamp`，再调用 `lightmem.add_memory(messages=turn_messages, ...)`。
+
+LoCoMo 脚本证据：
+
+- `experiments/locomo/add_locomo.py` 将每条 LoCoMo 原始 turn 转成两条 message：
+  user content 和空 assistant content。
+- 构建阶段按 `turn_idx` 切 `turn_messages = session[turn_idx*2 : turn_idx*2 + 2]`，
+  给 pair 内每条 message 写入相同 `time_stamp`。
+- 每个 pair 调一次 `add_memory(..., METADATA_GENERATE_PROMPT=METADATA_GENERATE_PROMPT_locomo,
+  force_segment=is_last_turn, force_extract=is_last_turn)`。
+- `is_last_turn` 只在最后一个 session 的最后一个 pair 为 true。
+- 写入完成后脚本备份 pre-update 状态，再调用
+  `construct_update_queue_all_entries()` 和 `offline_update_all_entries(score_threshold=0.9)`。
+
+LongMemEval 脚本证据：
+
+- `experiments/longmemeval/run_lightmem_gpt.py` 遍历 `haystack_sessions` 与
+  `haystack_dates`。
+- 每个 session 同样切 user+assistant pair，并给 pair 内 message 写入同一
+  `time_stamp`。
+- 每个 pair 调一次 `add_memory(..., force_segment=is_last_turn,
+  force_extract=is_last_turn)`。
+- 检索阶段调用 `lightmem.retrieve(item["question"], limit=20)`。
+- 回答 prompt 显式包含 `Question time:{item['question_date']}`。
+
+结论：本项目 adapter 已把 `Conversation` 展开成官方粒度逐次调用 `add_memory()`，不再把
+完整 conversation 一次性传入。对于 LoCoMo official-mini profile，当前已经复刻
+`METADATA_GENERATE_PROMPT_locomo` 与 `force_segment/is_last_turn`；offline update 顺序仍是
+真实 smoke 前需要确认的剩余项。
 
 ## LightMem 本地资源
 
@@ -59,17 +262,37 @@ models/llmlingua-2-bert-base-multilingual-cased-meetingbank
 Adapter 已增加资源前置校验：如果配置指向 `models/...` 或绝对路径但目录不存在，真实
 LightMem backend 构造前会抛 `ConfigurationError`。fake/offline 测试不会要求这些模型存在。
 
+## Method add 接口粒度记录
+
+本节记录第三方 method 官方暴露的写入接口、官方实验脚本的实际喂入粒度，以及本项目
+adapter 当前实现。`BaseMemorySystem.add(list[Conversation])` 是框架统一入口；
+adapter 的职责是把 conversation 展开成目标 method 官方算法期望的最小写入单元。
+
+| Method | 官方暴露写入接口 | 官方实验喂入粒度 | 当前 adapter 喂入粒度 | 结论 |
+| --- | --- | --- | --- | --- |
+| Mem0 | `Memory.add(messages, run_id/user_id, metadata, ...)` | Mem0 官方 memory-benchmarks 中，LoCoMo 按 session chunk 写入 message list；LongMemEval 按 user+assistant pair 写入，`CHUNK_SIZE=2` | 当前 adapter 会展开 conversation/session/turn，每个 turn 构造成单条 message 后调用 `Memory.add([message], run_id=conversation_id, ...)` | 已做细粒度展开；但若目标是严格复刻 Mem0 官方 benchmark，还需要再讨论是否改为 benchmark-specific chunk/pair 粒度 |
+| MemoryOS | PyPI/官方接口近似 `add_memory(user_input, agent_response, timestamp, meta_data)`；LoCoMo eval 路径使用 dialogue page / QA pair | user turn + assistant turn 组成一个 dialogue page / QA pair | 当前 adapter 将 turns 配对成 page，再逐 page 调用 MemoryOS 短期记忆写入 | LoCoMo 路径已按 round/page 级展开 |
+| A-Mem | `add_note(content, time=...)` / robust wrapper 的 `add_memory(content, time)` | 一条 note，一般对应一条说话内容或片段 | 当前 adapter 展开每个 turn，格式化 speaker/content 后逐 turn 调用 `add_note(...)` | 写入粒度基本对齐；当前阻塞点在 QA 阶段缺 query keyword generation 和按类别 `k` |
+| LightMem | `LightMemory.add_memory(messages, force_segment, force_extract, ...)` | 官方 LoCoMo / LongMemEval 脚本按 user+assistant turn pair 多次调用；仅最后一轮 `force_segment=True, force_extract=True` | 当前 adapter 已按来源展开：LoCoMo 单原始 turn + 空 assistant，LongMemEval 真实 user+assistant pair | 写入粒度已对齐；剩余问题在 LoCoMo search 路径和 offline update |
+
+LightMem 的 `OP-update` 已在论文 Table 2 中确认：每组 `r/th` 对应两行，一行是在线 soft
+update，一行是 offline parallel update。用户当前指定的 LoCoMo/阶段一 LightMem profile
+为 `(r=0.7, th=512)`；后续实现应先保证该 profile 的 online 写入与最终提问流程对齐，再
+决定是否在 LongMemEval 上额外支持 OP-update。
+
 ## 下一步真实 smoke 建议
 
-在确认 API 余额和 run_id 后，按以下顺序做极小真实 smoke：
+在完成上面的算法路径和参数修正后，再确认 API 余额和 run_id，按以下顺序做极小真实 smoke：
 
 1. Mem0 + LoCoMo：已有历史 smoke，但新规则下 `top_k=200`，建议重新跑 1 conversation、
    1 question。
 2. MemoryOS + LoCoMo：参数已对齐，成本较高，先跑 1 conversation、1 question。
-3. A-Mem + LoCoMo：先跑 1 conversation、1 question，观察 `all-MiniLM-L6-v2` 加载和 API
-   调用记录。
-4. LightMem + LoCoMo：本地模型已补齐，可在用户确认后跑 1 conversation、1 question。
-5. LoCoMo 四个 method 均通过后，再对 LongMemEval-S 做同样极小 smoke。
+3. A-Mem + LoCoMo：必须先完成 Table 1 GPT-4o-mini profile 对齐，再跑 1 conversation、
+   1 question。
+4. LightMem + LoCoMo：必须先完成 Table 3 profile 选择和 add 粒度对齐，再跑
+   1 conversation、1 question。
+5. LoCoMo 四个 method 均通过后，再对 LongMemEval-S 做同样极小 smoke；MemoryOS 暂不跑
+   LongMemEval。
 
 每个 smoke 都必须写入标准 artifacts、logs、checkpoints 和 efficiency observations。不得把
 smoke 的结果当作正式指标，只用于验证链路和估算成本。

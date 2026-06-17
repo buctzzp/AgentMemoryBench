@@ -13,12 +13,14 @@ import pytest
 from memory_benchmark.cli import commands
 from memory_benchmark.cli import main as main_cli
 from memory_benchmark.cli.commands import (
+    CalibrationSmokeCommand,
     EvaluateCommand,
     PredictCommand,
     RunCommand,
     RunCommandResult,
     RunVariantResult,
     execute_evaluate,
+    execute_calibrate_smoke,
     execute_predict,
     execute_run,
 )
@@ -51,6 +53,7 @@ def _predict_command(tmp_path: Path, **overrides) -> PredictCommand:
         "smoke_turn_limit": 3,
         "smoke_conversation_limit": 1,
         "smoke_max_workers": 1,
+        "enable_efficiency_observability": False,
     }
     values.update(overrides)
     return PredictCommand(**values)
@@ -115,8 +118,61 @@ def test_execute_predict_delegates_to_registered_prediction(
             "smoke_turn_limit": 3,
             "smoke_conversation_limit": 1,
             "smoke_max_workers": 1,
+            "enable_efficiency_observability": False,
         }
     ]
+
+
+def test_execute_predict_can_enable_efficiency_observability(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """predict command 可显式开启效率观测，供单 run 成本调试使用。"""
+
+    calls: list[dict[str, object]] = []
+    expected = PredictionBatchResult(
+        benchmark="locomo",
+        selector="locomo10",
+        runs=(),
+    )
+    monkeypatch.setattr(
+        commands,
+        "run_registered_conversation_qa_prediction",
+        lambda **kwargs: calls.append(kwargs) or expected,
+    )
+
+    result = execute_predict(
+        _predict_command(tmp_path, enable_efficiency_observability=True)
+    )
+
+    assert result is expected
+    assert calls[0]["enable_efficiency_observability"] is True
+
+
+def test_execute_calibrate_smoke_delegates_to_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """command service 不实现校准调度，只转发强类型 calibration command。"""
+
+    command = CalibrationSmokeCommand(
+        project_root=tmp_path,
+        methods=("mem0",),
+        benchmarks=("locomo",),
+        run_prefix="calib",
+    )
+    expected = SimpleNamespace(failed_count=0)
+    received: list[CalibrationSmokeCommand] = []
+    monkeypatch.setattr(
+        commands,
+        "run_cost_calibration_smoke",
+        lambda selected: received.append(selected) or expected,
+    )
+
+    result = execute_calibrate_smoke(command)
+
+    assert result is expected
+    assert received == [command]
 
 
 def test_execute_evaluate_runs_offline_f1_without_loading_openai(
@@ -332,6 +388,7 @@ def test_main_help_lists_predict_evaluate_and_run(capsys) -> None:
     assert "predict" in output
     assert "evaluate" in output
     assert "run" in output
+    assert "calibrate-smoke" in output
 
 
 def test_main_maps_predict_arguments_to_command(
@@ -380,6 +437,52 @@ def test_main_maps_predict_arguments_to_command(
             run_id="run-1",
             confirm_api=True,
             smoke_turn_limit=3,
+        )
+    ]
+
+
+def test_main_maps_predict_efficiency_flag_to_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """argparse 应把单 run efficiency 开关传给 command service。"""
+
+    received: list[PredictCommand] = []
+    monkeypatch.setattr(
+        main_cli,
+        "execute_predict",
+        lambda command: received.append(command)
+        or SimpleNamespace(run_id="run-1"),
+    )
+
+    exit_code = main_cli.main(
+        [
+            "predict",
+            "--root",
+            str(tmp_path),
+            "--method",
+            "mem0",
+            "--benchmark",
+            "locomo",
+            "--profile",
+            "smoke",
+            "--run-id",
+            "run-1",
+            "--confirm-api",
+            "--enable-efficiency-observability",
+        ]
+    )
+
+    assert exit_code == 0
+    assert received == [
+        PredictCommand(
+            project_root=tmp_path,
+            method="mem0",
+            benchmark="locomo",
+            profile="smoke",
+            run_id="run-1",
+            confirm_api=True,
+            enable_efficiency_observability=True,
         )
     ]
 
@@ -588,6 +691,88 @@ def test_main_maps_run_arguments_to_run_command(
     ]
 
 
+def test_main_maps_calibration_smoke_arguments_to_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """calibrate-smoke 应解析 method/benchmark 矩阵和外层并发参数。"""
+
+    received: list[CalibrationSmokeCommand] = []
+    monkeypatch.setattr(
+        main_cli,
+        "execute_calibrate_smoke",
+        lambda command: received.append(command)
+        or SimpleNamespace(failed_count=0),
+    )
+
+    exit_code = main_cli.main(
+        [
+            "calibrate-smoke",
+            "--root",
+            str(tmp_path),
+            "--method",
+            "mem0",
+            "--method",
+            "memoryos",
+            "--benchmark",
+            "locomo",
+            "--benchmark",
+            "longmemeval",
+            "--run-prefix",
+            "ohmygpt-calib",
+            "--confirm-api",
+            "--smoke-turn-limit",
+            "7",
+            "--max-parallel-runs",
+            "2",
+        ]
+    )
+
+    assert exit_code == 0
+    assert received == [
+        CalibrationSmokeCommand(
+            project_root=tmp_path,
+            methods=("mem0", "memoryos"),
+            benchmarks=("locomo", "longmemeval"),
+            run_prefix="ohmygpt-calib",
+            resume=True,
+            confirm_api=True,
+            smoke_turn_limit=7,
+            max_parallel_runs=2,
+        )
+    ]
+
+
+def test_main_returns_nonzero_when_calibration_has_failed_child(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """校准矩阵若存在失败 child，CLI 应返回非零但仍打印 summary。"""
+
+    monkeypatch.setattr(
+        main_cli,
+        "execute_calibrate_smoke",
+        lambda command: SimpleNamespace(failed_count=1, run_prefix="calib"),
+    )
+
+    exit_code = main_cli.main(
+        [
+            "calibrate-smoke",
+            "--root",
+            str(tmp_path),
+            "--method",
+            "mem0",
+            "--benchmark",
+            "locomo",
+            "--run-prefix",
+            "calib",
+            "--confirm-api",
+        ]
+    )
+
+    assert exit_code == 1
+
+
 def test_main_returns_nonzero_for_domain_error_without_traceback(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -638,6 +823,7 @@ def test_cli_help_subprocesses_are_stable(command: list[str]) -> None:
     assert completed.returncode == 0
     assert "predict" in completed.stdout
     assert "evaluate" in completed.stdout
+    assert "calibrate-smoke" in completed.stdout
     assert "run" in completed.stdout
     assert completed.stderr == ""
 

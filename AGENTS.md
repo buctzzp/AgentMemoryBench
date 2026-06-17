@@ -17,6 +17,8 @@
 - 当前已实现 answer 质量评测，不做 retrieval recall。成本与效率原始 observation 底座
   已完成并覆盖 Mem0/MemoryOS；真实费用在实验完成后按实际 API 服务商价格离线计算。
 - 当前用户明确要求暂缓通用并行调度，优先接入 A-Mem 与 LightMem adapter。
+- 当前阶段所有真实 LLM 调用统一使用 `gpt-4o-mini`；不要临时切换 `gpt-4o`、
+  GPT-5 或其他模型，除非用户后续明确改口。
 
 ## 当前断点
 
@@ -102,15 +104,22 @@
 - A-Mem 与 LightMem adapter 已完成 config、source identity、registry、question-level
   efficiency observation、fake/offline contract 和 registered runner smoke。LightMem 生产
   backend 已通过测试覆盖官方 `LightMemory.from_config()` 配置注入，但尚未执行真实 API
-  smoke。当前已确认 smoke 也必须使用官方 method 参数，成本控制只通过 benchmark 数据规模
-  裁剪；资源与参数审计见 `docs/method-resource-parameter-audit.md`。A-Mem smoke
-  `retrieve_k=10`，Mem0 smoke `top_k=200`，LightMem smoke `retrieve_limit=60`。
+  smoke。2026-06-17 重新审计后确认：fake/offline smoke 只能证明框架链路，不代表
+  A-Mem / LightMem 已按论文 Table 级参数与调用流程对齐。A-Mem 需要补齐 Table 1
+  GPT-4o-mini profile：官方 query keyword generation + Table 8 按类别 `k`。LightMem
+  已落实用户指定 `(r=0.7, th=512)` official-mini、LoCoMo/LongMemEval 增量写入粒度和
+  官方 reader prompt 方向；剩余未确认项是是否完全复刻 LightMem 针对 LoCoMo 的
+  `search_locomo.py` Qdrant payload 检索路径，以及是否在真实 smoke 前接入 offline update
+  顺序。完成前不得
+  启动 A-Mem / LightMem 真实 API smoke；资源与参数审计见
+  `docs/method-resource-parameter-audit.md`。
+  Mem0 smoke `top_k=200`。
   LightMem 真实运行所需
   `models/all-MiniLM-L6-v2` 和
   `models/llmlingua-2-bert-base-multilingual-cased-meetingbank` 已补齐并通过本地资源
-  校验；adapter 仍会在真实 backend 构造前强校验。最新 focused 验证：
-  A-Mem/LightMem/profile suite `21 passed,
-  2 warnings`；文档规范 `5 passed`；`compileall` exit 0。未执行真实 API。
+  校验；adapter 仍会在真实 backend 构造前强校验。最新 LightMem focused 验证：
+  `uv run pytest tests/test_lightmem_adapter.py -q` 为 `13 passed, 1 warning`。
+  未执行真实 API。
 - A-Mem 官方 robust layer 导入需要 `rank-bm25` 和 `litellm`，已通过 `uv add` 写入
   `pyproject.toml` / `uv.lock`。这是官方 A-Mem requirements 中的正式依赖。
 - README 已于 2026-06-17 更新为 GitHub 项目入口，清理本地绝对路径并明确本地资产不入库、
@@ -120,6 +129,13 @@
   `0eb625cd4c7cecca7951c7c7feae4211861f979d`；准备脚本为
   `scripts/prepare_hf_dataset_bundle.py`，操作文档为 `docs/huggingface-datasets.md`。
 - 本轮精确交接：
+  `docs/handoffs/2026-06-17-method-table-parameter-audit.md`。
+- Method 原生接口清单：
+  `docs/method-interface-inventory.md`。新增或重修 method adapter 前必须先更新该文档。
+- Method official profile 对齐实施计划：
+  `docs/superpowers/plans/2026-06-17-method-official-profile-alignment.md`。下一步应按该计划
+  修正 Mem0、A-Mem 和 LightMem，完成前不得启动对应真实 API smoke。
+- A-Mem / LightMem adapter 接入完成时的历史交接：
   `docs/handoffs/2026-06-16-amem-lightmem-adapters.md`。
 - Phase F 已完成并通过 `gpt-5.5 xhigh` 最终只读复审。LongMemEval S/M 使用 `ijson`
   流式加载；full-M 500 instances 已唯一运行一次并通过，不要重复执行该昂贵测试。
@@ -137,14 +153,22 @@
 - API 已充值，但未经用户确认 method、benchmark、样本规模和正式 run_id，不得启动真实
   prediction；全量实验仍需额外确认。
 - 未经用户确认 API 规模、余额和正式 run_id，不得启动 Mem0 official-full。
+- 成本校准 smoke 外层 orchestrator 已实现但尚未真实运行：
+  `memory-benchmark calibrate-smoke` 会对多个 method × benchmark 启动独立 smoke
+  child run，固定每组合 1 个 conversation/LongMemEval instance，强制开启
+  efficiency observation，并用 `--max-parallel-runs` 限制外层并发。真实运行前仍需用户
+  确认 run_prefix、并发数和 API 预算。
 
 恢复工作时按顺序读：
 
 1. `docs/current-roadmap.md`
-2. `docs/handoffs/2026-06-16-amem-lightmem-adapters.md`
-3. `docs/superpowers/plans/2026-06-16-amem-lightmem-adapter.md`
-4. `docs/superpowers/specs/2026-06-16-amem-lightmem-adapter-design.md`
-5. 派发 subagent 前读 `docs/subagent-strategy.md`
+2. `docs/method-interface-inventory.md`
+3. `docs/handoffs/2026-06-17-method-table-parameter-audit.md`
+4. `docs/handoffs/2026-06-16-amem-lightmem-adapters.md`
+5. `docs/superpowers/plans/2026-06-17-method-official-profile-alignment.md`
+6. `docs/superpowers/plans/2026-06-16-amem-lightmem-adapter.md`
+7. `docs/superpowers/specs/2026-06-16-amem-lightmem-adapter-design.md`
+8. 派发 subagent 前读 `docs/subagent-strategy.md`
 
 Phase G 的 plan/spec 已完成，只在核验成本与效率实现细节时按需读取，不作为下一窗口默认输入。
 
@@ -185,6 +209,10 @@ class BaseMemoryRetriever(ABC):
 
 规则：
 
+- conversation + QA benchmark 要求框架层的 method adapter 必须提供
+  `get_answer(question)`。第三方原始仓库可以没有同名函数，但 adapter 必须用其官方
+  answer 接口，或用其官方 benchmark 的 `retrieval/search + prompt + LLM` 流程包装成
+  `get_answer()`。
 - 依靠 `conversation_id` 做记忆隔离，不做 reset 接口。
 - `add()` 接收 `list[Conversation]`，不设计 `add(session)`。
 - `get_answer()` 只接收 `Question`，不能接收 gold answer、retrieval result 或 top_k。
@@ -251,6 +279,15 @@ adapter 可以把这些放入 `GoldAnswerInfo` 或 evaluator-only artifact，但
 - 任务按依赖顺序逐步完成，不跳阶段、不提前宣布完成。默认串行；只有任务之间没有
   前置依赖、写入文件不冲突且结果可独立验收时才允许并行。
 - 任何实质性架构变化都要先和用户讨论，确认后再改。
+- method adapter 必须严格复刻目标 method 的官方/论文算法调用路径；如果论文、README、
+  复现实验脚本和当前 adapter 之间存在不一致，必须先记录证据并和用户对齐，禁止凭
+  “差不多能跑”擅自选择实现。
+- 新增或重修任何 method adapter 前，必须先在 `docs/method-interface-inventory.md`
+  记录该第三方仓库原生暴露接口的完整信息：写入、检索、回答/生成、离线更新、配置注入、
+  输入参数、输出结构、调用粒度、prompt 来源、LLM/embedding 模型、API key/base URL
+  传递位置，以及哪些字段不能进入 method。没有完成接口记录，不得启动真实 API smoke。
+- 对任何不懂、犹豫或不确定的实验设置、参数含义、调用粒度和算法步骤，必须先明确告诉
+  用户并等待确认；不得把未确认假设写进 official/smoke profile。
 - 禁止修改第三方核心算法；wrapper 和配置注入优先放在本项目侧。若 adapter 无法准确
   观测，可在第三方源码加入可关闭、可审计且通过行为等价验证的纯 observer 插桩。
 - 长实验 runner 必须写 `logs/run.log`、`logs/events.jsonl` 和 `checkpoints/progress.json`。

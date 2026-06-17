@@ -22,6 +22,11 @@ from memory_benchmark.cli.run_prediction import (
     PredictionBatchResult,
     run_registered_conversation_qa_prediction,
 )
+from memory_benchmark.runners.cost_calibration import (
+    CalibrationSmokeCommand,
+    CalibrationSmokeSummary,
+    run_cost_calibration_smoke,
+)
 from memory_benchmark.runners.evaluation import (
     EvaluationRunSummary,
     run_artifact_evaluation,
@@ -45,6 +50,7 @@ class PredictCommand:
     smoke_turn_limit: int = 20
     smoke_conversation_limit: int = 1
     smoke_max_workers: int | None = None
+    enable_efficiency_observability: bool = False
 
 
 @dataclass(frozen=True)
@@ -117,7 +123,20 @@ def execute_predict(command: PredictCommand) -> PredictionBatchResult:
         smoke_turn_limit=command.smoke_turn_limit,
         smoke_conversation_limit=command.smoke_conversation_limit,
         smoke_max_workers=command.smoke_max_workers,
+        enable_efficiency_observability=command.enable_efficiency_observability,
     )
+
+
+def execute_calibrate_smoke(
+    command: CalibrationSmokeCommand,
+) -> CalibrationSmokeSummary:
+    """执行成本校准 smoke 矩阵。
+
+    该入口强制使用 runner 层的 calibration service；真实 API 成本确认仍由每个
+    child prediction run 自己执行。
+    """
+
+    return run_cost_calibration_smoke(command)
 
 
 def execute_evaluate(command: EvaluateCommand) -> tuple[Any, ...]:
@@ -237,7 +256,9 @@ __all__ = [
     "RunCommand",
     "RunCommandResult",
     "RunVariantResult",
+    "CalibrationSmokeCommand",
     "execute_evaluate",
+    "execute_calibrate_smoke",
     "execute_predict",
     "execute_run",
 ]

@@ -111,7 +111,7 @@ class FakeOfficialLightMemory:
 
 
 def _lightmem_conversation() -> Conversation:
-    """构造最小 conversation-QA 样本。"""
+    """构造最小 LoCoMo 风格 conversation-QA 样本。"""
 
     question = Question(
         question_id="q-1",
@@ -131,6 +131,114 @@ def _lightmem_conversation() -> Conversation:
             )
         ],
         questions=[question],
+        metadata={
+            "source_path": "data/locomo/locomo10.json",
+            "speaker_a": "Alice",
+            "speaker_b": "Bob",
+        },
+    )
+
+
+def _locomo_style_lightmem_conversation() -> Conversation:
+    """构造 LoCoMo 风格多 turn 样本。
+
+    LightMem 的 LoCoMo 脚本会把每条原始发言转成
+    `user(content)+assistant("")`，因此四条原始 turn 应产生四次
+    `add_memory()` 调用。
+    """
+
+    question = Question(
+        question_id="q-locomo",
+        conversation_id="conv-locomo",
+        text="What does Alice like?",
+    )
+    return Conversation(
+        conversation_id="conv-locomo",
+        sessions=[
+            Session(
+                session_id="s-1",
+                session_time="2026-01-01",
+                turns=[
+                    Turn(turn_id="t-1", speaker="Alice", content="I like tea."),
+                    Turn(turn_id="t-2", speaker="Bob", content="I will remember tea."),
+                ],
+            ),
+            Session(
+                session_id="s-2",
+                session_time="2026-01-02",
+                turns=[
+                    Turn(turn_id="t-3", speaker="Alice", content="I also like jazz."),
+                    Turn(turn_id="t-4", speaker="Bob", content="Jazz is noted."),
+                ],
+            ),
+        ],
+        questions=[question],
+        metadata={
+            "source_path": "data/locomo/locomo10.json",
+            "speaker_a": "Alice",
+            "speaker_b": "Bob",
+        },
+    )
+
+
+def _longmemeval_style_lightmem_conversation() -> Conversation:
+    """构造 LongMemEval 风格 user/assistant pair 样本。
+
+    LongMemEval 官方脚本会跳过开头非 user 消息，然后按真实
+    `user+assistant` pair 逐组调用 `add_memory()`。
+    """
+
+    question = Question(
+        question_id="q-long",
+        conversation_id="conv-long",
+        text="What does Alice like?",
+        question_time="2026-01-03",
+    )
+    return Conversation(
+        conversation_id="conv-long",
+        sessions=[
+            Session(
+                session_id="s-1",
+                session_time="2026-01-01",
+                turns=[
+                    Turn(
+                        turn_id="t-1",
+                        speaker="user",
+                        normalized_role="user",
+                        content="I like tea.",
+                    ),
+                    Turn(
+                        turn_id="t-2",
+                        speaker="assistant",
+                        normalized_role="assistant",
+                        content="Tea is noted.",
+                    ),
+                ],
+            ),
+            Session(
+                session_id="s-2",
+                session_time="2026-01-02",
+                turns=[
+                    Turn(
+                        turn_id="t-3",
+                        speaker="user",
+                        normalized_role="user",
+                        content="I also like jazz.",
+                    ),
+                    Turn(
+                        turn_id="t-4",
+                        speaker="assistant",
+                        normalized_role="assistant",
+                        content="Jazz is noted.",
+                    ),
+                ],
+            ),
+        ],
+        questions=[question],
+        metadata={
+            "source_path": "data/longmemeval/longmemeval_s_cleaned.json",
+            "variant": "s_cleaned",
+        },
     )
 
 
@@ -223,9 +331,198 @@ def test_lightmem_add_and_get_answer_with_fake_backend() -> None:
     first_message = backend.added_messages[0]["messages"][0]
     assert first_message["time_stamp"] == "2026-01-01"
     assert "timestamp" not in first_message
-    assert first_message["speaker_id"] == "Alice"
+    assert first_message["speaker_id"] == "speaker_a"
     assert first_message["speaker_name"] == "Alice"
     assert first_message["role"] == "user"
+
+
+def test_lightmem_add_uses_locomo_single_turn_incremental_feeding() -> None:
+    """LoCoMo 写入应复刻官方脚本的单 turn + 空 assistant 增量喂入。"""
+
+    backend = FakeLightMemoryBackend()
+    method = LightMem(
+        config=LightMemConfig(
+            llm_model="gpt-4o-mini",
+            embedding_model_path="models/all-MiniLM-L6-v2",
+            llmlingua_model_path=(
+                "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+            ),
+            retrieve_limit=60,
+            max_workers=1,
+            compression_rate=0.7,
+            stm_threshold=512,
+            profile_name="official-mini",
+        ),
+        backend_factory=lambda conversation_id: backend,
+        answer_client=FakeLightMemAnswerClient(),
+    )
+
+    method.add([_locomo_style_lightmem_conversation()])
+
+    assert len(backend.added_messages) == 4
+    first_call = backend.added_messages[0]
+    last_call = backend.added_messages[-1]
+    assert first_call["kwargs"]["force_segment"] is False
+    assert first_call["kwargs"]["force_extract"] is False
+    assert last_call["kwargs"]["force_segment"] is True
+    assert last_call["kwargs"]["force_extract"] is True
+    assert first_call["kwargs"]["METADATA_GENERATE_PROMPT"]
+    assert [message["content"] for message in first_call["messages"]] == [
+        "I like tea.",
+        "",
+    ]
+    assert [message["role"] for message in first_call["messages"]] == [
+        "user",
+        "assistant",
+    ]
+    assert [message["speaker_id"] for message in first_call["messages"]] == [
+        "speaker_a",
+        "speaker_a",
+    ]
+    assert [message["time_stamp"] for message in first_call["messages"]] == [
+        "2026-01-01",
+        "2026-01-01",
+    ]
+    assert [message["content"] for message in last_call["messages"]] == [
+        "Jazz is noted.",
+        "",
+    ]
+
+
+def test_lightmem_add_uses_longmemeval_user_assistant_pair_feeding() -> None:
+    """LongMemEval 写入应复刻官方脚本的真实 user+assistant pair 增量喂入。"""
+
+    backend = FakeLightMemoryBackend()
+    method = LightMem(
+        config=LightMemConfig(
+            llm_model="gpt-4o-mini",
+            embedding_model_path="models/all-MiniLM-L6-v2",
+            llmlingua_model_path=(
+                "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+            ),
+            retrieve_limit=20,
+            max_workers=1,
+            compression_rate=0.7,
+            stm_threshold=512,
+            profile_name="official-mini",
+        ),
+        backend_factory=lambda conversation_id: backend,
+        answer_client=FakeLightMemAnswerClient(),
+    )
+
+    method.add([_longmemeval_style_lightmem_conversation()])
+
+    assert len(backend.added_messages) == 2
+    first_call = backend.added_messages[0]
+    second_call = backend.added_messages[1]
+    assert first_call["kwargs"]["force_segment"] is False
+    assert first_call["kwargs"]["force_extract"] is False
+    assert second_call["kwargs"]["force_segment"] is True
+    assert second_call["kwargs"]["force_extract"] is True
+    assert "METADATA_GENERATE_PROMPT" not in first_call["kwargs"]
+    assert [message["content"] for message in first_call["messages"]] == [
+        "I like tea.",
+        "Tea is noted.",
+    ]
+    assert [message["role"] for message in first_call["messages"]] == [
+        "user",
+        "assistant",
+    ]
+
+
+def test_lightmem_backend_config_uses_official_mini_profile_values() -> None:
+    """LightMem `(0.7,512)` profile 应显式传入压缩率并记录 STM 阈值。"""
+
+    config = LightMemConfig(
+        llm_model="gpt-4o-mini",
+        embedding_model_path="models/all-MiniLM-L6-v2",
+        llmlingua_model_path=(
+            "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+        ),
+        retrieve_limit=60,
+        max_workers=1,
+        compression_rate=0.7,
+        stm_threshold=512,
+        profile_name="official-mini",
+    )
+    backend_config = LightMem.build_backend_config(
+        config=config,
+        openai_settings=OpenAISettings(
+            api_key="sk-test",
+            base_url="https://example.invalid/v1",
+        ),
+        storage_root="/tmp/lightmem-state",
+        conversation_id="conv-profile",
+        project_root="/project",
+    )
+
+    compress_config = backend_config["pre_compressor"]["configs"]["compress_config"]
+    assert compress_config["rate"] == 0.7
+    assert backend_config["lightmem_profile"]["stm_threshold"] == 512
+
+
+def test_lightmem_locomo_reader_prompt_uses_official_memory_layout() -> None:
+    """LoCoMo reader prompt 应使用官方按 speaker 分组的 memory 布局。"""
+
+    backend = FakeLightMemoryBackend()
+    chat = FakeLightMemAnswerClient()
+    method = LightMem(
+        config=LightMemConfig(
+            llm_model="gpt-4o-mini",
+            embedding_model_path="models/all-MiniLM-L6-v2",
+            llmlingua_model_path=(
+                "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+            ),
+            retrieve_limit=2,
+            max_workers=1,
+            compression_rate=0.7,
+            stm_threshold=512,
+            profile_name="official-mini",
+        ),
+        backend_factory=lambda conversation_id: backend,
+        answer_client=chat,
+    )
+    conversation = _locomo_style_lightmem_conversation()
+    method.add([conversation])
+
+    method.get_answer(conversation.questions[0])
+
+    prompt = chat.prompts[0]
+    assert "Memories for user Alice" in prompt
+    assert "Memories for user Bob" in prompt
+    assert "Question: What does Alice like?" in prompt
+    assert "The answer should be less than 5-6 words." in prompt
+
+
+def test_lightmem_longmemeval_reader_prompt_includes_question_time() -> None:
+    """LongMemEval reader prompt 应复刻官方包含 question_time 的格式。"""
+
+    backend = FakeLightMemoryBackend()
+    chat = FakeLightMemAnswerClient()
+    method = LightMem(
+        config=LightMemConfig(
+            llm_model="gpt-4o-mini",
+            embedding_model_path="models/all-MiniLM-L6-v2",
+            llmlingua_model_path=(
+                "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+            ),
+            retrieve_limit=20,
+            max_workers=1,
+            compression_rate=0.7,
+            stm_threshold=512,
+            profile_name="official-mini",
+        ),
+        backend_factory=lambda conversation_id: backend,
+        answer_client=chat,
+    )
+    conversation = _longmemeval_style_lightmem_conversation()
+    method.add([conversation])
+
+    method.get_answer(conversation.questions[0])
+
+    prompt = chat.prompts[0]
+    assert "Question time:2026-01-03 and question:What does Alice like?" in prompt
+    assert "Please answer the question based on the following memories:" in prompt
 
 
 def test_lightmem_records_question_efficiency_observations() -> None:

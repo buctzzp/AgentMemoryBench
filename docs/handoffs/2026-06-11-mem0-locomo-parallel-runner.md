@@ -51,7 +51,7 @@ coordinator:
 - OSS `Memory` 支持使用 `user_id`、`agent_id`、`run_id` 进行存储和检索过滤。
 - Mem0 仓库自带 LoCoMo evaluation 使用的是托管版 `MemoryClient`，并非本地 OSS
   `Memory`；该脚本的实验结果不能直接宣称为本地 OSS 复现。
-- 官方 LoCoMo 脚本按 conversation 并行，并为两个 speaker 分别建立 user namespace；
+- Mem0 仓库的 LoCoMo 脚本按 conversation 并行，并为两个 speaker 分别建立 user namespace；
   这一行为可作为 OSS adapter 设计参考，但不能直接调用官方脚本。
 - 当前 `.env` 只有 `OPENAI_KEY` 和 `BASE_URL`，没有 Mem0 Platform 配置；这符合
   OSS-only 决策。

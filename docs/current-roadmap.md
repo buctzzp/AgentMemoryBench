@@ -1,6 +1,6 @@
 # 当前动态路线图
 
-更新日期：2026-06-16
+更新日期：2026-06-17
 
 本文件只记录当前主线、完成状态和阶段依赖。每完成一个任务必须立即勾选并同步
 `AGENTS.md`；详细实现步骤放在对应 `docs/superpowers/plans/` 文件中。
@@ -100,6 +100,8 @@ API 服务商价格离线计算费用，不绑定 OpenAI 官方价格。
 
 用户已明确要求先不做并行调度，优先接入 A-Mem 和 LightMem。设计方案位于
 `docs/superpowers/specs/2026-06-16-amem-lightmem-adapter-design.md`。
+Method official profile 对齐计划位于
+`docs/superpowers/plans/2026-06-17-method-official-profile-alignment.md`。
 
 - [x] 完成 A-Mem / LightMem 接入设计对齐。
 - [x] 编写实施计划。
@@ -113,7 +115,22 @@ API 服务商价格离线计算费用，不绑定 OpenAI 官方价格。
 
 说明：A-Mem 与 LightMem 均已完成离线/fake registered runner smoke；未执行真实 API。
 LightMem 已通过测试覆盖官方 `LightMemory.from_config()` 生产 backend 配置注入，但真实
-API smoke 仍需等待用户确认 API 余额、样本规模和 run_id。
+API smoke 仍需等待用户确认 API 余额、样本规模和 run_id。2026-06-17 重新审计后确认：
+fake/offline runner smoke 只能证明框架链路可运行，不能证明 A-Mem / LightMem 已按论文
+Table 级实验设置对齐。
+
+- [ ] A-Mem：补齐 Table 1 GPT-4o-mini profile，对齐官方 query keyword generation 和
+  Table 8 按类别 `k`。
+- [ ] LightMem：补齐 Table 2 / Table 3 profile。
+  - [x] 用户指定并落实 `(r=0.7, th=512)` official-mini profile。
+  - [x] 对齐 LoCoMo / LongMemEval 增量写入粒度。
+  - [x] 对齐 LongMemEval `question_time` reader prompt 和 LightMem LoCoMo prompt 布局。
+  - [ ] 确认是否继续复刻 LightMem 针对 LoCoMo 的 `search_locomo.py` Qdrant payload 检索路径。
+  - [ ] 确认是否在真实 smoke 前接入 LoCoMo / LongMemEval offline update 顺序。
+- [ ] Mem0：将 `get_answer()` reader 改为 Mem0 memory-benchmarks 官方 LoCoMo /
+  LongMemEval prompt，并固定当前阶段 answerer 为 `gpt-4o-mini`。
+- [ ] 完成 `docs/method-interface-inventory.md` 中四个 method 的完整输入输出清单，
+  真实 smoke 前不得再依赖未记录假设。
 
 ### Phase I：通用并行调度（顺延）
 
@@ -125,16 +142,26 @@ API smoke 仍需等待用户确认 API 余额、样本规模和 run_id。
 - [ ] 增加实验级 orchestrator，并通过 `max_parallel_runs` 控制多个独立 run。
 - [ ] 限制“实验并发 × conversation 并发”的总请求规模。
 
+说明：Phase J 已实现一个只用于成本校准的极小 smoke 外层 orchestrator。它不是
+Phase I 的 full parallel 调度替代品；full parallel 仍需处理更大规模、多 profile、
+method execution policy 和进程隔离策略。
+
 MemoryOS PyPI backend 已降为低优先级，本阶段不实现。
 
 ### Phase J：实验与指标
 
-- [x] 完成 Mem0、MemoryOS、A-Mem、LightMem 的资源与参数审计：
+- [ ] 重新完成 Mem0、MemoryOS、A-Mem、LightMem 的论文 Table 级资源与参数审计：
   `docs/method-resource-parameter-audit.md`。
 - [x] 确认 smoke 也采用官方 method 参数，成本控制只通过 benchmark 数据规模裁剪。
 - [x] 补齐 LightMem 本地模型：
   `models/all-MiniLM-L6-v2` 和
   `models/llmlingua-2-bert-base-multilingual-cased-meetingbank`。
+- [x] 实现成本校准 smoke 外层 orchestrator：
+  `memory-benchmark calibrate-smoke`。该入口固定 smoke profile、每组合 1 个
+  conversation/instance、强制开启 efficiency observation，并通过 `max_parallel_runs`
+  限制多个独立 run 的并发。
+- [ ] 经用户确认 run_prefix、并发数和 API 预算后运行
+  Mem0/A-Mem/MemoryOS/LightMem × LoCoMo/LongMemEval-S 极小成本校准 smoke。
 - [ ] API 充值并经用户确认后运行 Mem0/A-Mem/MemoryOS/LightMem + LoCoMo 极小 smoke。
 - [ ] API 充值并经用户确认后运行 Mem0-LoCoMo `official-full` prediction。
 - [ ] API 条件允许并经用户确认后运行 LongMemEval-S 最小 smoke。
