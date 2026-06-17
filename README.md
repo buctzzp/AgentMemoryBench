@@ -105,6 +105,10 @@ LightMem 当前需要本地模型：
 
 method 资源和官方参数核对见
 [docs/method-resource-parameter-audit.md](docs/method-resource-parameter-audit.md)。
+当前 public Hugging Face 数据仓库为
+[BuptZZP/agentmemorybench-data](https://huggingface.co/datasets/BuptZZP/agentmemorybench-data)，
+准备和上传流程见
+[docs/huggingface-datasets.md](docs/huggingface-datasets.md)。
 
 ## 项目层次
 
@@ -452,4 +456,5 @@ uv run python -m unittest tests/test_API.py -v
 - [docs/method-interface.md](docs/method-interface.md): method 接口。
 - [docs/data-model.md](docs/data-model.md): core 数据模型说明。
 - [docs/method-resource-parameter-audit.md](docs/method-resource-parameter-audit.md): method 参数与资源审计。
+- [docs/huggingface-datasets.md](docs/huggingface-datasets.md): dataset 上传到 Hugging Face 的流程。
 - [docs/superpowers/specs/2026-06-12-project-goals-architecture-design.md](docs/superpowers/specs/2026-06-12-project-goals-architecture-design.md): 长期项目目标与架构设计。

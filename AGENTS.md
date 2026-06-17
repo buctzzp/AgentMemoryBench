@@ -115,6 +115,10 @@
   `pyproject.toml` / `uv.lock`。这是官方 A-Mem requirements 中的正式依赖。
 - README 已于 2026-06-17 更新为 GitHub 项目入口，清理本地绝对路径并明确本地资产不入库、
   真实 API 实验需显式确认；交接见 `docs/handoffs/2026-06-17-readme-github-refresh.md`。
+- 大型 `data/` 已发布到 Hugging Face public dataset repo
+  `BuptZZP/agentmemorybench-data`，当前 revision 为
+  `0eb625cd4c7cecca7951c7c7feae4211861f979d`；准备脚本为
+  `scripts/prepare_hf_dataset_bundle.py`，操作文档为 `docs/huggingface-datasets.md`。
 - 本轮精确交接：
   `docs/handoffs/2026-06-16-amem-lightmem-adapters.md`。
 - Phase F 已完成并通过 `gpt-5.5 xhigh` 最终只读复审。LongMemEval S/M 使用 `ijson`
