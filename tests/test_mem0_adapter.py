@@ -288,6 +288,62 @@ def _build_named_conversation(
     )
 
 
+def _build_longmemeval_conversation() -> Conversation:
+    """构造 LongMemEval 风格 conversation，用于验证官方 pair 级写入。"""
+
+    return Conversation(
+        conversation_id="lme-q1",
+        sessions=[
+            Session(
+                session_id="haystack-1",
+                session_time="2024-01-01",
+                turns=[
+                    Turn(
+                        turn_id="haystack-1:t0",
+                        speaker="user",
+                        normalized_role="user",
+                        content="I prefer jasmine tea in the morning.",
+                    ),
+                    Turn(
+                        turn_id="haystack-1:t1",
+                        speaker="assistant",
+                        normalized_role="assistant",
+                        content="I will keep that preference in mind.",
+                    ),
+                    Turn(
+                        turn_id="haystack-1:t2",
+                        speaker="user",
+                        normalized_role="user",
+                        content="I dislike coffee after lunch.",
+                    ),
+                    Turn(
+                        turn_id="haystack-1:t3",
+                        speaker="assistant",
+                        normalized_role="assistant",
+                        content="Noted, no coffee after lunch.",
+                    ),
+                ],
+            ),
+            Session(
+                session_id="haystack-2",
+                session_time="2024-01-03",
+                turns=[
+                    Turn(
+                        turn_id="haystack-2:t0",
+                        speaker="user",
+                        normalized_role="user",
+                        content="Mint tea is acceptable at night.",
+                    )
+                ],
+            ),
+        ],
+        metadata={
+            "source_path": "data/longmemeval/longmemeval_s_cleaned.json",
+            "variant": "s_cleaned",
+        },
+    )
+
+
 def test_mem0_profiles_separate_smoke_and_official_full_parameters() -> None:
     """smoke 只降低运行范围参数，全量 profile 必须锁定官方 benchmark 参数。"""
 
@@ -297,7 +353,7 @@ def test_mem0_profiles_separate_smoke_and_official_full_parameters() -> None:
     assert smoke.extraction_model == "gpt-4o-mini"
     assert smoke.embedding_model == "text-embedding-3-small"
     assert smoke.embedding_dimensions == 1536
-    assert smoke.top_k == 10
+    assert smoke.top_k == 200
     assert smoke.max_workers == 1
     assert smoke.ingestion_chunk_size == 1
     assert smoke.infer is True
@@ -322,8 +378,20 @@ def test_mem0_source_identity_records_version_and_deterministic_core_hash() -> N
     assert first["package_version"] == "2.0.4"
     assert len(first["source_sha256"]) == 64
     assert first["file_count"] > 1
-    assert all(path.startswith(("mem0/", "pyproject.toml", "LICENSE")) for path in first["files"])
-    assert not any("memory-benchmarks" in path for path in first["files"])
+    allowed_memory_benchmark_files = {
+        "memory-benchmarks/benchmarks/locomo/prompts.py",
+        "memory-benchmarks/benchmarks/longmemeval/prompts.py",
+    }
+    assert all(
+        path.startswith(("mem0/", "pyproject.toml", "LICENSE"))
+        or path in allowed_memory_benchmark_files
+        for path in first["files"]
+    )
+    assert allowed_memory_benchmark_files.issubset(set(first["files"]))
+    assert not any(
+        path.startswith("memory-benchmarks/") and path not in allowed_memory_benchmark_files
+        for path in first["files"]
+    )
     assert not any("__pycache__" in path for path in first["files"])
 
 
@@ -395,6 +463,72 @@ def test_add_writes_each_turn_separately_with_conversation_namespace() -> None:
     assert first_metadata["turn_time"] == "2023-05-08T13:56:01"
 
 
+def test_add_batches_longmemeval_turns_as_user_assistant_pairs() -> None:
+    """LongMemEval 应按官方 `CHUNK_SIZE=2` 把 user+assistant pair 写入 Mem0。"""
+
+    backend = FakeMemoryBackend()
+    system = Mem0(
+        config=Mem0Config.smoke(),
+        memory_backend=backend,
+        reader_client=FakeReaderClient(),
+    )
+    conversation = _build_longmemeval_conversation()
+
+    result = system.add([conversation])
+
+    assert result.conversation_ids == ["lme-q1"]
+    assert result.metadata["turn_count"] == 5
+    assert [len(call["messages"]) for call in backend.add_calls] == [2, 2, 1]
+    assert backend.add_calls[0]["messages"] == [
+        {
+            "role": "user",
+            "content": (
+                "[Session time: 2024-01-01] "
+                "user: I prefer jasmine tea in the morning."
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": (
+                "[Session time: 2024-01-01] "
+                "assistant: I will keep that preference in mind."
+            ),
+        },
+    ]
+    assert backend.add_calls[2]["messages"] == [
+        {
+            "role": "user",
+            "content": (
+                "[Session time: 2024-01-03] "
+                "user: Mint tea is acceptable at night."
+            ),
+        }
+    ]
+    assert backend.add_calls[0]["metadata"] == {
+        "conversation_id": "lme-q1",
+        "session_id": "haystack-1",
+        "turn_ids": ["haystack-1:t0", "haystack-1:t1"],
+        "first_turn_id": "haystack-1:t0",
+        "last_turn_id": "haystack-1:t1",
+        "speaker": "user+assistant",
+        "session_time": "2024-01-01",
+    }
+    assert all(call["run_id"] == "lme-q1" for call in backend.add_calls)
+
+
+def test_mem0_turn_level_resume_is_only_enabled_for_non_longmemeval() -> None:
+    """Mem0 LongMemEval 走 conversation-level resume，LoCoMo 保留 turn-level resume。"""
+
+    system = Mem0(
+        config=Mem0Config.smoke(),
+        memory_backend=FakeMemoryBackend(),
+        reader_client=FakeReaderClient(),
+    )
+
+    assert system.supports_turn_resume(_build_conversation()) is True
+    assert system.supports_turn_resume(_build_longmemeval_conversation()) is False
+
+
 def test_add_from_turn_skips_confirmed_prefix_and_reports_callback_order() -> None:
     """增量写入应跳过已确认 turn，并严格包围实际 backend 调用。"""
 
@@ -459,7 +593,7 @@ def test_get_answer_searches_only_question_conversation_and_calls_reader() -> No
         {
             "query": question.text,
             "filters": {"run_id": "conv-1"},
-            "top_k": 10,
+            "top_k": 200,
         }
     ]
     assert prediction.question_id == "conv-1:q1"
@@ -468,12 +602,89 @@ def test_get_answer_searches_only_question_conversation_and_calls_reader() -> No
     assert prediction.metadata == {
         "method": "mem0",
         "retrieved_memory_count": 1,
-        "top_k": 10,
+        "top_k": 200,
         "reader_model": "gpt-4o-mini",
     }
     reader_messages = reader.calls[0]["messages"]
     assert "Alice likes jasmine tea." in reader_messages[0]["content"]
     assert question.text == reader_messages[1]["content"]
+
+
+def test_get_answer_uses_mem0_locomo_official_answer_prompt() -> None:
+    """LoCoMo 问题应使用 Mem0 memory-benchmarks 的官方 answer prompt。"""
+
+    backend = FakeMemoryBackend()
+    backend.search_results = [
+        {
+            "id": "m1",
+            "memory": "Alice likes jasmine tea.",
+            "score": 0.91,
+            "created_at": "2023-05-08T13:56:00",
+        }
+    ]
+    reader = FakeReaderClient(answer="ANSWER: jasmine tea")
+    system = Mem0(
+        config=Mem0Config.smoke(),
+        memory_backend=backend,
+        reader_client=reader,
+    )
+    conversation = _build_conversation()
+    conversation.metadata["source_path"] = "data/locomo/locomo10.json"
+    system.add([conversation])
+    question = Question(
+        question_id="conv-1:q1",
+        conversation_id="conv-1",
+        text="What kind of tea does Alice like?",
+    )
+
+    system.get_answer(question)
+
+    reader_messages = reader.calls[0]["messages"]
+    assert len(reader_messages) == 1
+    prompt = reader_messages[0]["content"]
+    assert "You are answering a question using retrieved memories" in prompt
+    assert "## Step 1: SCAN ALL MEMORIES" in prompt
+    assert "These conversations took place around 2023" in prompt
+    assert "(Monday, May 08, 2023) Alice likes jasmine tea." in prompt
+    assert "Question: What kind of tea does Alice like?" in prompt
+
+
+def test_get_answer_uses_mem0_longmemeval_official_answer_prompt() -> None:
+    """LongMemEval 问题应使用 Mem0 memory-benchmarks 的官方 answer prompt。"""
+
+    backend = FakeMemoryBackend()
+    backend.search_results = [
+        {
+            "id": "m1",
+            "memory": "Alice likes jasmine tea.",
+            "score": 0.91,
+            "created_at": "2023-05-08T13:56:00",
+        }
+    ]
+    reader = FakeReaderClient(answer="jasmine tea")
+    system = Mem0(
+        config=Mem0Config.smoke(),
+        memory_backend=backend,
+        reader_client=reader,
+    )
+    system.add([_build_longmemeval_conversation()])
+    question = Question(
+        question_id="lme-q1",
+        conversation_id="lme-q1",
+        text="What kind of tea does the user prefer?",
+        question_time="2024-01-04",
+    )
+
+    system.get_answer(question)
+
+    reader_messages = reader.calls[0]["messages"]
+    assert len(reader_messages) == 1
+    prompt = reader_messages[0]["content"]
+    assert "You are a personal assistant with access to memories" in prompt
+    assert "IMPORTANT: Today's date is 2024-01-04." in prompt
+    assert "--- Monday, May 08, 2023 ---" in prompt
+    assert "- Alice likes jasmine tea." in prompt
+    assert "Question: What kind of tea does the user prefer?" in prompt
 
 
 def test_get_answer_records_efficiency_observations_when_collector_enabled() -> None:

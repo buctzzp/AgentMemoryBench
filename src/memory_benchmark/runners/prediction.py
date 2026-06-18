@@ -698,12 +698,12 @@ def _ingest_pending_conversations(
             if efficiency_store is not None:
                 efficiency_store.merge_observations(batch.observations)
             returned_id = batch.conversation_id
-            if isinstance(system, BaseResumableMemorySystem):
-                conversation = next(
-                    item
-                    for item in pending
-                    if item.conversation_id == returned_id
-                )
+            conversation = next(
+                item
+                for item in pending
+                if item.conversation_id == returned_id
+            )
+            if _uses_turn_resume(system, conversation):
                 checkpoint_store.mark_conversation_completed(
                     conversation_id=returned_id,
                     total_turns=_conversation_turn_count(conversation),
@@ -739,7 +739,6 @@ def _preflight_ingest_checkpoints(
         都会在 method 调用前终止整个 resume。
     """
 
-    is_resumable = isinstance(system, BaseResumableMemorySystem)
     checkpoints: dict[str, TurnIngestCheckpoint | None] = {}
     for conversation in conversations:
         total_turns = _conversation_turn_count(conversation)
@@ -750,10 +749,11 @@ def _preflight_ingest_checkpoints(
         checkpoints[conversation.conversation_id] = checkpoint
         if checkpoint is None:
             continue
-        if not is_resumable:
+        if not _uses_turn_resume(system, conversation):
             raise ConfigurationError(
-                "Turn ingest checkpoint exists, but method does not implement "
-                f"BaseResumableMemorySystem: {conversation.conversation_id}"
+                "Turn ingest checkpoint exists, but method does not enable "
+                "turn-level resume for conversation: "
+                f"{conversation.conversation_id}"
             )
         if not policy.resume:
             raise ConfigurationError(
@@ -835,7 +835,7 @@ def _add_public_conversation(
 ) -> None:
     """执行一次公开 conversation 写入，并校验 method 返回 id。"""
 
-    if isinstance(system, BaseResumableMemorySystem):
+    if _uses_turn_resume(system, public_conversation):
         total_turns = _conversation_turn_count(public_conversation)
         start_turn_index = (
             checkpoint.next_turn_index if checkpoint is not None else 0
@@ -863,6 +863,17 @@ def _add_public_conversation(
             "Method add result did not include expected conversation_id: "
             f"{public_conversation.conversation_id}"
         )
+
+
+def _uses_turn_resume(
+    system: BaseMemorySystem,
+    conversation: Conversation,
+) -> bool:
+    """判断当前 method/conversation 是否使用逐 turn checkpoint。"""
+
+    return isinstance(system, BaseResumableMemorySystem) and system.supports_turn_resume(
+        conversation
+    )
 
 
 def _conversation_turn_count(conversation: Conversation) -> int:

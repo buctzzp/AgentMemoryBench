@@ -56,6 +56,19 @@ class BaseResumableMemorySystem(BaseMemorySystem):
     可以检测该子类，并在每个 turn 前后持久化 method 私有 checkpoint。
     """
 
+    def supports_turn_resume(self, conversation: Conversation) -> bool:
+        """返回当前 conversation 是否支持逐 turn 安全续写。
+
+        输入:
+            conversation: 已清洗的公开 conversation。
+
+        输出:
+            bool: `True` 表示 runner 可以调用 `add_from_turn()`；`False` 表示应退回
+            完整 `add([conversation])`，只使用 conversation-level resume。
+        """
+
+        return True
+
     @abstractmethod
     def add_from_turn(
         self,

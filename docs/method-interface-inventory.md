@@ -1,6 +1,6 @@
 # Method 原生接口清单
 
-更新日期：2026-06-17
+更新日期：2026-06-18
 
 本文记录第三方 method 仓库原生暴露的接口、官方实验脚本的调用方式，以及本项目 adapter
 应该如何包装成统一 `BaseMemorySystem.add()` / `BaseMemorySystem.get_answer()`。
@@ -45,7 +45,7 @@
 | 项 | 记录 |
 | --- | --- |
 | 原生写入接口 | OSS `Memory.add(messages, run_id/user_id, metadata, infer, prompt, ...)`；输入是 message list |
-| 官方写入粒度 | memory-benchmarks 中 LoCoMo 按 session chunk；LongMemEval 按 user+assistant pair，`CHUNK_SIZE=2` |
+| 官方写入粒度 | memory-benchmarks 中 LoCoMo `CHUNK_SIZE=1`，即每条格式化 turn/message 一次写入；LongMemEval `CHUNK_SIZE=2`，即 user+assistant pair |
 | 原生检索接口 | `Memory.search(query, filters, top_k, ...)`；conversation 隔离通过 `run_id`/filter |
 | 原生回答接口 | Mem0 OSS 本体没有统一 `answer(question)` |
 | 官方回答流程 | memory-benchmarks 使用 `search_results -> get_answer_generation_prompt(...) -> answerer LLM` |
@@ -53,7 +53,7 @@
 | LongMemEval prompt | `benchmarks/longmemeval/prompts.py::get_answer_generation_prompt` |
 | 模型配置 | OSS server 默认 fact extraction `gpt-4o-mini`、embedding `text-embedding-3-small`；当前阶段 answerer/judge 统一改用 `gpt-4o-mini` |
 | API 配置 | Mem0 extraction/embedder 和 answerer LLM 都需要从配置层传入 API key/base URL |
-| 当前 adapter 状态 | add/search 调官方 OSS；当前 reader 需要核对并改为 Mem0 memory-benchmarks 官方 prompt |
+| 当前 adapter 状态 | add/search 调官方 OSS；LoCoMo 写入粒度与官方 `CHUNK_SIZE=1` 对齐并启用 turn-level resume；LongMemEval 按官方 `CHUNK_SIZE=2` user+assistant pair 写入，并由 runner 使用 conversation-level resume；reader 已按 benchmark 分支调用 Mem0 memory-benchmarks 官方 LoCoMo / LongMemEval `get_answer_generation_prompt(...)`；未知 benchmark 保留通用 fallback |
 
 ## MemoryOS
 
@@ -127,3 +127,19 @@
 | API 配置 | memory manager 和 answerer LLM 需要 API key/base URL |
 | 当前 adapter 状态 | 已改为 adapter 内部按来源展开：LoCoMo 单原始 turn -> `user(content)+assistant("")`，LongMemEval 真实 `user+assistant` pair；仅最后一批 `force_segment=True, force_extract=True`；`r=0.7, th=512` 已进入 config/profile；LoCoMo `add()` 后执行 `construct_update_queue_all_entries()` 与 `offline_update_all_entries(score_threshold=0.9)`；LoCoMo `get_answer()` 使用 `search_locomo.py` 风格 Qdrant payload/vector combined 检索和 speaker-organized prompt；LongMemEval `get_answer()` 保持 `LightMemory.retrieve()` + `question_time` prompt |
 | 已知差异 | LongMemEval OP-update 仍未作为独立 profile 实现；LoCoMo 真实 API smoke 尚未运行，因此不能宣称 Table 3 真实复现完成 |
+
+## Resume 策略分层
+
+该分层吸收 `docs/opencode-suggestions/method-resume-feasibility-analysis.md` 中经源码核验后
+可采纳的部分。原则是只在 method 的最小写入单元“完成即持久化”时使用 turn 级 resume；
+否则退回 conversation 级，避免 checkpoint 记录的进度和 method 实际持久化状态不一致。
+
+| Method | 当前 resume 级别 | 依据 | 后续任务 |
+| --- | --- | --- | --- |
+| Mem0 | LoCoMo turn 级；LongMemEval conversation 级 | LoCoMo 官方 `CHUNK_SIZE=1`，每次 `Memory.add([message], run_id=...)` 完成完整写入；LongMemEval 官方 `CHUNK_SIZE=2` user+assistant pair，不适合 turn checkpoint | `supports_turn_resume()` 已按 conversation 分流；LoCoMo 使用 turn checkpoint，LongMemEval 使用 conversation status |
+| MemoryOS | conversation 级 | 官方 LoCoMo eval 以 dialogue page / QA pair 写入，状态落到独立 JSON 目录；当前 adapter 通过 conversation state 目录恢复 | 后续并行时优先做进程隔离，不强行降到 turn 级 |
+| A-Mem | 暂无可靠跨进程 resume，当前按 conversation 重跑 | 官方 robust runtime 主要是内存 dict + Faiss retriever；进程重启后状态丢失 | 后续可在 wrapper 层增加 Faiss index + memories JSON 持久化，作为可靠性增强 |
+| LightMem | conversation 级 | `add_memory()` 中间调用可能只进入 buffer，只有 force extraction/offline update 后才具备完整持久化语义 | 不做 turn 级 resume；LoCoMo `add()` 返回后已执行 offline update，可作为 conversation 完成点 |
+
+question 级 resume 由 runner 统一基于 `method_predictions.jsonl` 处理。当前四个 method 的
+`get_answer()` 都按只读路径设计，不应修改 method 记忆状态。

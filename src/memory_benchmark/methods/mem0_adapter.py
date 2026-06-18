@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import importlib.util
 import os
 import sys
 import threading
@@ -27,7 +28,14 @@ from memory_benchmark.config.settings import (
     load_path_settings,
     load_settings,
 )
-from memory_benchmark.core import AddResult, AnswerResult, Conversation, Question, Turn
+from memory_benchmark.core import (
+    AddResult,
+    AnswerResult,
+    Conversation,
+    Question,
+    Session,
+    Turn,
+)
 from memory_benchmark.core.exceptions import ConfigurationError
 from memory_benchmark.core.interfaces import BaseResumableMemorySystem
 from memory_benchmark.observability.efficiency import (
@@ -40,8 +48,16 @@ from memory_benchmark.observability.efficiency import (
 
 MEM0_METHOD_DIRECTORY = "mem0-main"
 MEM0_ADAPTER_VERSION = "conversation-qa-v1"
-MEM0_READER_PROMPT_VERSION = "mem0-reader-v1"
+MEM0_READER_PROMPT_VERSION = "mem0-memory-benchmarks-reader-v2"
 VALID_MESSAGE_ROLES = {"user", "assistant"}
+LONGMEMEVAL_QUESTION_TYPES = {
+    "temporal-reasoning",
+    "multi-session",
+    "knowledge-update",
+    "single-session-user",
+    "single-session-assistant",
+    "single-session-preference",
+}
 
 
 @dataclass(frozen=True)
@@ -98,8 +114,9 @@ class Mem0Config:
     def smoke(cls) -> "Mem0Config":
         """返回低成本真实链路 smoke profile。
 
-        smoke 只降低检索深度和 conversation 并发；extraction、embedding、逐 turn add
-        和 `infer=True` 均保持官方 benchmark 语义。
+        smoke 只降低 conversation/question/turn 的运行规模和 conversation 并发；
+        extraction、embedding、检索深度、逐 turn add 和 `infer=True` 均保持官方
+        benchmark 语义。
         """
 
         return cls(
@@ -107,7 +124,7 @@ class Mem0Config:
             embedding_model="text-embedding-3-small",
             embedding_dimensions=1536,
             reader_model="gpt-4o-mini",
-            top_k=10,
+            top_k=200,
             max_workers=1,
             ingestion_chunk_size=1,
             infer=True,
@@ -181,6 +198,15 @@ def build_mem0_source_identity(
             for path in (mem0_root / "pyproject.toml", mem0_root / "LICENSE")
             if path.is_file()
         ],
+        key=lambda path: path.relative_to(mem0_root).as_posix(),
+    )
+    benchmark_prompt_files = [
+        mem0_root / "memory-benchmarks" / "benchmarks" / "locomo" / "prompts.py",
+        mem0_root / "memory-benchmarks" / "benchmarks" / "longmemeval" / "prompts.py",
+    ]
+    source_files.extend(path for path in benchmark_prompt_files if path.is_file())
+    source_files = sorted(
+        source_files,
         key=lambda path: path.relative_to(mem0_root).as_posix(),
     )
     if not source_files:
@@ -269,6 +295,7 @@ class Mem0(BaseResumableMemorySystem):
         self._reader = reader_client
         self._namespace_lock = threading.RLock()
         self._added_conversation_ids = set(existing_conversation_ids or ())
+        self._conversation_metadata: dict[str, dict[str, Any]] = {}
         if any(not conversation_id.strip() for conversation_id in self._added_conversation_ids):
             raise ConfigurationError(
                 "Mem0 existing_conversation_ids cannot contain empty ids"
@@ -341,12 +368,15 @@ class Mem0(BaseResumableMemorySystem):
         conversation_ids: list[str] = []
         turn_count = 0
         for conversation in conversations:
-            result = self.add_from_turn(
-                conversation=conversation,
-                start_turn_index=0,
-                on_turn_started=lambda index, turn: None,
-                on_turn_completed=lambda index, turn: None,
-            )
+            if self._is_longmemeval_conversation(conversation):
+                result = self._add_longmemeval_conversation(conversation)
+            else:
+                result = self.add_from_turn(
+                    conversation=conversation,
+                    start_turn_index=0,
+                    on_turn_started=lambda index, turn: None,
+                    on_turn_completed=lambda index, turn: None,
+                )
             conversation_ids.extend(result.conversation_ids)
             turn_count += int(result.metadata.get("turn_count", 0))
 
@@ -358,6 +388,19 @@ class Mem0(BaseResumableMemorySystem):
                 "infer": self.config.infer,
             },
         )
+
+    def supports_turn_resume(self, conversation: Conversation) -> bool:
+        """Mem0 仅对 LoCoMo 等 `CHUNK_SIZE=1` conversation 启用逐 turn resume。
+
+        输入:
+            conversation: runner 清洗后的公开 conversation。
+
+        输出:
+            bool: LongMemEval 官方写入粒度是 user+assistant pair，因此返回 False，
+            让 runner 使用 conversation-level resume。
+        """
+
+        return not self._is_longmemeval_conversation(conversation)
 
     def add_from_turn(
         self,
@@ -398,8 +441,19 @@ class Mem0(BaseResumableMemorySystem):
             self._reserve_namespace(conversation.conversation_id)
         else:
             self._attach_existing_namespace(conversation.conversation_id)
+        self._conversation_metadata[conversation.conversation_id] = {
+            **conversation.metadata,
+            "conversation_id": conversation.conversation_id,
+        }
 
         speaker_roles = self._build_speaker_roles(conversation)
+        if self._is_longmemeval_conversation(conversation):
+            raise ConfigurationError(
+                "Mem0 LongMemEval does not support turn-level resume; use "
+                "conversation-level add() so the official user+assistant pair "
+                "ingestion remains intact."
+            )
+
         written_turn_count = 0
         for turn_index, (session, turn) in enumerate(indexed_turns):
             if turn_index < start_turn_index:
@@ -429,6 +483,59 @@ class Mem0(BaseResumableMemorySystem):
                 "infer": self.config.infer,
                 "start_turn_index": start_turn_index,
                 "total_turns": total_turns,
+            },
+        )
+
+    def _add_longmemeval_conversation(self, conversation: Conversation) -> AddResult:
+        """按 Mem0 官方 LongMemEval `CHUNK_SIZE=2` 完整写入 conversation。
+
+        输入:
+            conversation: 已确认来自 LongMemEval 的公开 conversation。
+
+        输出:
+            AddResult: conversation id 和本次覆盖的 turn 数。该路径不支持逐 turn
+            checkpoint，runner 应以 conversation-level resume 管理。
+        """
+
+        chunks = self._longmemeval_ingestion_chunks(conversation)
+        total_turns = sum(len(session.turns) for session in conversation.sessions)
+        if total_turns == 0:
+            raise ConfigurationError(
+                f"Mem0 conversation has no turns: {conversation.conversation_id}"
+            )
+        self._reserve_namespace(conversation.conversation_id)
+        self._conversation_metadata[conversation.conversation_id] = {
+            **conversation.metadata,
+            "conversation_id": conversation.conversation_id,
+        }
+
+        speaker_roles = self._build_speaker_roles(conversation)
+        written_turn_count = 0
+        for _, session, turns in chunks:
+            messages = [
+                self._turn_to_message(
+                    turn,
+                    speaker_roles,
+                    session_time=session.session_time,
+                )
+                for turn in turns
+            ]
+            self._memory.add(
+                messages,
+                run_id=conversation.conversation_id,
+                metadata=self._turn_batch_metadata(conversation, session, turns),
+                infer=self.config.infer,
+                prompt=self._observation_time_prompt(session.session_time),
+            )
+            written_turn_count += len(turns)
+
+        return AddResult(
+            conversation_ids=[conversation.conversation_id],
+            metadata={
+                "method": "mem0",
+                "turn_count": written_turn_count,
+                "infer": self.config.infer,
+                "ingestion_chunk_size": 2,
             },
         )
 
@@ -810,6 +917,64 @@ class Mem0(BaseResumableMemorySystem):
         return metadata
 
     @staticmethod
+    def _turn_batch_metadata(
+        conversation: Conversation,
+        session: Session,
+        turns: list[Turn],
+    ) -> dict[str, Any]:
+        """构造 LongMemEval pair 写入 Mem0 时使用的公开 batch 元信息。"""
+
+        turn_ids = [turn.turn_id for turn in turns]
+        metadata: dict[str, Any] = {
+            "conversation_id": conversation.conversation_id,
+            "session_id": session.session_id,
+            "turn_ids": turn_ids,
+            "first_turn_id": turn_ids[0],
+            "last_turn_id": turn_ids[-1],
+            "speaker": "+".join(turn.speaker for turn in turns),
+        }
+        if session.session_time:
+            metadata["session_time"] = session.session_time
+        first_turn_time = turns[0].turn_time
+        last_turn_time = turns[-1].turn_time
+        if first_turn_time:
+            metadata["first_turn_time"] = first_turn_time
+        if last_turn_time and last_turn_time != first_turn_time:
+            metadata["last_turn_time"] = last_turn_time
+        return metadata
+
+    @staticmethod
+    def _longmemeval_ingestion_chunks(
+        conversation: Conversation,
+    ) -> list[tuple[int, Session, list[Turn]]]:
+        """按 session 内 2 条一组生成 Mem0 官方 LongMemEval 写入 chunk。"""
+
+        chunks: list[tuple[int, Session, list[Turn]]] = []
+        flat_index = 0
+        for session in conversation.sessions:
+            for session_turn_index in range(0, len(session.turns), 2):
+                turns = session.turns[session_turn_index : session_turn_index + 2]
+                if turns:
+                    chunks.append((flat_index + session_turn_index, session, turns))
+            flat_index += len(session.turns)
+        return chunks
+
+    @staticmethod
+    def _is_longmemeval_conversation(conversation: Conversation) -> bool:
+        """根据公开 metadata 判断 conversation 是否来自 LongMemEval。"""
+
+        source_text = " ".join(
+            str(value)
+            for value in (
+                conversation.metadata.get("source_path"),
+                conversation.metadata.get("source_format"),
+                conversation.metadata.get("variant"),
+            )
+            if value is not None
+        ).lower()
+        return "longmemeval" in source_text
+
+    @staticmethod
     def _observation_time_prompt(session_time: str | None) -> str | None:
         """为 Mem0 提取器构造 session 级相对时间锚点。
 
@@ -855,12 +1020,20 @@ class Mem0(BaseResumableMemorySystem):
             )
         return normalized
 
-    @staticmethod
     def _reader_messages(
+        self,
         question: Question,
         memories: list[dict[str, Any]],
     ) -> list[dict[str, str]]:
         """构造固定 reader 的 system/user messages。"""
+
+        prompt_kind = self._reader_prompt_kind(question)
+        if prompt_kind == "locomo":
+            prompt = self._build_mem0_locomo_prompt(question, memories)
+            return [{"role": "user", "content": prompt}]
+        if prompt_kind == "longmemeval":
+            prompt = self._build_mem0_longmemeval_prompt(question, memories)
+            return [{"role": "user", "content": prompt}]
 
         memory_text = Mem0._memory_context_text(memories)
         if not memory_text:
@@ -875,6 +1048,80 @@ class Mem0(BaseResumableMemorySystem):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": question.text},
         ]
+
+    def _reader_prompt_kind(self, question: Question) -> str:
+        """选择 Mem0 官方 benchmark prompt；未知数据集保持通用 fallback。"""
+
+        metadata = self._conversation_metadata.get(question.conversation_id, {})
+        source_text = " ".join(
+            str(value)
+            for value in (
+                metadata.get("source_path"),
+                metadata.get("source_format"),
+                metadata.get("variant"),
+                question.metadata.get("source_path"),
+                question.metadata.get("source_format"),
+            )
+            if value is not None
+        ).lower()
+        category = str(question.category or "").strip()
+        if "longmemeval" in source_text or category in LONGMEMEVAL_QUESTION_TYPES:
+            return "longmemeval"
+        if "locomo" in source_text or category in {"1", "2", "3", "4", "5"}:
+            return "locomo"
+        if question.question_time:
+            return "longmemeval"
+        return "generic"
+
+    def _build_mem0_locomo_prompt(
+        self,
+        question: Question,
+        memories: list[dict[str, Any]],
+    ) -> str:
+        """调用 Mem0 memory-benchmarks 的 LoCoMo answer prompt。"""
+
+        prompt_module = _load_mem0_benchmark_prompt_module(
+            self.path_settings,
+            "locomo",
+        )
+        prompt_builder = getattr(prompt_module, "get_answer_generation_prompt")
+        metadata = self._conversation_metadata.get(question.conversation_id, {})
+        reference_date = (
+            metadata.get("reference_date")
+            or metadata.get("question_reference_date")
+            or _reference_year_from_memories(memories)
+            or "2023"
+        )
+        return prompt_builder(
+            question=question.text,
+            search_results=memories,
+            reference_date=str(reference_date),
+            user_profile=None,
+        )
+
+    def _build_mem0_longmemeval_prompt(
+        self,
+        question: Question,
+        memories: list[dict[str, Any]],
+    ) -> str:
+        """调用 Mem0 memory-benchmarks 的 LongMemEval answer prompt。"""
+
+        if not question.question_time:
+            raise ConfigurationError(
+                "Mem0 LongMemEval official prompt requires question_time: "
+                f"{question.question_id}"
+            )
+        prompt_module = _load_mem0_benchmark_prompt_module(
+            self.path_settings,
+            "longmemeval",
+        )
+        prompt_builder = getattr(prompt_module, "get_answer_generation_prompt")
+        return prompt_builder(
+            question=question.text,
+            search_results=memories,
+            question_date=question.question_time,
+            user_profile=None,
+        )
 
     @staticmethod
     def _memory_context_text(memories: list[dict[str, Any]]) -> str:
@@ -983,6 +1230,46 @@ def _messages_to_text(messages: list[Any]) -> str:
         if content is not None:
             parts.append(str(content))
     return "\n".join(parts)
+
+
+def _load_mem0_benchmark_prompt_module(
+    path_settings: PathSettings,
+    benchmark_name: str,
+) -> Any:
+    """从 vendored Mem0 memory-benchmarks 加载指定 benchmark 的 prompt 模块。"""
+
+    prompt_path = (
+        path_settings.resolve_third_party_method_path(MEM0_METHOD_DIRECTORY)
+        / "memory-benchmarks"
+        / "benchmarks"
+        / benchmark_name
+        / "prompts.py"
+    )
+    if not prompt_path.is_file():
+        raise ConfigurationError(f"Mem0 benchmark prompt file missing: {prompt_path}")
+    module_name = f"_memory_benchmark_mem0_{benchmark_name}_prompts"
+    spec = importlib.util.spec_from_file_location(module_name, prompt_path)
+    if spec is None or spec.loader is None:
+        raise ConfigurationError(f"Mem0 prompt module cannot be loaded: {prompt_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if not hasattr(module, "get_answer_generation_prompt"):
+        raise ConfigurationError(
+            f"Mem0 prompt module missing get_answer_generation_prompt: {prompt_path}"
+        )
+    return module
+
+
+def _reference_year_from_memories(memories: list[dict[str, Any]]) -> str | None:
+    """从检索结果 `created_at` 推断 LoCoMo reference year。"""
+
+    for memory in memories:
+        created_at = memory.get("created_at")
+        if isinstance(created_at, str) and len(created_at) >= 4:
+            year = created_at[:4]
+            if year.isdigit():
+                return year
+    return None
 
 
 __all__ = [

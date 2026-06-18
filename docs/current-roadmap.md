@@ -1,6 +1,6 @@
 # 当前动态路线图
 
-更新日期：2026-06-17
+更新日期：2026-06-18
 
 本文件只记录当前主线、完成状态和阶段依赖。每完成一个任务必须立即勾选并同步
 `AGENTS.md`；详细实现步骤放在对应 `docs/superpowers/plans/` 文件中。
@@ -134,8 +134,12 @@ Table 级实验设置对齐。
     `offline_update_all_entries(score_threshold=0.9)`。
   - [ ] LongMemEval OP-update 仍是可选 future profile；当前 LongMemEval 保持通用
     `LightMemory.retrieve()` online 路径。
-- [ ] Mem0：将 `get_answer()` reader 改为 Mem0 memory-benchmarks 官方 LoCoMo /
+- [x] Mem0：将 `get_answer()` reader 改为 Mem0 memory-benchmarks 官方 LoCoMo /
   LongMemEval prompt，并固定当前阶段 answerer 为 `gpt-4o-mini`。
+- [x] Mem0：smoke profile 已恢复官方 `top_k=200`，成本控制只通过 benchmark 规模裁剪。
+- [x] Mem0：由于官方 LongMemEval 为 `CHUNK_SIZE=2` user+assistant pair，和当前
+  turn-level resume 语义不一致，Mem0 对 LoCoMo 保留 `CHUNK_SIZE=1` turn-level
+  写入和 resume；对 LongMemEval 使用官方 pair 级写入与 conversation-level resume。
 - [x] 完成 `docs/method-interface-inventory.md` 中四个 method 的完整输入输出清单，
   真实 smoke 前不得再依赖未记录假设。
 
@@ -148,6 +152,10 @@ Table 级实验设置对齐。
 - [ ] 从 `max_workers=2` 开始做小量 API 并发 smoke，再决定 official 默认值。
 - [ ] 增加实验级 orchestrator，并通过 `max_parallel_runs` 控制多个独立 run。
 - [ ] 限制“实验并发 × conversation 并发”的总请求规模。
+- [x] 采纳 resume 分层策略：Mem0 turn-level；MemoryOS/LightMem conversation-level；
+  A-Mem 需 wrapper 持久化后才具备可靠跨进程 resume。
+- [ ] 后续为 A-Mem 设计 wrapper 层状态持久化（Faiss index + memories JSON），作为
+  大规模并行/长实验可靠性增强，不阻塞当前极小 smoke。
 
 说明：Phase J 已实现一个只用于成本校准的极小 smoke 外层 orchestrator。它不是
 Phase I 的 full parallel 调度替代品；full parallel 仍需处理更大规模、多 profile、
@@ -167,14 +175,15 @@ MemoryOS PyPI backend 已降为低优先级，本阶段不实现。
   `memory-benchmark calibrate-smoke`。该入口固定 smoke profile、每组合 1 个
   conversation/instance、强制开启 efficiency observation，并通过 `max_parallel_runs`
   限制多个独立 run 的并发。
-- [ ] 经用户确认 run_prefix、并发数和 API 预算后运行
-  Mem0/A-Mem/MemoryOS/LightMem × LoCoMo/LongMemEval-S 极小成本校准 smoke。
+- [ ] 经用户确认 run_prefix、并发数和 API 预算后运行当前支持矩阵的极小成本校准
+  smoke；Mem0 可跑 LoCoMo 和 LongMemEval-S，MemoryOS 暂不跑 LongMemEval-S。
 - [ ] API 充值并经用户确认后运行 Mem0/A-Mem/MemoryOS/LightMem + LoCoMo 极小 smoke。
 - [ ] API 充值并经用户确认后运行 Mem0-LoCoMo `official-full` prediction。
 - [ ] API 条件允许并经用户确认后运行 LongMemEval-S 最小 smoke。
 - [ ] 复用 prediction artifact 计算 LoCoMo F1。
 - [ ] 需要时单独运行 LoCoMo LLM judge。
-- [ ] 完成 Mem0/MemoryOS/A-Mem/LightMem × LoCoMo/LongMemEval 的可选实验矩阵。
+- [ ] 完成 Mem0/MemoryOS/A-Mem/LightMem × LoCoMo/LongMemEval 的可选实验矩阵；
+  MemoryOS 暂不纳入 LongMemEval。
 - [ ] 基于 Phase G 保存的原始 observation 离线计算真实服务商费用。
 
 ### Phase K：后续扩展

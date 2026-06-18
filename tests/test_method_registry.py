@@ -24,10 +24,10 @@ from memory_benchmark.methods.registry import (
 pytestmark = pytest.mark.unit
 
 
-def test_registry_lists_mem0_and_memoryos() -> None:
-    """统一入口应同时暴露已迁移的 Mem0 与 MemoryOS。"""
+def test_registry_lists_conversation_qa_methods() -> None:
+    """统一入口应暴露当前已接入的 conversation-QA method。"""
 
-    assert list_methods() == ["mem0", "memoryos"]
+    assert list_methods() == ["amem", "lightmem", "mem0", "memoryos"]
 
 
 def test_mem0_registration_declares_capabilities_factory_and_api_boundary() -> None:
@@ -136,7 +136,7 @@ extraction_model = "gpt-4o-mini"
 embedding_model = "text-embedding-3-small"
 embedding_dimensions = 1536
 reader_model = "gpt-4o-mini"
-top_k = 10
+top_k = 200
 max_workers = 1
 ingestion_chunk_size = 1
 infer = true
@@ -152,7 +152,7 @@ infer = true
 
     assert isinstance(config, Mem0Config)
     assert config.profile_name == "smoke"
-    assert config.top_k == 10
+    assert config.top_k == 200
 
 
 def test_load_method_profile_maps_public_name_to_toml_section(

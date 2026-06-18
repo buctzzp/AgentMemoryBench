@@ -198,6 +198,34 @@ class ResumablePredictionSystem(BaseResumableMemorySystem):
         )
 
 
+class SelectiveResumablePredictionSystem(ResumablePredictionSystem):
+    """按 conversation 决定是否启用 turn-level resume 的 fake method。"""
+
+    def __init__(self, turn_resume_conversation_ids: set[str]):
+        """保存允许 turn-level resume 的 conversation id 集合。"""
+
+        super().__init__()
+        self.turn_resume_conversation_ids = turn_resume_conversation_ids
+        self.added_conversation_ids: list[str] = []
+
+    def supports_turn_resume(self, conversation: Conversation) -> bool:
+        """只有白名单中的 conversation 才走 `add_from_turn()`。"""
+
+        return conversation.conversation_id in self.turn_resume_conversation_ids
+
+    def add(self, conversations: list[Conversation]) -> AddResult:
+        """记录 conversation-level 写入，用于验证 runner fallback 路径。"""
+
+        self.added_conversation_ids.extend(
+            conversation.conversation_id for conversation in conversations
+        )
+        return AddResult(
+            conversation_ids=[
+                conversation.conversation_id for conversation in conversations
+            ]
+        )
+
+
 def _build_three_turn_dataset() -> Dataset:
     """构造一个含 3 个 turn 的 conversation，用于精确验证恢复 index。"""
 
@@ -765,6 +793,36 @@ def test_ready_checkpoint_resumes_only_unconfirmed_turns(tmp_path: Path) -> None
     assert summary.completed_questions == 1
 
 
+def test_resumable_system_can_disable_turn_resume_per_conversation(
+    tmp_path: Path,
+) -> None:
+    """method 可按 conversation 退回完整 add，从而使用 conversation-level resume。"""
+
+    system = SelectiveResumablePredictionSystem(turn_resume_conversation_ids=set())
+
+    summary = run_predictions(
+        dataset=_build_three_turn_dataset(),
+        system=system,
+        run_context=_create_context(tmp_path),
+        policy=PredictionRunPolicy(max_workers=1),
+        method_manifest={"adapter": "selective-resumable-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+    )
+
+    assert system.added_conversation_ids == ["conv-1"]
+    assert system.start_indices == []
+    assert summary.completed_conversations == 1
+    checkpoint_path = (
+        tmp_path
+        / "prediction-run"
+        / "checkpoints"
+        / "ingest_turns"
+        / "conv-1.json"
+    )
+    assert not checkpoint_path.exists()
+
+
 def test_ready_at_total_turns_still_validates_method_finalization(
     tmp_path: Path,
 ) -> None:
@@ -879,7 +937,7 @@ def test_any_in_flight_checkpoint_blocks_all_conversation_workers(
 def test_non_resumable_method_rejects_existing_turn_checkpoint(
     tmp_path: Path,
 ) -> None:
-    """普通 method 遇到逐 turn checkpoint 时应报错，不能从头重复写入。"""
+    """未启用 turn-level resume 时遇到 turn checkpoint 应报错。"""
 
     first_system = RecordingPredictionSystem()
     run_predictions(
@@ -898,7 +956,10 @@ def test_non_resumable_method_rejects_existing_turn_checkpoint(
     store.mark_turn_completed("conv-1", 0, "conv-1:t1", total_turns=1)
 
     resumed_system = RecordingPredictionSystem()
-    with pytest.raises(ConfigurationError, match="BaseResumableMemorySystem"):
+    with pytest.raises(
+        ConfigurationError,
+        match="method does not enable turn-level resume",
+    ):
         run_predictions(
             dataset=_build_dataset(),
             system=resumed_system,

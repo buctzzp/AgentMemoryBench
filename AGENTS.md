@@ -107,7 +107,10 @@
   A-Mem / LightMem 已自动按论文 Table 级参数与调用流程对齐。A-Mem 已补齐 Table 1
   GPT-4o-mini profile 中非 adversarial QA 的官方 query keyword generation 和 Table 8
   category k；category 5 adversarial 因官方 prompt 需要 gold answer，当前按 public-input
-  规则显式拒绝。LightMem 已落实用户指定 `(r=0.7, th=512)` official-mini、LoCoMo/LongMemEval 增量写入粒度和
+  规则显式拒绝。A-Mem 当前尚未实现可靠跨进程 method 内部状态持久化；runner artifact
+  可恢复已完成问题，但进程重启后 A-Mem 内部 memory/Faiss 状态不能安全复用，后续需做
+  wrapper 层 Faiss index + memories JSON 持久化。LightMem 已落实用户指定
+  `(r=0.7, th=512)` official-mini、LoCoMo/LongMemEval 增量写入粒度和
   官方 reader prompt 方向；LoCoMo 已专门化为 LightMem `search_locomo.py` 风格的
   Qdrant payload/vector combined 检索，并在 `add()` 完成后执行
   `construct_update_queue_all_entries()` 与
@@ -116,15 +119,29 @@
   `base_url` 已在 wrapper 层显式注入官方
   OpenAI controller client；资源与参数审计见
   `docs/method-resource-parameter-audit.md`。
-  Mem0 smoke `top_k=200`。
+  Mem0 smoke `top_k=200`；Mem0 reader 已按 benchmark 分支调用 vendored
+  memory-benchmarks 官方 LoCoMo / LongMemEval `get_answer_generation_prompt(...)`，
+  未知 benchmark 保留通用 fallback；Mem0 source identity 已纳入这两个 prompt 文件。
+  Mem0 LoCoMo 写入粒度已按官方 `CHUNK_SIZE=1` 对齐，并启用 turn-level resume；
+  Mem0 LongMemEval 按官方 `CHUNK_SIZE=2` user+assistant pair 写入，但
+  `supports_turn_resume()` 对 LongMemEval 返回 False，因此通用 runner 对该路径使用
+  conversation-level resume。
   LightMem 真实运行所需
   `models/all-MiniLM-L6-v2` 和
   `models/llmlingua-2-bert-base-multilingual-cased-meetingbank` 已补齐并通过本地资源
   校验；adapter 仍会在真实 backend 构造前强校验。最新 A-Mem / runner focused 验证：
   `uv run pytest tests/test_amem_adapter.py tests/test_amem_registered_prediction.py tests/test_amem_lightmem_registry.py tests/test_cost_calibration_smoke.py tests/test_main_cli.py -q`
   为 `43 passed, 1 warning`；base URL 注入单测包含在 A-Mem adapter suite 中。最新 LightMem focused 验证：
-  `uv run pytest tests/test_lightmem_adapter.py -q` 为 `13 passed, 1 warning`。
-  未执行真实 API。
+  `uv run pytest tests/test_lightmem_adapter.py -q` 为 `15 passed, 1 warning`。
+  最新 Mem0 prompt/top_k/resume focused 验证：
+  `uv run pytest tests/test_mem0_adapter.py tests/test_method_registry.py tests/test_config_profiles.py tests/test_documentation_standards.py -q`
+  旧结果为 `40 passed`；纠偏后新增验证
+  `uv run pytest tests/test_mem0_adapter.py tests/test_prediction_runner.py::test_resumable_system_can_disable_turn_resume_per_conversation tests/test_method_registry.py tests/test_config_profiles.py tests/test_documentation_standards.py -q`
+  为 `43 passed`；`uv run python -m compileall -q src/memory_benchmark tests`
+  exit 0。宽回归
+  `uv run pytest tests/test_mem0_adapter.py tests/test_mem0_source_compatibility.py tests/test_prediction_runner.py tests/test_conversation_runner.py tests/test_main_cli.py tests/test_cost_calibration_smoke.py tests/test_method_registry.py tests/test_config_profiles.py -q`
+  当前为 `99 passed`；`tests/test_documentation_standards.py` 为 `5 passed`；
+  `compileall` 和 `git diff --check` 均通过。未执行真实 API。
 - A-Mem 官方 robust layer 导入需要 `rank-bm25` 和 `litellm`，已通过 `uv add` 写入
   `pyproject.toml` / `uv.lock`。这是官方 A-Mem requirements 中的正式依赖。
 - README 已于 2026-06-17 更新为 GitHub 项目入口，清理本地绝对路径并明确本地资产不入库、
@@ -151,10 +168,10 @@
   为 `49 passed, 1 warning`；文档规范 `5 passed`；`compileall` exit 0。未执行真实 API。
   下一步可继续处理本轮改动提交，或在用户确认 API 预算、样本规模和 run_id 后启动极小
   smoke。
-- 当前 A-Mem 断点：上一批 LightMem/成本校准 checkpoint 已提交并推送到 GitHub
-  `c01559f`；A-Mem RED 测试已转绿，当前需要继续处理文档同步、最终 focused 验证、
-  以及是否提交本轮改动。恢复时先读
-  `docs/handoffs/2026-06-17-amem-red-tests-handoff.md`，不要重复大范围扫描历史文档。
+- 当前 A-Mem / LightMem / Mem0 official-profile 断点：上一批 LightMem/成本校准 checkpoint
+  已提交并推送到 GitHub `c01559f`；A-Mem/LightMem official-profile 变更已提交为
+  `02649ed`。本轮 Mem0 prompt/top_k/resume 变更已完成并通过离线验证；恢复时先读
+  `docs/handoffs/2026-06-18-mem0-prompt-resume.md`，不要重复大范围扫描历史文档。
 - Method 原生接口清单：
   `docs/method-interface-inventory.md`。新增或重修 method adapter 前必须先更新该文档。
 - Method official profile 对齐实施计划：

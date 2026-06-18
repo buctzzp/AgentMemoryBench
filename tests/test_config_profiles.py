@@ -39,7 +39,7 @@ def test_load_typed_profile_builds_mem0_smoke_profile_from_section(tmp_path: Pat
         embedding_model = "text-embedding-3-small"
         embedding_dimensions = 1536
         reader_model = "gpt-4o-mini"
-        top_k = 10
+        top_k = 200
         max_workers = 1
         ingestion_chunk_size = 1
         infer = true
@@ -86,7 +86,7 @@ def test_load_typed_profile_rejects_unknown_key(tmp_path: Path) -> None:
         embedding_model = "text-embedding-3-small"
         embedding_dimensions = 1536
         reader_model = "gpt-4o-mini"
-        top_k = 10
+        top_k = 200
         max_workers = 1
         ingestion_chunk_size = 1
         infer = true
@@ -110,7 +110,7 @@ def test_load_typed_profile_rejects_wrong_field_type(tmp_path: Path) -> None:
         embedding_model = "text-embedding-3-small"
         embedding_dimensions = "1536"
         reader_model = "gpt-4o-mini"
-        top_k = 10
+        top_k = 200
         max_workers = 1
         ingestion_chunk_size = 1
         infer = true
@@ -133,7 +133,7 @@ def test_load_typed_profile_autofills_profile_name_and_rejects_duplicate(tmp_pat
         embedding_model = "text-embedding-3-small"
         embedding_dimensions = 1536
         reader_model = "gpt-4o-mini"
-        top_k = 10
+        top_k = 200
         max_workers = 1
         ingestion_chunk_size = 1
         infer = true
@@ -156,7 +156,7 @@ def test_load_typed_profile_rejects_root_without_section(tmp_path: Path) -> None
         embedding_model = "text-embedding-3-small"
         embedding_dimensions = 1536
         reader_model = "gpt-4o-mini"
-        top_k = 10
+        top_k = 200
         max_workers = 1
         ingestion_chunk_size = 1
         infer = true
