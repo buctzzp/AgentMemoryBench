@@ -52,7 +52,8 @@ registered prediction reader wiring、四个内置 method adapter 的 `retrieve(
 answer efficiency observation 和 artifact evaluation compatibility 均已落地。旧
 `get_answer()` 路径仍作为迁移期兼容保留。2026-06-22 已执行一轮 LoCoMo 2c20t 真实
 smoke，但发现 isolated worker 仍走 legacy answer path；当前代码已修复，严格
-retrieve-first API smoke 仍需用户确认 method、benchmark、规模和新 run_id 后重跑。
+retrieve-first API smoke 已用新 run id 重跑通过，四个内置 method 均写出
+`answer_prompts.prediction.jsonl` 和非空 `prompt_messages`。
 
 LLM/provider 灵活配置方向也已完成设计：
 [LLM Provider 与 Prompt 配置设计](docs/superpowers/specs/2026-06-21-llm-provider-config-design.md)。

@@ -39,6 +39,18 @@
 
 ## 当前断点
 
+- 2026-06-22 最新 smoke 结论：
+  `docs/handoffs/2026-06-22-strict-retrieve-first-locomo-smoke-success.md`。
+  用户已用新 run id 严格重跑 LoCoMo retrieve-first 极小真实 smoke：
+  `retrieve-first-strict-locomo-{mem0,memoryos,amem,lightmem}-smoke-2c20t-w2-20260622`。
+  四个 run 均完成 2 conversations / 2 questions，并均存在
+  `artifacts/answer_prompts.prediction.jsonl`、`method_predictions.jsonl`、
+  `efficiency_observations.prediction.jsonl` 和 `efficiency_overall.prediction.json`。
+  每个 `answer_prompts.prediction.jsonl` 均为 2 行且含非空 `prompt_messages`：A-Mem
+  为 system+user，LightMem 为 system，Mem0 为 user，MemoryOS 为 system+user。结构化
+  event 均无 failed/error/exception，`run.log` 无 ERROR/WARNING/Traceback/SSL/timeout。
+  严格 retrieve-first LoCoMo 极小真实 smoke 已通过。下一步优先讨论并执行
+  LongMemEval-S 最小 retrieve-first smoke，或对这四个 smoke 做 artifact-only F1。
 - 2026-06-22 最新交接：
   `docs/handoffs/2026-06-22-retrieve-first-locomo-smoke-and-isolated-fix.md`。
   用户已运行四个 LoCoMo retrieve-first 极小真实 smoke：
@@ -53,7 +65,8 @@
   calibrate-smoke focused `241 passed, 2 warnings, 2 subtests passed`。因此，上述四个
   真实 run 只能作为“小规模真实 API legacy isolated path 可完成 + observation 可写出”的
   证据；严格 retrieve-first smoke 需要用新 run_id 重跑，并确认
-  `answer_prompts.prediction.jsonl` 存在且含 `prompt_messages`。
+  `answer_prompts.prediction.jsonl` 存在且含 `prompt_messages`。该待办已由上方严格
+  smoke 交接关闭。
 - 2026-06-22 最新 P0 已完成主体：`AnswerPromptResult` 已升级为 message role 结构。
   主类型为 `PromptMessage(role, content)`，主字段为
   `AnswerPromptResult.prompt_messages`，语义是“交给 answer LLM 的完整 prompt
