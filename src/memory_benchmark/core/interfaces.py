@@ -1,7 +1,8 @@
-"""method / memory system 抽象接口。
+"""method / memory module 抽象接口。
 
-Phase 1 使用同步接口，只要求完整 memory system 支持 add 和 get_answer。
-检索能力拆到 BaseMemoryRetriever，只有需要检索能力的 benchmark runner 才会要求。
+Phase 1 当前正在从完整 memory system 协议迁移到 retrieve-first memory module
+协议。新 adapter 应优先实现 `BaseMemoryProvider`；旧 `BaseMemorySystem` 暂时保留
+用于迁移期兼容。
 """
 
 from __future__ import annotations
@@ -11,16 +12,54 @@ from collections.abc import Callable
 
 from .entities import (
     AddResult,
+    AnswerPromptResult,
     AnswerResult,
     Conversation,
     Question,
-    RetrievalResult,
     Turn,
 )
 
 
+class BaseMemoryProvider(ABC):
+    """retrieve-first memory module 主接口。
+
+    新 method 只需要实现 conversation 写入和 question 检索。最终答案由 framework
+    reader 统一生成。
+    """
+
+    @abstractmethod
+    def add(self, conversation: Conversation) -> AddResult:
+        """写入单个公开 conversation。
+
+        输入:
+            conversation: 已清洗的公开 Conversation，不含 gold answer/evidence。
+
+        输出:
+            AddResult: 至少包含当前 conversation_id。
+        """
+
+        raise NotImplementedError
+
+    @abstractmethod
+    def retrieve(self, question: Question) -> AnswerPromptResult:
+        """根据公开问题返回 method 构造好的完整 prompt messages。
+
+        输入:
+            question: method 可见公开问题。
+
+        输出:
+            AnswerPromptResult: `prompt_messages` 是 answer LLM 的完整输入。
+        """
+
+        raise NotImplementedError
+
+
 class BaseMemorySystem(ABC):
-    """完整记忆系统接口。"""
+    """迁移期完整记忆系统接口。
+
+    该接口代表旧的 `add + get_answer` 协议。新 method 应优先实现
+    `BaseMemoryProvider`。
+    """
 
     @abstractmethod
     def add(self, conversations: list[Conversation]) -> AddResult:
@@ -93,17 +132,20 @@ class BaseResumableMemorySystem(BaseMemorySystem):
 
 
 class BaseMemoryRetriever(ABC):
-    """可选记忆检索能力接口。"""
+    """历史可选记忆检索接口。
+
+    新主协议已经由 `BaseMemoryProvider` 表达；该类保留给旧测试和迁移期引用。
+    """
 
     @abstractmethod
-    def retrieve(self, question: Question) -> RetrievalResult:
-        """根据公开问题返回相关记忆。
+    def retrieve(self, question: Question) -> AnswerPromptResult:
+        """根据公开问题返回完整 prompt messages。
 
         输入:
             question: method 可见问题。
 
         输出:
-            RetrievalResult: 相关记忆。Phase 1 不把它用于 recall metric。
+            AnswerPromptResult: method 构造好的完整 prompt messages。
         """
 
         raise NotImplementedError

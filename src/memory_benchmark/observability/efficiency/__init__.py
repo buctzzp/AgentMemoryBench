@@ -21,6 +21,7 @@ from memory_benchmark.observability.efficiency.storage import (
 from memory_benchmark.observability.efficiency.token_counting import (
     ResolvedTokenUsage,
     TokenCounter,
+    extract_api_token_usage,
     resolve_token_usage,
 )
 
@@ -39,5 +40,6 @@ __all__ = [
     "RetrievalObservationContract",
     "ResolvedTokenUsage",
     "TokenCounter",
+    "extract_api_token_usage",
     "resolve_token_usage",
 ]

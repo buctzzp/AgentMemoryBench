@@ -13,9 +13,11 @@ from types import SimpleNamespace
 import pytest
 
 from memory_benchmark.cli import run_prediction as run_prediction_module
+from memory_benchmark.config import OpenAISettings
 from memory_benchmark.core import (
     AddResult,
     AnswerResult,
+    BaseMemoryProvider,
     BaseMemorySystem,
     ConfigurationError,
     Conversation,
@@ -23,11 +25,15 @@ from memory_benchmark.core import (
     MetricResult,
     MethodCapability,
     Question,
+    AnswerPromptResult,
     TaskFamily,
 )
 from memory_benchmark.methods.registry import MethodBuildContext
-from memory_benchmark.benchmark_adapters import RunScope
-from memory_benchmark.benchmark_adapters.longmemeval import LongMemEvalAdapter
+from memory_benchmark.benchmark_adapters import (
+    BenchmarkLoadRequest,
+    RunScope,
+    get_benchmark_registration,
+)
 from memory_benchmark.cli.run_prediction import PredictionBatchResult
 from memory_benchmark.evaluators import LoCoMoF1Evaluator
 from memory_benchmark.runners.evaluation import run_artifact_evaluation
@@ -107,6 +113,33 @@ class _FakeOfflineSystem(BaseMemorySystem):
             question_id=question.question_id,
             conversation_id=question.conversation_id,
             answer="offline fake answer",
+            metadata={"method": "offline-fake"},
+        )
+
+
+class _FakeOfflineProvider(BaseMemoryProvider):
+    """用于离线装配测试的 retrieve-first fake provider。"""
+
+    def __init__(self) -> None:
+        """初始化 add/retrieve 调用记录。"""
+
+        self.added_conversations: list[Conversation] = []
+        self.retrieved_questions: list[Question] = []
+
+    def add(self, conversation: Conversation) -> AddResult:
+        """记录写入的完整公开 conversation。"""
+
+        self.added_conversations.append(conversation)
+        return AddResult(conversation_ids=[conversation.conversation_id])
+
+    def retrieve(self, question: Question) -> AnswerPromptResult:
+        """返回离线固定上下文，避免真实 method/API 调用。"""
+
+        self.retrieved_questions.append(question)
+        return AnswerPromptResult(
+            question_id=question.question_id,
+            conversation_id=question.conversation_id,
+            answer_prompt=f"offline context for {question.text}",
             metadata={"method": "offline-fake"},
         )
 
@@ -207,6 +240,76 @@ def test_run_artifact_evaluation_scores_locomo_f1_without_env_or_method(
     assert summary_payload["metric_name"] == "locomo_f1"
     assert summary_payload["score_path"] == summary.score_path
     assert summary_payload["summary_path"] == summary.summary_path
+
+
+def test_answer_level_evaluation_ignores_retrieval_artifact_by_default(
+    tmp_path: Path,
+) -> None:
+    """answer-level metric 只依赖 prediction 和 private labels。"""
+
+    run_dir = _build_run_dir(tmp_path)
+    _write_manifest(run_dir, benchmark_name="locomo")
+    _write_jsonl(
+        run_dir / "artifacts" / "public_questions.jsonl",
+        [
+            {
+                "question_id": "conv-1:q1",
+                "conversation_id": "conv-1",
+                "question_text": "What does Alice like?",
+                "category": "2",
+                "metadata": {},
+            }
+        ],
+    )
+    _write_jsonl(
+        run_dir / "artifacts" / "method_predictions.jsonl",
+        [
+            {
+                "question_id": "conv-1:q1",
+                "conversation_id": "conv-1",
+                "answer": "tea",
+                "metadata": {"method": "fake"},
+            }
+        ],
+    )
+    _write_jsonl(
+        run_dir / "artifacts" / "evaluator_private_labels.jsonl",
+        [
+            {
+                "question_id": "conv-1:q1",
+                "gold_answer": "tea",
+                "category": "2",
+                "evidence": ["conv-1:t1"],
+                "metadata": {},
+            }
+        ],
+    )
+    _write_jsonl(
+        run_dir / "artifacts" / "answer_prompts.prediction.jsonl",
+        [
+            {
+                "question_id": "conv-1:q1",
+                "conversation_id": "conv-1",
+                "answer_prompt": "This prompt should not be read by F1.",
+                "metadata": {"debug": "answer-prompt-only"},
+            }
+        ],
+    )
+
+    summary = run_artifact_evaluation(
+        run_dir=run_dir,
+        evaluator=FakeEvaluator(metric_name="fake_metric", score=1.0),
+        expected_benchmark="locomo",
+    )
+
+    scores = read_jsonl(Path(summary.score_path))
+    assert summary.total_questions == 1
+    assert summary.mean_score == 1.0
+    assert scores[0]["details"] == {
+        "question_text": "What does Alice like?",
+        "prediction_answer": "tea",
+        "gold_answer": "tea",
+    }
 
 
 def test_new_memoryos_prediction_can_be_scored_by_existing_locomo_f1(
@@ -479,7 +582,7 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
 ) -> None:
     """LongMemEval S smoke 装配应产出 v2 artifacts，且公开/私有字段保持分离。"""
 
-    captured_systems: list[_FakeOfflineSystem] = []
+    captured_systems: list[_FakeOfflineProvider] = []
     original_read_text = Path.read_text
 
     def guarded_read_text(self: Path, *args, **kwargs):
@@ -499,14 +602,38 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
 
             return {"profile_name": "smoke"}
 
-    def build_fake_system(context: MethodBuildContext) -> BaseMemorySystem:
-        """构造离线 fake system，并保留 build context 供断言。"""
+    def build_fake_system(context: MethodBuildContext) -> BaseMemoryProvider:
+        """构造离线 fake provider，并保留 build context 供断言。"""
 
         assert context.config.profile_name == "smoke"
-        assert context.openai_settings is None
-        system = _FakeOfflineSystem()
+        assert context.openai_settings == OpenAISettings(
+            api_key="sk-test",
+            base_url="https://example.test/v1",
+            model="gpt-4o-mini",
+        )
+        system = _FakeOfflineProvider()
         captured_systems.append(system)
         return system
+
+    class _FakeOpenAIAnswerClient:
+        """测试用 answer client，避免构造真实 OpenAI SDK client。"""
+
+        model_name = "offline-answer-llm"
+
+        def __init__(self, *, settings: OpenAISettings, answer_settings=None) -> None:
+            """只校验配置来源，不创建真实网络 client。"""
+
+            assert settings == OpenAISettings(
+                api_key="sk-test",
+                base_url="https://example.test/v1",
+                model="gpt-4o-mini",
+            )
+
+        def complete(self, *, prompt: str) -> str:
+            """返回固定答案，证明 framework reader 可以离线装配。"""
+
+            assert "offline context" in prompt
+            return "offline fake answer"
 
     fake_method_registration = SimpleNamespace(
         name="offline-fake",
@@ -514,7 +641,7 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
         provided_capabilities=frozenset(
             {
                 MethodCapability.CONVERSATION_ADD,
-                MethodCapability.ANSWER_GENERATION,
+                MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
         requires_api=False,
@@ -551,16 +678,28 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda **kwargs: (_ for _ in ()).throw(
-            AssertionError("offline method must not load OpenAI settings")
+        lambda project_root: OpenAISettings(
+            api_key="sk-test",
+            base_url="https://example.test/v1",
+            model="gpt-4o-mini",
         ),
         raising=False,
     )
+    monkeypatch.setattr(
+        run_prediction_module,
+        "OpenAICompatibleAnswerLLMClient",
+        _FakeOpenAIAnswerClient,
+        raising=False,
+    )
 
-    expected_full_first = LongMemEvalAdapter(
+    expected_smoke_first = get_benchmark_registration("longmemeval").prepare(
         PROJECT_ROOT,
-        variant="s_cleaned",
-    ).load(limit=1)
+        BenchmarkLoadRequest(
+            variant="s_cleaned",
+            run_scope=RunScope.SMOKE,
+            smoke_turn_limit=20,
+        ),
+    ).dataset
     batch_result = run_prediction_module.run_registered_conversation_qa_prediction(
         project_root=tmp_path,
         method_name="offline-fake",
@@ -569,6 +708,7 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
         variant="s_cleaned",
         run_id="offline-longmemeval",
         confirm_api=False,
+        enable_efficiency_observability=False,
     )
 
     assert isinstance(batch_result, PredictionBatchResult)
@@ -582,8 +722,9 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
     assert child.summary.total_questions == 1
     assert len(captured_systems) == 1
     assert len(captured_systems[0].added_conversations) == 1
-    added_conversation = captured_systems[0].added_conversations[0][0]
-    assert added_conversation.sessions == expected_full_first.conversations[0].sessions
+    added_conversation = captured_systems[0].added_conversations[0]
+    assert added_conversation.sessions == expected_smoke_first.conversations[0].sessions
+    assert len(captured_systems[0].retrieved_questions) == 1
 
     run_dir = tmp_path / "outputs" / child.run_id
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
@@ -943,4 +1084,201 @@ def _write_jsonl(path: Path, records: list[dict[str, object]]) -> None:
     path.write_text(
         "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records),
         encoding="utf-8",
+    )
+
+
+def test_artifact_evaluation_writes_category_summary(tmp_path: Path) -> None:
+    """category 存在时 summary 包含 category_breakdown 字段。"""
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    paths = ExperimentPaths.create(run_dir)
+    _write_manifest(run_dir, benchmark_name="test-bench")
+    public_questions = [
+        public_question_record(
+            Question(
+                question_id="q-1",
+                conversation_id="c-1",
+                text="What is X?",
+                category="cat-A",
+            )
+        ),
+        public_question_record(
+            Question(
+                question_id="q-2",
+                conversation_id="c-2",
+                text="What is Y?",
+                category="cat-B",
+            )
+        ),
+        public_question_record(
+            Question(
+                question_id="q-3",
+                conversation_id="c-2",
+                text="What is Z?",
+                category="cat-A",
+            )
+        ),
+    ]
+    _write_jsonl(paths.public_questions_path, public_questions)
+    _write_jsonl(
+        paths.method_predictions_path,
+        [
+            {"question_id": "q-1", "conversation_id": "c-1", "question_text": "What is X?", "answer": "X1"},
+            {"question_id": "q-2", "conversation_id": "c-2", "question_text": "What is Y?", "answer": "Y1"},
+            {"question_id": "q-3", "conversation_id": "c-2", "question_text": "What is Z?", "answer": "Z1"},
+        ],
+    )
+    _write_jsonl(
+        paths.evaluator_private_labels_path,
+        [
+            evaluator_private_label_record(
+                GoldAnswerInfo(question_id="q-1", answer="XA"),
+                category="cat-A",
+            ),
+            evaluator_private_label_record(
+                GoldAnswerInfo(question_id="q-2", answer="YB"),
+                category="cat-B",
+            ),
+            evaluator_private_label_record(
+                GoldAnswerInfo(question_id="q-3", answer="ZA"),
+                category="cat-A",
+            ),
+        ],
+    )
+
+    summary = run_artifact_evaluation(
+        run_dir=run_dir,
+        evaluator=FakeEvaluator("fake-metric", score=0.5),
+        expected_benchmark="test-bench",
+    )
+    assert summary.total_questions == 3
+
+    summary_path = run_dir / "summaries" / "summary.fake-metric.json"
+    summary_data = json.loads(summary_path.read_text(encoding="utf-8"))
+    breakdown = summary_data.get("category_breakdown")
+    assert breakdown is not None
+    assert len(breakdown) == 2
+    category_names = {entry["category"] for entry in breakdown}
+    assert category_names == {"cat-A", "cat-B"}
+    for entry in breakdown:
+        assert entry["mean_score"] == 0.5
+
+
+def test_artifact_evaluation_no_category_summary_when_no_categories(tmp_path: Path) -> None:
+    """无 category 时 summary 不含 category_breakdown。"""
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    paths = ExperimentPaths.create(run_dir)
+    _write_manifest(run_dir, benchmark_name="test-bench")
+    public_questions = [
+        public_question_record(
+            Question(question_id="q-1", conversation_id="c-1", text="X")
+        ),
+    ]
+    _write_jsonl(paths.public_questions_path, public_questions)
+    _write_jsonl(
+        paths.method_predictions_path,
+        [{"question_id": "q-1", "conversation_id": "c-1", "question_text": "X", "answer": "A"}],
+    )
+    _write_jsonl(
+        paths.evaluator_private_labels_path,
+        [evaluator_private_label_record(GoldAnswerInfo(question_id="q-1", answer="XA"), category=None)],
+    )
+    run_artifact_evaluation(
+        run_dir=run_dir,
+        evaluator=FakeEvaluator("fake-metric", score=0.5),
+        expected_benchmark="test-bench",
+    )
+    summary_path = run_dir / "summaries" / "summary.fake-metric.json"
+    summary_data = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert "category_breakdown" not in summary_data
+
+
+def test_parallel_evaluation_produces_same_results_as_serial(tmp_path: Path) -> None:
+    """max_workers>1 结果应与串行一致，且顺序正确。"""
+
+    question_count = 20
+
+    public_records = [
+        public_question_record(
+            Question(
+                question_id=f"q-{i}",
+                conversation_id="c-1",
+                text=f"question {i}",
+                category=str(i % 3 + 1),
+            )
+        )
+        for i in range(question_count)
+    ]
+
+    def _setup_run(sub_path: str) -> Path:
+        """创建独立评测目录并写入最小 artifacts。"""
+        run_dir = ExperimentPaths.create(tmp_path / sub_path).run_dir
+        _write_manifest(run_dir, benchmark_name="test-parallel")
+        spawn_paths = ExperimentPaths.create(run_dir)
+        _write_jsonl(spawn_paths.public_questions_path, public_records)
+        _write_jsonl(
+            spawn_paths.method_predictions_path,
+            [
+                {
+                    "question_id": f"q-{i}",
+                    "conversation_id": "c-1",
+                    "question_text": f"question {i}",
+                    "answer": f"answer {i}",
+                }
+                for i in range(question_count)
+            ],
+        )
+        _write_jsonl(
+            spawn_paths.evaluator_private_labels_path,
+            [
+                evaluator_private_label_record(
+                    GoldAnswerInfo(question_id=f"q-{i}", answer=f"gold {i}"),
+                    category=None,
+                )
+                for i in range(question_count)
+            ],
+        )
+        return run_dir
+
+    serial_dir = _setup_run("serial-run")
+    parallel_dir = _setup_run("parallel-run")
+
+    serial_summary = run_artifact_evaluation(
+        run_dir=serial_dir,
+        evaluator=FakeEvaluator("same-metric", score=0.8),
+        expected_benchmark="test-parallel",
+        max_workers=1,
+    )
+
+    parallel_summary = run_artifact_evaluation(
+        run_dir=parallel_dir,
+        evaluator=FakeEvaluator("same-metric", score=0.8),
+        expected_benchmark="test-parallel",
+        max_workers=4,
+    )
+
+    assert parallel_summary.total_questions == serial_summary.total_questions
+    assert parallel_summary.mean_score == serial_summary.mean_score
+    assert parallel_summary.correct_count == serial_summary.correct_count
+
+    serial_scores = read_jsonl(Path(serial_summary.score_path))
+    parallel_scores = read_jsonl(Path(parallel_summary.score_path))
+    assert len(parallel_scores) == len(serial_scores)
+    for sp, pp in zip(serial_scores, parallel_scores):
+        assert pp["question_id"] == sp["question_id"]
+        assert pp["score"] == sp["score"]
+
+    serial_summary_data = json.loads(
+        Path(serial_summary.summary_path).read_text(encoding="utf-8")
+    )
+    parallel_summary_data = json.loads(
+        Path(parallel_summary.summary_path).read_text(encoding="utf-8")
+    )
+    assert "category_breakdown" in parallel_summary_data
+    assert (
+        parallel_summary_data["category_breakdown"]
+        == serial_summary_data["category_breakdown"]
     )

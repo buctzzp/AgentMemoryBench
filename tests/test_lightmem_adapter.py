@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -91,11 +93,20 @@ class FakeLightMemoryBackend:
         self.offline_update_calls: list[dict[str, object]] = []
         self.text_embedder = FakeLightMemEmbedder()
         self.embedding_retriever = FakeLightMemEmbeddingRetriever()
+        self.manager = FakeLightMemManager()
 
     def add_memory(self, messages, **kwargs):
         """记录写入消息和 LightMem pipeline 参数。"""
 
         self.added_messages.append({"messages": messages, "kwargs": kwargs})
+        if kwargs.get("force_extract"):
+            self.manager.generate_response(
+                messages=[
+                    {"role": "system", "content": "extract memory"},
+                    {"role": "user", "content": str(messages)},
+                ],
+                response_format={"type": "json_object"},
+            )
         return {"api_call_nums": 0}
 
     def retrieve(self, query, limit=10, filters=None):
@@ -113,6 +124,30 @@ class FakeLightMemoryBackend:
         """记录官方 LoCoMo 离线更新调用。"""
 
         self.offline_update_calls.append(kwargs)
+
+
+class ThreadedUpdateFakeLightMemoryBackend(FakeLightMemoryBackend):
+    """模拟 LightMem OP-update 在线程池内调用 memory manager。"""
+
+    def offline_update_all_entries(self, **kwargs):
+        """用线程池调用 manager.generate_response，复现 ContextVar 丢失场景。"""
+
+        super().offline_update_all_entries(**kwargs)
+        payloads = ("update-entry-1", "update-entry-2")
+
+        def _call_manager(payload: str):
+            """在子线程执行一次官方 manager LLM 调用。"""
+
+            return self.manager.generate_response(
+                messages=[
+                    {"role": "system", "content": "update memory"},
+                    {"role": "user", "content": payload},
+                ],
+                response_format={"type": "json_object"},
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            list(executor.map(_call_manager, payloads))
 
 
 class FakeLightMemEmbedder:
@@ -179,6 +214,25 @@ class FakeLightMemEmbeddingRetriever:
         return self.entries
 
 
+class FakeLightMemManager:
+    """模拟 LightMem 官方 memory manager 的 LLM 入口。"""
+
+    def __init__(self) -> None:
+        """初始化调用记录。"""
+
+        self.calls: list[dict[str, object]] = []
+
+    def generate_response(self, **kwargs):
+        """返回 OpenAI manager 风格的文本和 usage_info。"""
+
+        self.calls.append(kwargs)
+        return "[]", {
+            "prompt_tokens": 23,
+            "completion_tokens": 7,
+            "total_tokens": 30,
+        }
+
+
 class FakeLightMemAnswerClient:
     """模拟回答 LLM。"""
 
@@ -192,6 +246,17 @@ class FakeLightMemAnswerClient:
 
         self.prompts.append(prompt)
         return "fake lightmem answer"
+
+
+class FakeLightMemAnswerClientWithUsage(FakeLightMemAnswerClient):
+    """模拟能暴露 API usage 的 LightMem reader client。"""
+
+    def create_answer(self, prompt: str) -> str:
+        """返回答案并暴露最近一次 API usage。"""
+
+        answer = super().create_answer(prompt)
+        self.last_usage = SimpleNamespace(prompt_tokens=13, completion_tokens=5)
+        return answer
 
 
 class FakeOfficialLightMemory:
@@ -693,6 +758,87 @@ def test_lightmem_locomo_get_answer_uses_qdrant_payload_vector_search() -> None:
     assert "[Memory recorded on: 01 January 2026, Thu]" in prompt
 
 
+def test_lightmem_retrieve_locomo_uses_specialized_context() -> None:
+    """LoCoMo retrieve 应走 search_locomo 风格的 Qdrant payload 检索路径。"""
+
+    backend = FakeLightMemoryBackend()
+    method = LightMem(
+        config=LightMemConfig(
+            llm_model="gpt-4o-mini",
+            embedding_model_path="models/all-MiniLM-L6-v2",
+            llmlingua_model_path=(
+                "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+            ),
+            retrieve_limit=2,
+            max_workers=1,
+            compression_rate=0.7,
+            stm_threshold=512,
+            profile_name="official-mini",
+        ),
+        backend_factory=lambda conversation_id: backend,
+        answer_client=FakeLightMemAnswerClient(),
+    )
+    conversation = _locomo_style_lightmem_conversation()
+    method.add([conversation])
+
+    retrieval = method.retrieve(conversation.questions[0])
+
+    assert backend.queries == []
+    assert backend.text_embedder.embedded_texts == ["What does Alice like?"]
+    assert retrieval.question_id == "q-locomo"
+    assert retrieval.conversation_id == "conv-locomo"
+    assert [message.role for message in retrieval.prompt_messages] == ["system"]
+    assert "Alice likes jasmine tea." in retrieval.answer_prompt
+    assert retrieval.metadata["method"] == "lightmem"
+    assert retrieval.metadata["retrieval_profile"] == "locomo_qdrant_combined"
+
+
+def test_lightmem_retrieve_longmemeval_uses_backend_retrieve() -> None:
+    """LongMemEval retrieve 应保留官方 LightMemory.retrieve online 路径。"""
+
+    backend = FakeLightMemoryBackend()
+    method = LightMem(
+        config=LightMemConfig(
+            llm_model="gpt-4o-mini",
+            embedding_model_path="models/all-MiniLM-L6-v2",
+            llmlingua_model_path=(
+                "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+            ),
+            retrieve_limit=20,
+            max_workers=1,
+            compression_rate=0.7,
+            stm_threshold=512,
+            profile_name="official-mini",
+        ),
+        backend_factory=lambda conversation_id: backend,
+        answer_client=FakeLightMemAnswerClient(),
+    )
+    conversation = _longmemeval_style_lightmem_conversation()
+    method.add([conversation])
+
+    retrieval = method.retrieve(conversation.questions[0])
+
+    assert backend.queries == [
+        {
+            "query": "What does Alice like?",
+            "limit": 20,
+            "filters": None,
+        }
+    ]
+    assert retrieval.question_id == "q-long"
+    assert retrieval.conversation_id == "conv-long"
+    assert [message.role for message in retrieval.prompt_messages] == [
+        "system",
+        "user",
+    ]
+    assert retrieval.prompt_messages[0].content == "You are a helpful assistant."
+    assert "2026-01-01 Alice likes tea" in retrieval.answer_prompt
+    assert "What does Alice like?" in retrieval.answer_prompt
+    assert retrieval.metadata["answer_context"] == "2026-01-01 Alice likes tea"
+    assert retrieval.metadata["method"] == "lightmem"
+    assert retrieval.metadata["retrieval_profile"] == "lightmemory_retrieve"
+
+
 def test_lightmem_longmemeval_reader_prompt_includes_question_time() -> None:
     """LongMemEval reader prompt 应复刻官方包含 question_time 的格式。"""
 
@@ -771,6 +917,126 @@ def test_lightmem_records_question_efficiency_observations() -> None:
     assert llm_records[0]["input_tokens"] > 0
     assert llm_records[0]["output_tokens"] > 0
     assert llm_records[0]["token_measurement_source"] == "tokenizer_estimate"
+
+
+def test_lightmem_prefers_api_usage_when_answer_client_exposes_usage() -> None:
+    """LightMem reader 暴露 usage 时，应记录精确 `api_usage`。"""
+
+    backend = FakeLightMemoryBackend()
+    chat = FakeLightMemAnswerClientWithUsage()
+    collector = EfficiencyCollector(run_id="lightmem-api-usage-run", enabled=True)
+    method = LightMem(
+        config=LightMemConfig(
+            llm_model="gpt-4o-mini",
+            embedding_model_path="models/all-MiniLM-L6-v2",
+            llmlingua_model_path=(
+                "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+            ),
+            retrieve_limit=2,
+            max_workers=1,
+            profile_name="smoke",
+        ),
+        backend_factory=lambda conversation_id: backend,
+        answer_client=chat,
+        efficiency_collector=collector,
+    )
+    conversation = _lightmem_conversation()
+    method.add([conversation])
+
+    with collector.question_scope("conv-1", "q-1") as scope:
+        method.get_answer(conversation.questions[0])
+
+    llm_records = [
+        record.to_dict()
+        for record in scope.records
+        if record.to_dict()["observation_type"] == "llm_call"
+    ]
+    assert len(llm_records) == 1
+    assert llm_records[0]["token_measurement_source"] == "api_usage"
+    assert llm_records[0]["input_tokens"] == 13
+    assert llm_records[0]["output_tokens"] == 5
+
+
+def test_lightmem_records_memory_build_manager_api_usage() -> None:
+    """LightMem add 阶段 manager.generate_response usage 应记录为 memory_build。"""
+
+    backend = FakeLightMemoryBackend()
+    collector = EfficiencyCollector(run_id="lightmem-build-usage-run", enabled=True)
+    method = LightMem(
+        config=LightMemConfig(
+            llm_model="gpt-4o-mini",
+            embedding_model_path="models/all-MiniLM-L6-v2",
+            llmlingua_model_path=(
+                "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+            ),
+            retrieve_limit=20,
+            max_workers=1,
+            profile_name="smoke",
+        ),
+        backend_factory=lambda conversation_id: backend,
+        answer_client=FakeLightMemAnswerClient(),
+        efficiency_collector=collector,
+    )
+
+    with collector.conversation_scope("conv-long") as scope:
+        method.add([_longmemeval_style_lightmem_conversation()])
+        collector.record_memory_build_total_latency(latency_ms=1.0)
+
+    llm_records = [
+        record.to_dict()
+        for record in scope.records
+        if record.to_dict()["observation_type"] == "llm_call"
+    ]
+    assert len(llm_records) == 1
+    assert llm_records[0]["stage"] == "memory_build"
+    assert llm_records[0]["model_id"] == "lightmem-memory-llm"
+    assert llm_records[0]["token_measurement_source"] == "api_usage"
+    assert llm_records[0]["input_tokens"] == 23
+    assert llm_records[0]["output_tokens"] == 7
+
+
+def test_lightmem_buffers_threaded_offline_update_manager_usage() -> None:
+    """线程池中的 OP-update LLM usage 应回到 conversation scope 后落盘。"""
+
+    backend = ThreadedUpdateFakeLightMemoryBackend()
+    collector = EfficiencyCollector(
+        run_id="lightmem-threaded-update-usage-run",
+        enabled=True,
+    )
+    method = LightMem(
+        config=LightMemConfig(
+            llm_model="gpt-4o-mini",
+            embedding_model_path="models/all-MiniLM-L6-v2",
+            llmlingua_model_path=(
+                "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+            ),
+            retrieve_limit=60,
+            max_workers=1,
+            compression_rate=0.7,
+            stm_threshold=512,
+            profile_name="official-mini",
+        ),
+        backend_factory=lambda conversation_id: backend,
+        answer_client=FakeLightMemAnswerClient(),
+        efficiency_collector=collector,
+    )
+
+    with collector.conversation_scope("conv-locomo") as scope:
+        method.add([_locomo_style_lightmem_conversation()])
+        collector.record_memory_build_total_latency(latency_ms=1.0)
+
+    llm_records = [
+        record.to_dict()
+        for record in scope.records
+        if record.to_dict()["observation_type"] == "llm_call"
+    ]
+    assert len(llm_records) == 3
+    assert {
+        record["model_id"]
+        for record in llm_records
+    } == {"lightmem-memory-llm"}
+    assert [record["input_tokens"] for record in llm_records] == [23, 23, 23]
+    assert [record["output_tokens"] for record in llm_records] == [7, 7, 7]
 
 
 def test_lightmem_production_backend_receives_openai_and_storage_settings(

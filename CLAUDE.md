@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 uv run pytest                    # 完整回归（默认排除 real API）
-uv run pytest -q                 # 简洁输出，386 passed 为正常
+uv run pytest -q                 # 简洁输出，658 passed 为正常
 uv run pytest -m memoryos -q    # MemoryOS 专项
 uv run pytest -m api --collect-only -q  # 查看哪些测试会调真实 API
 uv run pytest -x -q tests/test_method_registry.py  # 单个测试文件
@@ -17,7 +17,7 @@ uv sync                          # 同步依赖（首次或有新依赖时）
 ```
 
 - 默认 `-m "not api"` 排除付费 API
-- 当前不是 git repo，不需要 commit
+- 当前是 git repo，分支 `main`；除非用户明确要求，否则不自动 commit
 
 ## Architecture
 
@@ -39,11 +39,15 @@ run_artifact_evaluation() → evaluator.evaluate(question, prediction, gold)
 Compatibility check at runtime: `validate_compatibility(benchmark_task_family, required_caps, method_task_families, provided_caps)`
 
 ### Method interface
-Every method implements `BaseMemorySystem`:
+当前主协议为 `BaseMemoryProvider`（retrieve-first）：
+- `add(conversation: Conversation) → AddResult`
+- `retrieve(question: Question) → RetrievalResult`
+
+旧协议 `BaseMemorySystem` 仍保留为兼容路径：
 - `add(conversations: list[Conversation]) → AddResult`
 - `get_answer(question: Question) → AnswerResult`
 
-Optional: `BaseResumableMemorySystem` (add_from_turn with callbacks), `BaseMemoryRetriever` (retrieve)
+Optional: `BaseMemoryRetriever` (retrieve)
 
 ### Private data protection (4-layer)
 1. **Data model**: `Conversation.to_public_dict()` excludes gold_answers
@@ -86,7 +90,7 @@ Optional: `BaseResumableMemorySystem` (add_from_turn with callbacks), `BaseMemor
 - `cli/main.py:main()` — CLI entry (`memory-benchmark`)
 - `cli/commands.py:execute_predict/evaluate/run()` — command orchestration
 - `cli/run_prediction.py:run_registered_conversation_qa_prediction()` — 13-step unified assembly
-- `runners/prediction.py:run_predictions()` — generic prediction engine (~800 lines)
+- `runners/prediction.py:run_predictions()` — generic prediction engine (~2100 lines)
 - `runners/evaluation.py:run_artifact_evaluation()` — artifact-only evaluation
 - `runners/ingest_resume.py` — TurnIngestCheckpointStore, load_completed_conversation_ids
 - `benchmark_adapters/registry.py` — BenchmarkRegistry, _build_default_registry
@@ -96,7 +100,6 @@ Optional: `BaseResumableMemorySystem` (add_from_turn with callbacks), `BaseMemor
 
 ## Key constraints
 - Do not modify `third_party/` source code
-- Do not delete or overwrite `outputs/memoryos-locomo-full-20260603/` (protected experiment)
 - Do not call external API without `--confirm-api` / `--confirm-full`
 - All Python files must have Chinese module docstring; classes/functions need Chinese docstrings
 - Private data (gold answers, evidence, judge labels) must never reach method

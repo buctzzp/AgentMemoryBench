@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -240,6 +241,38 @@ def test_monitor_reads_progress_inside_subdirectories(
     assert progress["question_total"] == 1
 
 
+def test_monitor_reads_variant_child_progress_by_base_run_id(
+    tmp_path: Path,
+) -> None:
+    """base run id 无 progress 时，应发现 concrete variant child run 的进度。"""
+
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    _write_progress(
+        outputs,
+        "calib-mem0-longmemeval-s-cleaned",
+        stage="Completed",
+        conversation_completed=1,
+        conversation_total=1,
+        question_completed=1,
+        question_total=1,
+    )
+
+    monitor = CalibrationProgressMonitor(
+        output_root=outputs,
+        run_ids=("calib-mem0-longmemeval",),
+        methods=("mem0",),
+        benchmarks=("longmemeval",),
+    )
+    progress = monitor._read_progress("calib-mem0-longmemeval")
+    table = monitor._build_snapshot_table()
+    rendered = _render_table(table)
+
+    assert progress["stage"] == "Completed"
+    assert progress["question_completed"] == 1
+    assert "completed" in rendered
+
+
 def test_monitor_handles_missing_progress_file(
     tmp_path: Path,
 ) -> None:
@@ -286,3 +319,72 @@ def test_monitor_start_and_stop_lifecycle(
     monitor.mark_completed("run-a")
     monitor.stop()
     assert monitor._live is None
+
+
+def test_monitor_survives_sys_stdout_redirect(
+    tmp_path: Path,
+) -> None:
+    """redirect_stdout 替换 sys.stdout 后，monitor 仍能正确读取 progress 并建表。
+
+    验证 _capture_real_stdout() 使用 sys.__stdout__ 创建 Console，因此不受
+    contextlib.redirect_stdout 影响。
+    """
+
+    import contextlib
+    import io
+
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    _write_progress(
+        outputs,
+        "run-a",
+        stage="Ingest conversations",
+        conversation_total=1,
+        question_total=1,
+    )
+    _write_progress(
+        outputs,
+        "run-b",
+        stage="Completed",
+        conversation_completed=1,
+        conversation_total=1,
+        question_completed=1,
+        question_total=1,
+    )
+
+    monitor = CalibrationProgressMonitor(
+        output_root=outputs,
+        run_ids=("run-a", "run-b"),
+        methods=("mem0", "memoryos"),
+        benchmarks=("locomo", "locomo"),
+    )
+    # 模拟 child thread adapter 内部的 redirect_stdout
+    with contextlib.redirect_stdout(io.StringIO()):
+        table = monitor._build_snapshot_table()
+
+    rendered = _render_table(table)
+    assert "mem0" in rendered
+    assert "memoryos" in rendered
+    assert "running" in rendered
+    assert "completed" in rendered
+
+
+def test_capture_real_stdout_returns_original_stdout() -> None:
+    """_capture_real_stdout() 返回 sys.__stdout__，与 redirect_stdout 后的 sys.stdout 不同。"""
+
+    import contextlib
+    import io
+
+    from memory_benchmark.runners.calibration_progress import (
+        _capture_real_stdout,
+    )
+
+    original = _capture_real_stdout()
+    assert original is not None
+    assert original is sys.__stdout__
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        # sys.stdout 已被替换
+        assert sys.stdout is not original
+        # _capture_real_stdout() 仍返回原始 stdout
+        assert _capture_real_stdout() is original

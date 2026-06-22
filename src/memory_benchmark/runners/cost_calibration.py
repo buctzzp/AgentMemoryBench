@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import importlib
 from pathlib import Path
 from typing import Callable, Iterable, Literal
+import warnings
 
 from memory_benchmark.cli.run_prediction import (
     PredictionBatchResult,
@@ -89,8 +90,8 @@ class CalibrationSmokeCommand:
             raise ConfigurationError(
                 "max_new_conversations must be positive when provided"
             )
-        if self.max_parallel_runs not in {1, 2, 4}:
-            raise ConfigurationError("max_parallel_runs must be 1, 2 or 4")
+        if self.max_parallel_runs not in {1, 2, 3, 4}:
+            raise ConfigurationError("max_parallel_runs must be 1, 2, 3 or 4")
 
 
 @dataclass(frozen=True)
@@ -223,9 +224,16 @@ def _preload_parallel_dependencies(command: CalibrationSmokeCommand) -> None:
     LightMem、MemoryOS 和 A-Mem 都可能在 child run 内触发 transformers /
     sentence-transformers 的懒加载。部分版本的 transformers lazy module 在多线程首次
     导入时不稳定，因此这里先在主线程完成导入，避免 worker 互相踩全局 import 状态。
+
+    同时抑制已知无害的第三方 deprecation warning，避免污染 Rich 终端进度区。
     """
 
     method_names = set(command.methods)
+    if "lightmem" in method_names:
+        warnings.filterwarnings(
+            "ignore",
+            message=".*class-based.*config.*",
+        )
     modules: list[str] = []
     if method_names & {"lightmem", "memoryos", "amem"}:
         modules.extend(

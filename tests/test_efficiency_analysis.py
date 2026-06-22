@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
-from memory_benchmark.analysis.efficiency import aggregate_efficiency
+from memory_benchmark.analysis.efficiency import (
+    aggregate_efficiency,
+    build_efficiency_report_payloads,
+)
 from memory_benchmark.observability.efficiency import (
     ConversationEfficiencyObservation,
     EfficiencyStage,
@@ -159,3 +162,141 @@ def test_aggregate_efficiency_empty_input_returns_zero_counts() -> None:
     assert summary.memory_build_latency_ms.mean is None
     assert summary.retrieval_supported_count == 0
     assert summary.llm_tokens == {}
+
+
+def test_build_efficiency_report_payloads_groups_by_conversation_and_question() -> None:
+    """效率报告 payload 应能直接回答单 conversation 的 token、耗时和调用次数。
+
+    输入:
+        两个 conversation 的 build、question、LLM 和 embedding observation。
+    输出:
+        三个 JSON payload：overall、by_conversation、by_question。conversation 汇总
+        必须把同一 conversation 下的 question latency 和模型调用 token 累加起来。
+    """
+
+    overall, by_conversation, by_question = build_efficiency_report_payloads(
+        [
+            ConversationEfficiencyObservation(
+                observation_id="build-conv-1",
+                conversation_id="conv-1",
+                memory_build_total_latency_ms=100.0,
+            ),
+            QuestionEfficiencyObservation(
+                observation_id="question-conv-1-q1",
+                conversation_id="conv-1",
+                question_id="conv-1:q1",
+                retrieval_latency_ms=7.0,
+                unsupported_reason=None,
+                injected_memory_context_tokens=31,
+                answer_generation_latency_ms=80.0,
+            ),
+            LLMCallObservation(
+                observation_id="answer-conv-1-q1",
+                stage=EfficiencyStage.ANSWER,
+                model_id="gpt-4o-mini",
+                input_tokens=400,
+                output_tokens=40,
+                token_measurement_source=MeasurementSource.API_USAGE,
+                conversation_id="conv-1",
+                question_id="conv-1:q1",
+            ),
+            EmbeddingCallObservation(
+                observation_id="retrieval-embedding-conv-1-q1",
+                stage=EfficiencyStage.RETRIEVAL,
+                model_id="bge-m3",
+                input_tokens=16,
+                latency_ms=5.0,
+                token_measurement_source=MeasurementSource.TOKENIZER_ESTIMATE,
+                latency_measurement_source=MeasurementSource.FRAMEWORK_TIMER,
+                conversation_id="conv-1",
+                question_id="conv-1:q1",
+            ),
+            ConversationEfficiencyObservation(
+                observation_id="build-conv-2",
+                conversation_id="conv-2",
+                memory_build_total_latency_ms=200.0,
+            ),
+            QuestionEfficiencyObservation(
+                observation_id="question-conv-2-q1",
+                conversation_id="conv-2",
+                question_id="conv-2:q1",
+                retrieval_latency_ms=None,
+                unsupported_reason="retrieval_stage_not_separable",
+                injected_memory_context_tokens=None,
+                answer_generation_latency_ms=60.0,
+            ),
+        ]
+    )
+
+    assert overall["schema_version"] == 1
+    assert overall["summary"]["memory_build_latency_ms"]["total"] == 300.0
+    assert overall["summary"]["llm_tokens"]["answer:gpt-4o-mini"] == {
+        "call_count": 1,
+        "input_tokens": 400,
+        "output_tokens": 40,
+    }
+
+    assert by_conversation["records"] == [
+        {
+            "conversation_id": "conv-1",
+            "memory_build_total_latency_ms": 100.0,
+            "question_count": 1,
+            "retrieval_supported_count": 1,
+            "retrieval_unsupported_count": 0,
+            "retrieval_latency_ms_total": 7.0,
+            "answer_generation_latency_ms_total": 80.0,
+            "injected_memory_context_tokens_total": 31,
+            "llm_call_count": 1,
+            "llm_input_tokens": 400,
+            "llm_output_tokens": 40,
+            "embedding_call_count": 1,
+            "embedding_input_tokens": 16,
+            "embedding_latency_ms_total": 5.0,
+        },
+        {
+            "conversation_id": "conv-2",
+            "memory_build_total_latency_ms": 200.0,
+            "question_count": 1,
+            "retrieval_supported_count": 0,
+            "retrieval_unsupported_count": 1,
+            "retrieval_latency_ms_total": 0.0,
+            "answer_generation_latency_ms_total": 60.0,
+            "injected_memory_context_tokens_total": 0,
+            "llm_call_count": 0,
+            "llm_input_tokens": 0,
+            "llm_output_tokens": 0,
+            "embedding_call_count": 0,
+            "embedding_input_tokens": 0,
+            "embedding_latency_ms_total": 0.0,
+        },
+    ]
+    assert by_question["records"] == [
+        {
+            "conversation_id": "conv-1",
+            "question_id": "conv-1:q1",
+            "retrieval_latency_ms": 7.0,
+            "unsupported_reason": None,
+            "answer_generation_latency_ms": 80.0,
+            "injected_memory_context_tokens": 31,
+            "llm_call_count": 1,
+            "llm_input_tokens": 400,
+            "llm_output_tokens": 40,
+            "embedding_call_count": 1,
+            "embedding_input_tokens": 16,
+            "embedding_latency_ms_total": 5.0,
+        },
+        {
+            "conversation_id": "conv-2",
+            "question_id": "conv-2:q1",
+            "retrieval_latency_ms": None,
+            "unsupported_reason": "retrieval_stage_not_separable",
+            "answer_generation_latency_ms": 60.0,
+            "injected_memory_context_tokens": None,
+            "llm_call_count": 0,
+            "llm_input_tokens": 0,
+            "llm_output_tokens": 0,
+            "embedding_call_count": 0,
+            "embedding_input_tokens": 0,
+            "embedding_latency_ms_total": 0.0,
+        },
+    ]

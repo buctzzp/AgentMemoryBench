@@ -189,19 +189,84 @@ class RetrievedMemory:
 
 
 @dataclass
-class RetrievalResult:
-    """检索能力输出，Phase 1 runner 不强制使用。"""
+class PromptMessage:
+    """交给 answer LLM 的一条 role message。
 
-    question_id: str
-    conversation_id: str
-    memories: list[RetrievedMemory] = field(default_factory=list)
-    formatted_context: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
+    字段:
+        role: chat completion 角色，例如 `system`、`user`、`assistant`。
+        content: 当前 role 下的 prompt 内容，不能为空。
+    """
+
+    role: str
+    content: str
+
+    def __post_init__(self) -> None:
+        """强校验 message role 和内容，避免静默构造无效 prompt。"""
+
+        if self.role not in {"system", "user", "assistant"}:
+            raise ValueError(
+                "PromptMessage role must be one of: system, user, assistant"
+            )
+        if not self.content.strip():
+            raise ValueError("PromptMessage content must not be blank")
 
     def to_dict(self) -> dict[str, Any]:
         """返回 JSON 可序列化字典。"""
 
         return asdict(self)
+
+
+@dataclass
+class AnswerPromptResult:
+    """method 构造好的完整 answer prompt messages。
+
+    字段:
+        question_id: 当前问题 id，必须与公开 Question 对齐。
+        conversation_id: 当前 conversation id，必须与公开 Question 对齐。
+        prompt_messages: method 内部完成检索、记忆格式化和 prompt 拼接后的完整 role
+            messages，是 framework answer LLM 的主输入。
+        answer_prompt: prompt_messages 的兼容文本视图；旧 artifact 和旧测试可以继续读取。
+        metadata: 公开诊断信息；可放 answer_context、retrieved_memories、raw_items_ref
+            等 method-specific 调试内容，但不能包含 gold/evidence/secret。
+    """
+
+    question_id: str
+    conversation_id: str
+    answer_prompt: str = ""
+    prompt_messages: list[PromptMessage] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """在迁移期兼容旧 answer_prompt，同时优先使用 prompt_messages。"""
+
+        if self.prompt_messages:
+            if not self.answer_prompt.strip():
+                self.answer_prompt = format_prompt_messages(self.prompt_messages)
+            return
+        if self.answer_prompt.strip():
+            self.prompt_messages = [
+                PromptMessage(role="user", content=self.answer_prompt)
+            ]
+
+    def to_dict(self) -> dict[str, Any]:
+        """返回 JSON 可序列化字典。"""
+
+        return asdict(self)
+
+
+def format_prompt_messages(messages: list[PromptMessage]) -> str:
+    """把 role messages 转换为可读文本视图。
+
+    输入:
+        messages: 已校验的 prompt message 列表。
+
+    输出:
+        str: 带 role 标记的 prompt 文本，仅用于兼容 artifact、日志和 token 估算。
+    """
+
+    return "\n\n".join(
+        f"[{message.role}]\n{message.content}" for message in messages
+    )
 
 
 @dataclass

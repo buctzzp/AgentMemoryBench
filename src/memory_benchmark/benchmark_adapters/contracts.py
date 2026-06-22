@@ -93,6 +93,16 @@ class BenchmarkLoadRequest:
     smoke_turn_limit: int = 20
     smoke_conversation_limit: int = 1
 
+    def __post_init__(self) -> None:
+        """校验 smoke 裁剪参数是正整数。"""
+
+        if self.smoke_turn_limit < 1:
+            raise ConfigurationError("smoke_turn_limit must be at least 1")
+        if self.smoke_conversation_limit < 1:
+            raise ConfigurationError(
+                "smoke_conversation_limit must be at least 1"
+            )
+
 
 @dataclass(frozen=True)
 class PreparedBenchmarkRun:

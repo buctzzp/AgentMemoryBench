@@ -18,6 +18,9 @@ from memory_benchmark.core import ConfigurationError
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_MAX_RETRIES = 2
+DEFAULT_ANSWER_TIMEOUT_SECONDS = 60.0
+DEFAULT_ANSWER_MAX_RETRIES = 8
+SUPPORTED_ANSWER_MESSAGE_ROLES = frozenset({"system", "user"})
 
 
 @dataclass(frozen=True)
@@ -137,6 +140,147 @@ class OpenAISettings:
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
         }
+
+
+@dataclass(frozen=True)
+class AnswerLLMSettings:
+    """framework answer LLM 的显式调用参数。
+
+    字段:
+        model: answer LLM 的模型名，Phase 1 默认为 `gpt-4o-mini`。
+        message_role: 完整 answer prompt 放入 chat messages 时使用的角色。
+        temperature: 采样温度；None 表示不向 SDK 传该参数。
+        max_tokens: 最大输出 token；None 表示不向 SDK 传该参数。
+        top_p: nucleus sampling 参数；None 表示不向 SDK 传该参数。
+        timeout_seconds: answer LLM client 请求超时。
+        max_retries: answer LLM client SDK 最大重试次数。
+    """
+
+    model: str = DEFAULT_OPENAI_MODEL
+    message_role: str = "user"
+    temperature: float | None = None
+    max_tokens: int | None = None
+    top_p: float | None = None
+    timeout_seconds: float = DEFAULT_ANSWER_TIMEOUT_SECONDS
+    max_retries: int = DEFAULT_ANSWER_MAX_RETRIES
+
+    def __post_init__(self) -> None:
+        """强校验公开 answer LLM 参数，避免实验身份含糊。"""
+
+        if not self.model.strip():
+            raise ConfigurationError("answer LLM model must not be blank")
+        if self.message_role not in SUPPORTED_ANSWER_MESSAGE_ROLES:
+            raise ConfigurationError(
+                "answer LLM message_role must be one of "
+                f"{sorted(SUPPORTED_ANSWER_MESSAGE_ROLES)}"
+            )
+        if self.temperature is not None and not (0 <= self.temperature <= 2):
+            raise ConfigurationError("answer LLM temperature must be between 0 and 2")
+        if self.max_tokens is not None and self.max_tokens < 1:
+            raise ConfigurationError("answer LLM max_tokens must be at least 1")
+        if self.top_p is not None and not (0 <= self.top_p <= 1):
+            raise ConfigurationError("answer LLM top_p must be between 0 and 1")
+        if self.timeout_seconds <= 0:
+            raise ConfigurationError("answer LLM timeout_seconds must be positive")
+        if self.max_retries < 0:
+            raise ConfigurationError("answer LLM max_retries must be non-negative")
+
+    def to_client_kwargs(self, api_settings: OpenAISettings) -> dict[str, object]:
+        """转换为 OpenAI SDK client 参数，复用 API key/base URL。"""
+
+        kwargs: dict[str, object] = {
+            "api_key": api_settings.api_key,
+            "timeout": self.timeout_seconds,
+            "max_retries": self.max_retries,
+        }
+        if api_settings.base_url:
+            kwargs["base_url"] = api_settings.base_url
+        return kwargs
+
+    def to_request_kwargs(self) -> dict[str, object]:
+        """转换为 chat completions 可选请求参数，只包含显式配置项。"""
+
+        kwargs: dict[str, object] = {}
+        if self.temperature is not None:
+            kwargs["temperature"] = self.temperature
+        if self.max_tokens is not None:
+            kwargs["max_tokens"] = self.max_tokens
+        if self.top_p is not None:
+            kwargs["top_p"] = self.top_p
+        return kwargs
+
+    def to_manifest_dict(self) -> dict[str, object]:
+        """返回可公开写入 run manifest 的 answer LLM 参数。"""
+
+        return {
+            "message_role": self.message_role,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "top_p": self.top_p,
+            "timeout_seconds": self.timeout_seconds,
+            "max_retries": self.max_retries,
+        }
+
+
+def resolve_answer_llm_settings(
+    *,
+    method_name: str,
+    benchmark_name: str,
+    model: str = DEFAULT_OPENAI_MODEL,
+) -> AnswerLLMSettings:
+    """解析内置 method × benchmark 的官方 answer LLM 参数。
+
+    输入:
+        method_name: registry 中的 method 稳定名称。
+        benchmark_name: registry 中的 benchmark 稳定名称。
+        model: 当前运行指定的 answer LLM 模型名。
+
+    输出:
+        AnswerLLMSettings: 显式 answer LLM 参数。未知组合使用保守默认值。
+    """
+
+    key = (method_name.strip().lower(), benchmark_name.strip().lower())
+    if key in {("mem0", "locomo"), ("mem0", "longmemeval")}:
+        return AnswerLLMSettings(
+            model=model,
+            message_role="user",
+            temperature=0.0,
+            max_tokens=4096,
+            top_p=None,
+        )
+    if key == ("amem", "locomo"):
+        return AnswerLLMSettings(
+            model=model,
+            message_role="user",
+            temperature=0.7,
+            max_tokens=1000,
+            top_p=None,
+        )
+    if key == ("lightmem", "locomo"):
+        return AnswerLLMSettings(
+            model=model,
+            message_role="system",
+            temperature=0.0,
+            max_tokens=None,
+            top_p=None,
+        )
+    if key == ("lightmem", "longmemeval"):
+        return AnswerLLMSettings(
+            model=model,
+            message_role="user",
+            temperature=0.0,
+            max_tokens=2000,
+            top_p=0.8,
+        )
+    if key == ("memoryos", "locomo"):
+        return AnswerLLMSettings(
+            model=model,
+            message_role="user",
+            temperature=0.7,
+            max_tokens=2000,
+            top_p=None,
+        )
+    return AnswerLLMSettings(model=model)
 
 
 @dataclass(frozen=True)

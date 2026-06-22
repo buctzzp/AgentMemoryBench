@@ -19,6 +19,7 @@ from memory_benchmark.benchmark_adapters.locomo import (
     build_locomo_smoke_dataset,
 )
 from memory_benchmark.cli import run_prediction as run_prediction_module
+from memory_benchmark.config import AnswerLLMSettings, OpenAISettings
 from memory_benchmark.core import (
     AddResult,
     AnswerResult,
@@ -27,13 +28,16 @@ from memory_benchmark.core import (
     Dataset,
     GoldAnswerInfo,
     Question,
+    AnswerPromptResult,
     Session,
     Turn,
 )
+from memory_benchmark.core.interfaces import BaseMemoryProvider
 from memory_benchmark.methods import memoryos_adapter as memoryos_adapter_module
 from memory_benchmark.methods.memoryos_adapter import MemoryOS as RealMemoryOS
 from memory_benchmark.methods import registry as method_registry_module
 from memory_benchmark.observability import RunContext
+from memory_benchmark.observability.efficiency.entities import ModelDescriptor
 from memory_benchmark.runners import prediction as prediction_runner_module
 from memory_benchmark.storage import read_jsonl
 
@@ -234,7 +238,7 @@ class _FakeAdapter:
         return self.dataset
 
 
-class _FakeMemoryOS:
+class _FakeMemoryOS(BaseMemoryProvider):
     """用于验证 registry factory 装配顺序的假 MemoryOS。"""
 
     instances: list["_FakeMemoryOS"] = []
@@ -257,6 +261,7 @@ class _FakeMemoryOS:
         self.loaded_conversation_ids: list[str] = []
         self.add_calls: list[list[Conversation]] = []
         self.answered_question_ids: list[str] = []
+        self.retrieved_question_ids: list[str] = []
         _FakeMemoryOS.instances.append(self)
 
     def load_existing_conversation_state(self, conversation: Conversation) -> None:
@@ -270,12 +275,25 @@ class _FakeMemoryOS:
 
         return RealMemoryOS.estimate_add_workload(conversation, config)
 
-    def add(self, conversations: list[Conversation]) -> AddResult:
+    def add(self, conversations: Conversation | list[Conversation]) -> AddResult:
         """记录 add 调用，便于测试未被错误触发。"""
 
+        if isinstance(conversations, Conversation):
+            conversations = [conversations]
         self.add_calls.append(conversations)
         return AddResult(
             conversation_ids=[conversation.conversation_id for conversation in conversations]
+        )
+
+    def retrieve(self, question: Question) -> AnswerPromptResult:
+        """返回固定检索上下文，覆盖 retrieve-first runner 主路径。"""
+
+        self.retrieved_question_ids.append(question.question_id)
+        return AnswerPromptResult(
+            question_id=question.question_id,
+            conversation_id=question.conversation_id,
+            answer_prompt="MemoryOS fake context",
+            metadata={"method": "fake-memoryos"},
         )
 
     def get_answer(self, question: Question) -> AnswerResult:
@@ -293,16 +311,74 @@ class _FakeMemoryOS:
 def _patch_memoryos_registration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """用真实 registration 加 fake source identity，避免外部源码依赖。"""
+    """用真实 registration 加 fake source/efficiency identity，避免外部源码依赖。"""
 
     registration = replace(
         method_registry_module.get_method_registration("memoryos"),
         source_identity_factory=lambda path_settings: {"source": "fake-memoryos"},
+        efficiency_instrumentation_identity_getter=lambda path_settings, config, source_identity: {
+            "collector_schema": 1,
+            "wrapper_path": "src/fake/wrapper.py",
+            "wrapper_sha256": "a" * 64,
+            "llm_tokenizer": "fake-model",
+            "embedding_tokenizer": None,
+            "method_source_sha256": "b" * 64,
+        },
+        efficiency_model_inventory_getter=lambda config: [
+            ModelDescriptor(
+                model_id="fake-model",
+                model_name="fake-model",
+                model_role="memory_answer_llm",
+                execution_mode="api",
+                tokenizer_name="fake-model",
+            )
+        ],
     )
     monkeypatch.setattr(
         run_prediction_module,
         "get_method_registration",
         lambda method_name: registration,
+    )
+
+
+def _openai_settings() -> OpenAISettings:
+    """返回完整 OpenAI-compatible 测试配置，避免 registered 测试缺字段。"""
+
+    return OpenAISettings(
+        api_key="sk-test",
+        base_url="https://example.invalid/v1",
+    )
+
+
+def _patch_framework_answer_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """替换 framework answer client，避免 registered 测试触发真实 API。"""
+
+    class FakeAnswerClient:
+        """离线 fake framework answer client。"""
+
+        model_name = "fake-answer-client"
+
+        def __init__(
+            self,
+            *,
+            settings: OpenAISettings,
+            answer_settings: AnswerLLMSettings,
+        ) -> None:
+            """保存 settings，以覆盖真实 client 的构造路径。"""
+
+            self.settings = settings
+            self.answer_settings = answer_settings
+
+        def complete(self, *, prompt: str) -> str:
+            """返回固定答案；prompt 拼接由 framework reader 负责验证。"""
+
+            return "framework fake answer"
+
+    monkeypatch.setattr(
+        run_prediction_module,
+        "OpenAICompatibleAnswerLLMClient",
+        FakeAnswerClient,
+        raising=False,
     )
 
 
@@ -429,10 +505,7 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: SimpleNamespace(
-            api_key="sk-test",
-            base_url="https://example.invalid/v1",
-        ),
+        lambda project_root: _openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -470,6 +543,7 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
         smoke_turn_limit=2,
         smoke_conversation_limit=1,
         smoke_max_workers=None,
+        enable_efficiency_observability=False,
     )
 
     assert result.runs[0].run_id == "memoryos-run"
@@ -502,6 +576,20 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
         "conv-1:q1"
     ]
     assert captured["method_manifest"] == {
+        "answer_reader": {
+            "answer_model": "gpt-4o-mini",
+            "answer_parameters": {
+                "message_role": "user",
+                "temperature": 0.7,
+                "max_tokens": 2000,
+                "top_p": None,
+                "timeout_seconds": 60.0,
+                "max_retries": 8,
+            },
+            "answer_prompt_file_sha256": None,
+            "answer_prompt_profile": "default",
+            "answer_protocol": "retrieve_first_v1",
+        },
         "config": _FakeMemoryOS.instances[0].config.to_manifest(),
         "source": {"source": "fake-memoryos"},
         "workload_estimate": {
@@ -540,12 +628,10 @@ def test_new_memoryos_run_writes_only_canonical_prediction_artifacts(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: SimpleNamespace(
-            api_key="sk-test",
-            base_url="https://example.invalid/v1",
-        ),
+        lambda project_root: _openai_settings(),
         raising=False,
     )
+    _patch_framework_answer_client(monkeypatch)
 
     result = run_prediction_module.run_registered_conversation_qa_prediction(
         project_root=tmp_path,
@@ -556,6 +642,7 @@ def test_new_memoryos_run_writes_only_canonical_prediction_artifacts(
         confirm_api=True,
         smoke_turn_limit=2,
         smoke_conversation_limit=1,
+        enable_efficiency_observability=False,
     )
     summary = result.runs[0].summary
 
@@ -582,7 +669,8 @@ def test_new_memoryos_run_writes_only_canonical_prediction_artifacts(
     assert summary.run_id == "memoryos-canonical-run"
     assert summary.completed_conversations == 1
     assert summary.completed_questions == 1
-    assert _FakeMemoryOS.instances[0].answered_question_ids == ["conv-1:q1"]
+    assert _FakeMemoryOS.instances[0].retrieved_question_ids == ["conv-1:q1"]
+    assert _FakeMemoryOS.instances[0].answered_question_ids == []
     assert prepare_calls == [
         BenchmarkLoadRequest(
             variant="locomo10",
@@ -615,10 +703,14 @@ def test_new_memoryos_run_writes_only_canonical_prediction_artifacts(
             "question_id": "conv-1:q1",
             "conversation_id": "conv-1",
             "question_text": "前两轮里说了什么？",
-            "answer": "前两轮答案",
-            "metadata": {"method": "fake-memoryos"},
-        }
-    ]
+            "answer": "framework fake answer",
+                "metadata": {
+                    "answer_reader": "framework",
+                    "answer_model": "fake-answer-client",
+                    "answer_prompt_profile": "method_owned",
+                },
+            }
+        ]
     assert private_labels == [
         {
             "question_id": "conv-1:q1",
@@ -739,10 +831,7 @@ def test_memoryos_resume_manifest_mismatch_fails_before_factory_attach_or_direct
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: SimpleNamespace(
-            api_key="sk-test",
-            base_url="https://example.invalid/v1",
-        ),
+        lambda project_root: _openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -771,6 +860,7 @@ def test_memoryos_resume_manifest_mismatch_fails_before_factory_attach_or_direct
             confirm_api=True,
             smoke_turn_limit=2,
             smoke_conversation_limit=1,
+            enable_efficiency_observability=False,
         )
 
     assert _FakeMemoryOS.instances == []
@@ -781,11 +871,11 @@ def test_memoryos_resume_manifest_mismatch_fails_before_factory_attach_or_direct
     assert not (run_dir / "method_state").exists()
 
 
-def test_memoryos_smoke_worker_override_is_rejected_before_factory_or_runner(
+def test_memoryos_smoke_worker_override_is_accepted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """不支持 override 的 method 传入 smoke_max_workers 时应立即报错。"""
+    """支持 override 的 method 传入 smoke_max_workers 时正常通过。"""
 
     _FakeMemoryOS.instances.clear()
     _write_memoryos_profiles(tmp_path)
@@ -807,30 +897,36 @@ def test_memoryos_smoke_worker_override_is_rejected_before_factory_or_runner(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: SimpleNamespace(
-            api_key="sk-test",
-            base_url="https://example.invalid/v1",
-        ),
+        lambda project_root: _openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
         run_prediction_module,
         "run_predictions",
-        lambda **kwargs: (_ for _ in ()).throw(
-            AssertionError("generic runner must not run when override is rejected")
+        lambda **kwargs: SimpleNamespace(
+            run_id="test-run",
+            benchmark_name="locomo",
+            method_name="MemoryOS",
+            total_conversations=1,
+            completed_conversations=1,
+            total_questions=1,
+            completed_questions=1,
+            prediction_path="/tmp/x.jsonl",
+            private_label_path="/tmp/y.jsonl",
+            summary_path="/tmp/z.json",
         ),
     )
 
-    with pytest.raises(ConfigurationError, match="MemoryOS.*smoke-max-workers"):
-        run_prediction_module.run_registered_conversation_qa_prediction(
-            project_root=tmp_path,
-            method_name="memoryos",
-            benchmark_name="locomo",
-            profile_name="smoke",
-            confirm_api=True,
-            smoke_turn_limit=2,
-            smoke_conversation_limit=1,
-            smoke_max_workers=2,
-        )
+    # 不应报 ConfigurationError，override 被接受
+    run_prediction_module.run_registered_conversation_qa_prediction(
+        project_root=tmp_path,
+        method_name="memoryos",
+        benchmark_name="locomo",
+        profile_name="smoke",
+        confirm_api=True,
+        smoke_turn_limit=2,
+        smoke_conversation_limit=1,
+        smoke_max_workers=2,
+    )
 
     assert _FakeMemoryOS.instances == []

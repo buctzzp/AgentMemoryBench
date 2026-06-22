@@ -3,11 +3,17 @@
 本模块只读取标准 artifacts，重建 Question、AnswerResult、GoldAnswerInfo，
 并执行单个 answer-level evaluator。它不会构造 method、不会读取 `.env`，
 也不会调用任何 prediction 逻辑。
+
+对于带 category 字段的 benchmark，本模块自动计算 overall 与 by-category 聚合。
+支持通过 `max_workers` 参数启用多线程并行评测（适用于 LLM Judge 等 API 密集型
+evaluator）。
 """
 
 from __future__ import annotations
 
 import json
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -51,6 +57,7 @@ def run_artifact_evaluation(
     run_dir: str | Path,
     evaluator: BaseAnswerEvaluator,
     expected_benchmark: str,
+    max_workers: int = 1,
 ) -> EvaluationRunSummary:
     """基于标准 artifacts 运行单个 evaluator。
 
@@ -58,6 +65,8 @@ def run_artifact_evaluation(
         run_dir: 已存在 prediction artifacts 的 run 目录。
         evaluator: 单题 answer-level evaluator。
         expected_benchmark: 命令层期望的 benchmark 名称，用于前置兼容校验。
+        max_workers: 并行评测线程数；默认为 1（串行）。LLM Judge 等 API 密集型
+            evaluator 可通过增大该值加速。
 
     输出:
         EvaluationRunSummary: 单个 metric 的路径与聚合结果。
@@ -110,6 +119,7 @@ def run_artifact_evaluation(
     )
 
     score_records: list[dict[str, Any]] = []
+    categories: dict[str, str] = {}  # question_id -> category
     metric_name: str | None = None
     score_sum = 0.0
     correct_values: list[bool] = []
@@ -126,40 +136,41 @@ def run_artifact_evaluation(
             )
         model_inventory = _get_evaluator_model_inventory(evaluator)
 
-    for question_id in ordered_question_ids:
-        question, prediction, gold = _rebuild_entities(
-            public_record=public_by_id[question_id],
-            prediction_record=prediction_by_id[question_id],
-            private_record=private_by_id[question_id],
-        )
-        if efficiency_collector is not None and efficiency_collector.enabled:
-            with efficiency_collector.judge_scope(
-                question.conversation_id,
-                question.question_id,
-            ) as scope:
-                metric_result = evaluator.evaluate(question, prediction, gold)
-            efficiency_observations.extend(scope.records)
-        else:
-            metric_result = evaluator.evaluate(question, prediction, gold)
+    eval_results = _evaluate_questions(
+        evaluator=evaluator,
+        public_by_id=public_by_id,
+        prediction_by_id=prediction_by_id,
+        private_by_id=private_by_id,
+        ordered_question_ids=ordered_question_ids,
+        efficiency_collector=efficiency_collector,
+        max_workers=max_workers,
+    )
+
+    for result_item in eval_results:
+        question_id = result_item["question_id"]
+        result_metric_name = result_item["metric_name"]
         if metric_name is None:
-            metric_name = metric_result.metric_name
-        elif metric_result.metric_name != metric_name:
+            metric_name = result_metric_name
+        elif result_metric_name != metric_name:
             raise ConfigurationError(
                 "evaluator returned inconsistent metric_name across questions"
             )
-        score_sum += metric_result.score
-        if metric_result.is_correct is not None:
-            correct_values.append(metric_result.is_correct)
+        if result_item.get("category") is not None:
+            categories[question_id] = result_item["category"]
+        score_sum += result_item["score"]
+        if result_item["is_correct"] is not None:
+            correct_values.append(result_item["is_correct"])
         score_records.append(
             {
-                "question_id": question.question_id,
-                "conversation_id": question.conversation_id,
-                "metric_name": metric_result.metric_name,
-                "score": metric_result.score,
-                "is_correct": metric_result.is_correct,
-                "details": metric_result.details,
+                "question_id": question_id,
+                "conversation_id": result_item["conversation_id"],
+                "metric_name": result_metric_name,
+                "score": result_item["score"],
+                "is_correct": result_item["is_correct"],
+                "details": result_item["details"],
             }
         )
+        efficiency_observations.extend(result_item["efficiency_observations"])
 
     resolved_metric_name = metric_name or getattr(evaluator, "metric_name", None)
     if not resolved_metric_name:
@@ -190,9 +201,96 @@ def run_artifact_evaluation(
         )
         efficiency_store.write_model_inventory(model_inventory)
         efficiency_store.merge_observations(efficiency_observations)
+    summary_dict = summary.to_dict()
+    if categories:
+        category_breakdown = _build_category_breakdown(score_records, categories)
+        if category_breakdown:
+            summary_dict["category_breakdown"] = category_breakdown
     atomic_write_jsonl(score_path, score_records)
-    atomic_write_json(summary_path, summary.to_dict())
+    atomic_write_json(summary_path, summary_dict)
     return summary
+
+
+def _evaluate_questions(
+    *,
+    evaluator: BaseAnswerEvaluator,
+    public_by_id: dict[str, dict[str, Any]],
+    prediction_by_id: dict[str, dict[str, Any]],
+    private_by_id: dict[str, dict[str, Any]],
+    ordered_question_ids: list[str],
+    efficiency_collector: EfficiencyCollector | None,
+    max_workers: int,
+) -> list[dict[str, Any]]:
+    """按 order_index 排序的问题评测结果列表。
+
+    每项是一个 dict，包含 `_idx`、`question_id`、`metric_name`、`score`、
+    `is_correct`、`details`、`category` 和 `efficiency_observations` 字段。
+    """
+    question_args = [
+        (
+            evaluator,
+            public_by_id[qid],
+            prediction_by_id[qid],
+            private_by_id[qid],
+            efficiency_collector,
+            idx,
+        )
+        for idx, qid in enumerate(ordered_question_ids)
+    ]
+
+    if max_workers <= 1:
+        return [_evaluate_one_question(*args) for args in question_args]
+
+    results: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_evaluate_one_question, *args): args[-1]
+            for args in question_args
+        }
+        for future in as_completed(futures):
+            results.append(future.result())
+    results.sort(key=lambda r: r["_idx"])
+    return results
+
+
+def _evaluate_one_question(
+    evaluator: BaseAnswerEvaluator,
+    public_record: dict[str, Any],
+    prediction_record: dict[str, Any],
+    private_record: dict[str, Any],
+    efficiency_collector: EfficiencyCollector | None,
+    order_index: int,
+) -> dict[str, Any]:
+    """评测单个问题，返回带排序索引的结果字典。"""
+
+    question, prediction, gold = _rebuild_entities(
+        public_record=public_record,
+        prediction_record=prediction_record,
+        private_record=private_record,
+    )
+
+    if efficiency_collector is not None and efficiency_collector.enabled:
+        with efficiency_collector.judge_scope(
+            question.conversation_id,
+            question.question_id,
+        ) as scope:
+            metric_result = evaluator.evaluate(question, prediction, gold)
+        efficiency_observations = list(scope.records)
+    else:
+        metric_result = evaluator.evaluate(question, prediction, gold)
+        efficiency_observations: list[Any] = []
+
+    return {
+        "_idx": order_index,
+        "question_id": question.question_id,
+        "conversation_id": question.conversation_id,
+        "metric_name": metric_result.metric_name,
+        "score": metric_result.score,
+        "is_correct": metric_result.is_correct,
+        "details": metric_result.details,
+        "category": question.category,
+        "efficiency_observations": efficiency_observations,
+    }
 
 
 def _resolve_evaluator_efficiency_collector(
@@ -386,6 +484,44 @@ def _coerce_string_list(value: Any, field_name: str) -> list[str]:
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise ConfigurationError(f"{field_name} must be a list of strings")
     return value
+
+
+def _build_category_breakdown(
+    score_records: list[dict[str, Any]],
+    categories: dict[str, str],
+) -> list[dict[str, Any]] | None:
+    """按 category 分组聚合指标，返回有序 breakdown 列表。
+
+    若所有 question 均无 category，返回 None。
+    """
+
+    category_scores: dict[str, list[float]] = defaultdict(list)
+    category_correct: dict[str, list[bool]] = defaultdict(list)
+    for record in score_records:
+        question_id = record["question_id"]
+        category = categories.get(question_id)
+        if category is None:
+            continue
+        category_scores[category].append(record["score"])
+        if record.get("is_correct") is not None:
+            category_correct[category].append(record["is_correct"])
+
+    if not category_scores:
+        return None
+
+    breakdown: list[dict[str, Any]] = []
+    for category in sorted(category_scores):
+        scores = category_scores[category]
+        entry: dict[str, Any] = {
+            "category": category,
+            "question_count": len(scores),
+            "mean_score": sum(scores) / len(scores) if scores else 0.0,
+        }
+        correct_list = category_correct.get(category, [])
+        if correct_list:
+            entry["correct_count"] = sum(1 for v in correct_list if v)
+        breakdown.append(entry)
+    return breakdown
 
 
 def _require_non_empty_string(value: Any, field_name: str) -> str:

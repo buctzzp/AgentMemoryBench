@@ -1,116 +1,67 @@
-# OpenCode 任务：修复并行 smoke 终端展示与 stdout 捕获
-
-## 任务身份
-
-你现在不是“机械执行者”，而是 Codex 额度空档期的正式外部推进副手。你可以做实质开发，
-但必须完整记录你的设计、修改文件、测试命令和结果到：
-
-```text
-opencode/opencode_result.md
-```
-
-Codex 恢复后会逐项复核你的 diff 和验证证据。
-
-## 必读入口
+# OpenCode 当前任务入口（2026-06-20）
 
 请先读：
 
 1. `AGENTS.md`
-2. `docs/current-roadmap.md`
-3. `docs/handoffs/2026-06-19-parallel-resume-run-control.md`
-4. `docs/handoffs/2026-06-19-low-quota-checkpoint.md`
-5. `opencode/opencode_result.md` 中你上次关于 Rich 修复的记录
+2. `docs/task-ledger.md`
+3. `docs/current-roadmap.md`
+4. `opencode/opencode_result.md`
 
-## 当前背景
+## 最新事实
 
-`calibrate-smoke` 并行跑多个 method×benchmark child run 时，终端 Rich 输出仍有问题：
+- `opencode_result-6.20-00h-smoke-4c20t-w4.md` 已完成四 method LoCoMo 4 conversations /
+  20 turns / 4 workers 真实 API smoke：
+  Mem0、MemoryOS、A-Mem、LightMem 均 completed，并生成 efficiency observation 覆盖矩阵。
+- Mem0 isolated worker conversation-level observation 已复验关闭；不要再用旧 run
+  `outputs/mem0-locomo-smoke10c-10t-w10-20260620/` 判断该问题仍存在。
+- LightMem OP-update memory-build LLM usage 已复验关闭；不要再用旧 run
+  `outputs/lightmem-api-smoke-v2/` 判断该问题仍存在。
+- `opencode_result-6.20-01h-amem-lightmem-retry-timeout.md` 已为 A-Mem / LightMem 补齐
+  API timeout/retry；Mem0 / MemoryOS 已有同类兜底。四个当前 method 的
+  OpenAI-compatible timeout/retry 基础覆盖已关闭。
+- `opencode_result-6.20-02h-mem0-reference-date-gap.md` 是 informational；用户决定暂不修。
+- 不要启动 full API 实验，不要覆盖受保护历史输出。
 
-- 多个 child run 的进度条或 Live 输出会交错。
-- 第三方 warning/stdout 会插入进度区。
-- 有时 elapsed 秒数或 stage 显示停住，但后台实验仍在运行。
+## 当前不要做
 
-目标是让并行 smoke 运行时由外层 orchestrator 统一展示状态，而不是每个 child run 各自
-操作 Rich Live。
+- 不要重复跑 4c20t-w4 smoke。
+- 不要恢复 turn-level resume。
+- 不要恢复 PrefEval。
+- 不要删除 `outputs/memoryos-locomo-full-20260603/`。
+- 不要实现 retrieve-first 架构重构；设计已写入
+  `docs/superpowers/specs/2026-06-20-retrieve-first-memory-module-design.md`，但用户尚未审阅
+  并批准实施计划，未批准前不得改接口。
 
-## 主任务
+## 可执行任务（仅在用户明确让 OpenCode 继续时）
 
-实现并验证：
+### 任务 1：只读检查当前文档一致性
 
-1. 当 `calibrate-smoke --max-parallel-runs > 1` 时：
-   - child run 内部 Rich progress 必须关闭。
-   - orchestrator 主线程用单个 Rich `Live(Table)` 展示所有 child run 状态。
-   - 展示字段至少包括：method、benchmark、status、stage、conversation progress、
-     question progress、elapsed、run_id、error。
-2. 当 `--max-parallel-runs == 1` 时：
-   - 保持单 child run 原有 Rich progress 行为，不强制使用总表。
-3. 第三方 stdout/stderr/warning：
-   - 不得直接污染 Rich Live 区域。
-   - 需要被重定向到每个 child run 对应日志，或被外层安全捕获后写入结构化/文本日志。
-   - 不得吞掉异常堆栈；失败时 CLI 仍应能显示明确 error type 和 message。
+目标：确认 `AGENTS.md`、`docs/current-roadmap.md`、`docs/task-ledger.md` 是否都已经写入
+OpenCode 6.20 三份结果。
 
-## 可接受实现方向
+要求：
 
-- 优先复用或修正已有：
-  - `src/memory_benchmark/runners/calibration_progress.py`
-  - `src/memory_benchmark/runners/cost_calibration.py`
-  - `src/memory_benchmark/observability/progress_reporter.py`
-- 如果已有 `CalibrationProgressMonitor` 设计有 bug，请修它，不要再新建一套平行实现。
-- 尽量通过 `progress.json` 作为 child run 与 orchestrator 的状态边界。
-- 不要为了终端显示修改 method adapter 的核心算法。
+- 只读检查为主，除非发现明显状态冲突，否则不要改代码。
+- 如需记录结果，只写入新的 `opencode/opencode_result-YYYY-MM-DD-HHh-*.md`，并更新
+  `opencode/opencode_result.md` 索引。
 
-## 暂缓任务
+### 任务 2：等待 Codex 的架构设计结论
 
-prediction artifact 瘦身暂时不要直接做大改。你可以：
+用户提出将 method 接口从 `add + get_answer` 重构为
+`add(conversation) + retrieve(question) + framework reader`。
+这会影响 adapter、runner、observability、prompt、resume 和实验可复现性。
 
-- 写一份简短设计建议到 `opencode/opencode_result.md`。
-- 或添加不会破坏现有行为的红测草案。
+在用户审阅 spec 并确认实施计划之前，OpenCode 不应自行实现该重构。可以做的只有只读调研：
 
-但不要删除 `method_predictions.jsonl` 现有字段，避免破坏 evaluator 复用。
+- 阅读 `supermemoryai-memorybench.md`。
+- 阅读 `docs/superpowers/specs/2026-06-20-retrieve-first-memory-module-design.md`。
+- 对照当前 `src/memory_benchmark/core/`、`src/memory_benchmark/methods/` 和
+  `src/memory_benchmark/runners/prediction.py`，列出需要改动的文件清单。
+- 不要提交代码改动。
 
-## 禁止事项
+## 注意事项
 
-- 不要运行 full 实验。
-- 不要调用真实 API；本任务必须用 fake/offline 测试。
-- 不要修改 `.env`。
-- 不要提交 `data/`、`models/`、`outputs/`、`tmp/` 里的大文件。
-- 不要改 PrefEval。
-- 不要修改第三方核心算法，除非只是可关闭、可审计的 stdout/observer 层改动。
-
-## 必须新增或修复的测试
-
-优先补充离线测试：
-
-```bash
-uv run pytest tests/test_calibration_progress_monitor.py tests/test_cost_calibration_smoke.py -q
-```
-
-如果你改了 CLI：
-
-```bash
-uv run pytest tests/test_main_cli.py -q
-```
-
-如果你改了 runner/progress：
-
-```bash
-uv run pytest tests/test_prediction_runner.py tests/test_cost_calibration_smoke.py -q
-```
-
-最后至少运行：
-
-```bash
-uv run pytest tests/test_documentation_standards.py tests/test_cost_calibration_smoke.py tests/test_calibration_progress_monitor.py -q
-uv run python -m compileall -q src/memory_benchmark tests
-git diff --check
-```
-
-## 结果记录要求
-
-在 `opencode/opencode_result.md` 中追加：
-
-1. 你读了哪些文件。
-2. 你认为问题根因是什么。
-3. 修改了哪些文件，每个文件改了什么。
-4. 跑了哪些测试，完整结果是什么。
-5. 还有哪些已知风险或没解决的问题。
-6. 如果你无法修复，写清楚卡点、复现步骤和下一步建议。
+- OpenCode 的完成声明不是验收结论；Codex 会复核 diff 和测试。
+- 所有真实 API 实验必须有用户明确确认规模和 `run_id`。
+- 所有代码改动后至少跑相关 focused pytest、`uv run python -m compileall -q src/memory_benchmark tests`
+  和 `git diff --check`。

@@ -3,12 +3,17 @@
 本模块在 calibrate-smoke 以 max_parallel_runs > 1 运行时，禁用各 child run 的
 Rich Live progress，改由外层 orchestrator 主线程定时读取各 run 的
 checkpoints/progress.json，并渲染一张 Rich Live(Table)。
+
+Rich Console 使用 sys.__stdout__ 而非 sys.stdout 创建，以免疫 child thread
+中 contextlib.redirect_stdout 对全局 sys.stdout 的替换。这保证 child run
+adapter 内部的 stdout 压制不会污染外层 Rich 表格。
 """
 
 from __future__ import annotations
 
 import io
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -16,6 +21,16 @@ from typing import Any
 from rich.console import Console
 from rich.live import Live
 from rich.table import Table
+
+
+def _capture_real_stdout() -> Any:
+    """返回系统原始 stdout，免受 redirect_stdout 干扰。
+
+    sys.__stdout__ 保留 Python 启动时的原始 stdout，contextlib.redirect_stdout
+    只替换 sys.stdout 而不影响 sys.__stdout__。若原始 stdout 不可用（极少情况），
+    回退到当前 sys.stdout。
+    """
+    return sys.__stdout__ or sys.stdout
 
 
 class CalibrationProgressMonitor:
@@ -27,7 +42,7 @@ class CalibrationProgressMonitor:
         methods: 对应的 method 名称列表（与 run_ids 对齐）。
         benchmarks: 对应的 benchmark 名称列表（与 run_ids 对齐）。
         refresh_per_second: Rich Live 刷新频率。
-        console: 可选 Rich Console。
+        console: 可选 Rich Console。未提供时使用系统原始 stdout 创建。
         clock: 可注入单调时钟（测试用）。
     """
 
@@ -57,7 +72,10 @@ class CalibrationProgressMonitor:
             run_id: idx for idx, run_id in enumerate(run_ids)
         }
         self._live: Live | None = None
-        self._console = console or Console()
+        if console is not None:
+            self._console = console
+        else:
+            self._console = Console(file=_capture_real_stdout())
         self._refresh_per_second = refresh_per_second
 
     def start(self) -> None:
@@ -167,14 +185,33 @@ class CalibrationProgressMonitor:
     def _read_progress(self, run_id: str) -> dict[str, Any]:
         """读取单个 child run 的 progress.json；文件不存在时返回空 dict。"""
 
-        progress_path = (
-            self._output_root / run_id / "checkpoints" / "progress.json"
-        )
+        progress_path = self._resolve_progress_path(run_id)
+        if progress_path is None:
+            return {}
         try:
             raw = progress_path.read_text(encoding="utf-8")
             return json.loads(raw)
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError):
             return {}
+
+    def _resolve_progress_path(self, run_id: str) -> Path | None:
+        """解析 child run 的 progress.json 路径，兼容 concrete variant suffix。
+
+        calibrate-smoke 调度层启动时只知道 base run id，例如
+        `prefix-mem0-longmemeval`；registered prediction 可能实际写入
+        `prefix-mem0-longmemeval-s-cleaned`。因此 exact 路径不存在时，需要向下
+        查找 `base-*` concrete child run。
+        """
+
+        exact_path = self._output_root / run_id / "checkpoints" / "progress.json"
+        if exact_path.exists():
+            return exact_path
+        variant_paths = sorted(
+            self._output_root.glob(f"{run_id}-*/checkpoints/progress.json")
+        )
+        if not variant_paths:
+            return None
+        return variant_paths[0]
 
     def _derive_status(self, progress: dict[str, Any]) -> str:
         """根据 progress.json 内容推导运行状态。

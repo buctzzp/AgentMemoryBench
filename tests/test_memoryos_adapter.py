@@ -167,6 +167,51 @@ class MemoryOSAdapterTests(unittest.TestCase):
             with self.assertRaises(ConfigurationError):
                 system.get_answer(question)
 
+    def test_retrieve_formats_retrieval_queue_and_knowledge(self):
+        """retrieve 应返回 framework reader 可用的 MemoryOS 检索上下文。"""
+
+        conversation = build_small_conversation()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            system = MemoryOS(
+                openai_api_key="unit-test-key",
+                openai_base_url="https://example.invalid/v1",
+                storage_root=Path(temp_dir),
+            )
+            system.add([conversation])
+            state = system.get_debug_state(conversation.conversation_id)
+
+            def fake_retrieve(*_: object, **__: object) -> dict[str, object]:
+                """返回固定检索结果，避免调用官方检索 LLM。"""
+
+                return {
+                    "retrieval_queue": [
+                        {
+                            "user_input": "Alice likes tea.",
+                            "agent_response": "Tea preference noted.",
+                        }
+                    ],
+                    "long_term_knowledge": ["Alice likes tea."],
+                }
+
+            state.retrieval_system.retrieve = fake_retrieve
+
+            retrieval = system.retrieve(conversation.questions[0])
+
+        self.assertEqual(retrieval.question_id, "conv-test:q1")
+        self.assertEqual(retrieval.conversation_id, "conv-test")
+        self.assertEqual(
+            [message.role for message in retrieval.prompt_messages],
+            ["system", "user"],
+        )
+        self.assertIn("role-playing", retrieval.prompt_messages[0].content)
+        self.assertIn("<MEMORY>", retrieval.answer_prompt)
+        self.assertIn("【Historical Memory】", retrieval.answer_prompt)
+        self.assertIn("Alice likes tea.", retrieval.answer_prompt)
+        self.assertIn("Alice likes tea.", retrieval.metadata["answer_context"])
+        self.assertEqual(retrieval.metadata["method"], "MemoryOS")
+        self.assertEqual(retrieval.metadata["retrieved_page_count"], 1)
+        self.assertEqual(retrieval.metadata["retrieved_knowledge_count"], 1)
+
     def test_estimate_add_workload_counts_pages_and_update_batches(self):
         """add 前应能估算 page 数和会触发的 MemoryOS 更新批次数。"""
 

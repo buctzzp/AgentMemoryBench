@@ -286,7 +286,7 @@ def test_calibration_keeps_running_when_one_child_fails(tmp_path: Path) -> None:
         ("run_prefix", "../bad", "path separators"),
         ("profile", "official-full", "smoke profile"),
         ("smoke_conversation_limit", 2, "exactly 1"),
-        ("max_parallel_runs", 5, "1, 2 or 4"),
+            ("max_parallel_runs", 5, "1, 2, 3 or 4"),
     ],
 )
 def test_calibration_command_rejects_unsafe_scope(

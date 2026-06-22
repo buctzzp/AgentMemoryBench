@@ -54,7 +54,8 @@ def _predict_command(tmp_path: Path, **overrides) -> PredictCommand:
         "smoke_conversation_limit": 1,
         "smoke_max_workers": 1,
         "max_new_conversations": None,
-        "enable_efficiency_observability": False,
+        "question_limit_per_conversation": None,
+        "enable_efficiency_observability": True,
     }
     values.update(overrides)
     return PredictCommand(**values)
@@ -120,9 +121,13 @@ def test_execute_predict_delegates_to_registered_prediction(
             "smoke_conversation_limit": 1,
             "smoke_max_workers": 1,
             "max_new_conversations": None,
-            "enable_efficiency_observability": False,
-        }
-    ]
+                "retry_failed_conversations": False,
+                "question_limit_per_conversation": None,
+                "enable_efficiency_observability": True,
+                "answer_prompt_file": None,
+                "answer_prompt_profile": "default",
+            }
+        ]
 
 
 def test_execute_predict_can_enable_efficiency_observability(
@@ -221,7 +226,7 @@ def test_execute_evaluate_runs_offline_f1_without_loading_openai(
     monkeypatch.setattr(
         commands,
         "run_artifact_evaluation",
-        lambda path, selected, expected_benchmark: (
+        lambda path, selected, expected_benchmark, max_workers=1: (
             calls.append((Path(path), selected, expected_benchmark)) or summary
         ),
     )
@@ -432,6 +437,18 @@ def test_prediction_help_describes_max_new_conversations(capsys) -> None:
     assert "identity" in output
 
 
+def test_prediction_help_describes_retry_failed(capsys) -> None:
+    """predict 子命令 help 应说明 failed conversation 默认隔离、需显式重试。"""
+
+    with pytest.raises(SystemExit) as raised:
+        main_cli.main(["predict", "--help"])
+
+    assert raised.value.code == 0
+    output = capsys.readouterr().out
+    assert "--retry-failed" in output
+    assert "failed conversations" in output
+
+
 def test_calibration_help_describes_max_new_conversations(capsys) -> None:
     """calibrate-smoke help 也应说明该字段只是本次命令预算。"""
 
@@ -477,8 +494,13 @@ def test_main_maps_predict_arguments_to_command(
             "--confirm-api",
             "--smoke-turn-limit",
             "3",
+            "--smoke-conversation-limit",
+            "10",
+            "--smoke-max-workers",
+            "10",
             "--max-new-conversations",
             "2",
+            "--retry-failed",
         ]
     )
 
@@ -493,7 +515,10 @@ def test_main_maps_predict_arguments_to_command(
             run_id="run-1",
             confirm_api=True,
             smoke_turn_limit=3,
+            smoke_conversation_limit=10,
+            smoke_max_workers=10,
             max_new_conversations=2,
+            retry_failed_conversations=True,
         )
     ]
 
@@ -502,7 +527,7 @@ def test_main_maps_predict_efficiency_flag_to_command(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """argparse 应把单 run efficiency 开关传给 command service。"""
+    """predict 默认开启 efficiency observation，避免真实长实验丢成本记录。"""
 
     received: list[PredictCommand] = []
     monkeypatch.setattr(
@@ -526,7 +551,6 @@ def test_main_maps_predict_efficiency_flag_to_command(
             "--run-id",
             "run-1",
             "--confirm-api",
-            "--enable-efficiency-observability",
         ]
     )
 
@@ -540,6 +564,102 @@ def test_main_maps_predict_efficiency_flag_to_command(
             run_id="run-1",
             confirm_api=True,
             enable_efficiency_observability=True,
+        )
+    ]
+
+
+def test_main_maps_predict_disable_efficiency_flag_to_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """用户显式关闭时，argparse 才把 efficiency observation 传为 False。"""
+
+    received: list[PredictCommand] = []
+    monkeypatch.setattr(
+        main_cli,
+        "execute_predict",
+        lambda command: received.append(command)
+        or SimpleNamespace(run_id="run-1"),
+    )
+
+    exit_code = main_cli.main(
+        [
+            "predict",
+            "--root",
+            str(tmp_path),
+            "--method",
+            "mem0",
+            "--benchmark",
+            "locomo",
+            "--profile",
+            "smoke",
+            "--run-id",
+            "run-1",
+            "--confirm-api",
+            "--disable-efficiency-observability",
+        ]
+    )
+
+    assert exit_code == 0
+    assert received == [
+        PredictCommand(
+            project_root=tmp_path,
+            method="mem0",
+            benchmark="locomo",
+            profile="smoke",
+            run_id="run-1",
+            confirm_api=True,
+            enable_efficiency_observability=False,
+        )
+    ]
+
+
+def test_main_maps_answer_prompt_arguments_to_predict_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """predict 应把自定义 answer prompt 参数传入 command service。"""
+
+    received: list[PredictCommand] = []
+    monkeypatch.setattr(
+        main_cli,
+        "execute_predict",
+        lambda command: received.append(command)
+        or SimpleNamespace(run_id="run-1"),
+    )
+
+    exit_code = main_cli.main(
+        [
+            "predict",
+            "--root",
+            str(tmp_path),
+            "--method",
+            "mem0",
+            "--benchmark",
+            "locomo",
+            "--profile",
+            "smoke",
+            "--run-id",
+            "run-1",
+            "--confirm-api",
+            "--answer-prompt-file",
+            "prompts/locomo.txt",
+            "--answer-prompt-profile",
+            "locomo-custom",
+        ]
+    )
+
+    assert exit_code == 0
+    assert received == [
+        PredictCommand(
+            project_root=tmp_path,
+            method="mem0",
+            benchmark="locomo",
+            profile="smoke",
+            run_id="run-1",
+            confirm_api=True,
+            answer_prompt_file=Path("prompts/locomo.txt"),
+            answer_prompt_profile="locomo-custom",
         )
     ]
 
@@ -713,11 +833,13 @@ def test_main_maps_run_arguments_to_run_command(
             "--smoke-turn-limit",
             "7",
             "--smoke-conversation-limit",
-            "2",
+            "5",
             "--smoke-max-workers",
-            "2",
+            "10",
             "--max-new-conversations",
             "3",
+            "--question-limit-per-conversation",
+            "2",
             "--metric",
             "locomo-f1",
             "--metric",
@@ -741,9 +863,10 @@ def test_main_maps_run_arguments_to_run_command(
                 confirm_api=True,
                 confirm_full=True,
                 smoke_turn_limit=7,
-                smoke_conversation_limit=2,
-                smoke_max_workers=2,
+                smoke_conversation_limit=5,
+                smoke_max_workers=10,
                 max_new_conversations=3,
+                question_limit_per_conversation=2,
             ),
             metrics=("locomo-f1", "locomo-judge"),
             judge_profile="detailed",

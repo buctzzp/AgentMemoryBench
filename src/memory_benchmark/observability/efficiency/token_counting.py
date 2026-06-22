@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from memory_benchmark.core import ConfigurationError
 from memory_benchmark.observability.efficiency.entities import MeasurementSource
@@ -67,6 +67,48 @@ def resolve_token_usage(
     )
 
 
+def extract_api_token_usage(usage: Any) -> tuple[int | None, int | None]:
+    """从 OpenAI-compatible usage 对象中提取 input/output token 数。
+
+    输入:
+        usage: 可能是 OpenAI SDK usage 对象、dict，或测试 fake 对象。Chat Completions
+            常用 `prompt_tokens/completion_tokens`，Responses API 常用
+            `input_tokens/output_tokens`。
+
+    输出:
+        tuple[int | None, int | None]: 可作为 `resolve_token_usage()` 的
+        `api_input_tokens/api_output_tokens`。任一侧缺失时返回 None，由调用方回退
+        tokenizer 估算。
+    """
+
+    if usage is None:
+        return None, None
+    input_tokens = _read_usage_int(
+        usage,
+        ("input_tokens", "prompt_tokens"),
+    )
+    output_tokens = _read_usage_int(
+        usage,
+        ("output_tokens", "completion_tokens"),
+    )
+    return input_tokens, output_tokens
+
+
+def _read_usage_int(usage: Any, field_names: tuple[str, ...]) -> int | None:
+    """从对象或 dict 中读取第一个存在的非负整数 token 字段。"""
+
+    for field_name in field_names:
+        if isinstance(usage, dict):
+            value = usage.get(field_name)
+        else:
+            value = getattr(usage, field_name, None)
+        if value is None:
+            continue
+        _validate_token_count(value, field_name)
+        return value
+    return None
+
+
 def _validate_token_count(value: int, field_name: str) -> None:
     """校验 token 数为非负整数。"""
 
@@ -74,4 +116,9 @@ def _validate_token_count(value: int, field_name: str) -> None:
         raise ConfigurationError(f"{field_name} must be a non-negative integer")
 
 
-__all__ = ["ResolvedTokenUsage", "TokenCounter", "resolve_token_usage"]
+__all__ = [
+    "ResolvedTokenUsage",
+    "TokenCounter",
+    "extract_api_token_usage",
+    "resolve_token_usage",
+]

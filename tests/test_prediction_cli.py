@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,6 +18,7 @@ from memory_benchmark.benchmark_adapters import (
     RunScope,
 )
 from memory_benchmark.benchmark_adapters.locomo import build_locomo_smoke_dataset
+from memory_benchmark.config import AnswerLLMSettings, OpenAISettings
 from memory_benchmark.core import (
     Conversation,
     Dataset,
@@ -226,8 +228,8 @@ def test_unknown_profile_is_rejected() -> None:
         )
 
 
-def test_smoke_dataset_keeps_only_turns_covering_one_private_evidence_set() -> None:
-    """smoke 应选 evidence 完全落在截断历史中的一道题，但不公开 evidence。"""
+def test_smoke_dataset_keeps_turns_covering_private_evidence_sets() -> None:
+    """smoke 应选择 evidence 完全落在截断历史中的问题，但不公开 evidence。"""
 
     smoke_dataset = build_locomo_smoke_dataset(
         _build_smoke_source_dataset(),
@@ -247,8 +249,66 @@ def test_smoke_dataset_keeps_only_turns_covering_one_private_evidence_set() -> N
     assert "evidence" not in str(conversation.to_public_dict()).lower()
 
 
+def test_smoke_dataset_keeps_all_questions_covered_by_retained_evidence() -> None:
+    """LoCoMo smoke 应保留所有可回答问题，再由 runner 的题数预算裁剪。"""
+
+    conversation_id = "conv-multi"
+    first_question = Question("q-first", conversation_id, "First?")
+    second_question = Question("q-second", conversation_id, "Second?")
+    outside_question = Question("q-outside", conversation_id, "Outside?")
+    source = Dataset(
+        dataset_name="locomo",
+        conversations=[
+            Conversation(
+                conversation_id=conversation_id,
+                sessions=[
+                    Session(
+                        session_id="s1",
+                        turns=[
+                            Turn("t1", "Alice", "first retained evidence"),
+                            Turn("t2", "Bob", "second retained evidence"),
+                            Turn("t3", "Alice", "outside evidence"),
+                        ],
+                    )
+                ],
+                questions=[outside_question, first_question, second_question],
+                gold_answers={
+                    "q-outside": GoldAnswerInfo(
+                        question_id="q-outside",
+                        answer="outside",
+                        evidence=["t3"],
+                    ),
+                    "q-first": GoldAnswerInfo(
+                        question_id="q-first",
+                        answer="first",
+                        evidence=["t1"],
+                    ),
+                    "q-second": GoldAnswerInfo(
+                        question_id="q-second",
+                        answer="second",
+                        evidence=["t2"],
+                    ),
+                },
+            )
+        ],
+    )
+
+    smoke_dataset = build_locomo_smoke_dataset(source, turn_limit=2)
+
+    conversation = smoke_dataset.conversations[0]
+    assert [question.question_id for question in conversation.questions] == [
+        "q-first",
+        "q-second",
+    ]
+    assert set(conversation.gold_answers) == {"q-first", "q-second"}
+    assert conversation.metadata["smoke_selected_question_ids"] == [
+        "q-first",
+        "q-second",
+    ]
+
+
 def test_smoke_dataset_can_select_two_independent_conversations() -> None:
-    """并发 smoke 应为每个 conversation 独立裁剪历史并选择一道可回答问题。"""
+    """并发 smoke 应为每个 conversation 独立裁剪历史并选择可回答问题。"""
 
     smoke_dataset = build_locomo_smoke_dataset(
         _build_two_conversation_smoke_source_dataset(),
@@ -268,17 +328,18 @@ def test_smoke_dataset_can_select_two_independent_conversations() -> None:
 
 
 def test_smoke_concurrency_override_is_bounded_and_does_not_change_full() -> None:
-    """smoke 只允许最多两个 worker，official-full 必须继续使用官方十并发。"""
+    """smoke 允许最多十个 worker，official-full 必须继续使用官方十并发。"""
 
     smoke = Mem0Config.smoke()
     full = Mem0Config.official_full()
 
     assert resolve_prediction_max_workers(smoke, smoke_max_workers=None) == 1
     assert resolve_prediction_max_workers(smoke, smoke_max_workers=2) == 2
+    assert resolve_prediction_max_workers(smoke, smoke_max_workers=10) == 10
     assert resolve_prediction_max_workers(full, smoke_max_workers=None) == 10
 
-    with pytest.raises(ConfigurationError, match="at most 2"):
-        resolve_prediction_max_workers(smoke, smoke_max_workers=3)
+    with pytest.raises(ConfigurationError, match="at most 10"):
+        resolve_prediction_max_workers(smoke, smoke_max_workers=11)
     with pytest.raises(ConfigurationError, match="smoke-only"):
         resolve_prediction_max_workers(full, smoke_max_workers=2)
 
@@ -408,6 +469,24 @@ def test_registered_prediction_builds_system_from_registry_context(
         max_workers_getter=lambda selected: selected.max_workers,
         workload_estimator=None,
         allow_smoke_worker_override=True,
+        efficiency_model_inventory_getter=lambda selected: (
+            ModelDescriptor(
+                model_id="mem0-answer-llm",
+                model_name=selected.reader_model,
+                model_role="answer_llm",
+                execution_mode="api",
+                tokenizer_name=selected.reader_model,
+            ),
+        ),
+        efficiency_instrumentation_identity_getter=lambda settings, selected, source_identity: {
+            "collector_schema": 1,
+            "wrapper_sha256": "def",
+            "source_sha256": source_identity["source_sha256"],
+        },
+        retrieval_observation_contract_getter=lambda selected: RetrievalObservationContract(
+            required_by_profile=True,
+            supported_by_method=True,
+        ),
     )
     monkeypatch.setattr(
         prediction_cli,
@@ -464,6 +543,7 @@ def test_registered_prediction_builds_system_from_registry_context(
         smoke_turn_limit=2,
         smoke_conversation_limit=1,
         smoke_max_workers=None,
+        enable_efficiency_observability=False,
     )
 
     assert hasattr(prediction_cli, "PredictionBatchResult")
@@ -492,6 +572,212 @@ def test_registered_prediction_builds_system_from_registry_context(
     assert runner_calls[0]["source_paths"] == (
         tmp_path / "sources/locomo10.json",
     )
+
+
+def test_registered_prediction_builds_framework_answer_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """retrieve-first service 应把 prompt 配置装配为 framework answer reader。"""
+
+    config = Mem0Config.smoke()
+    expected_summary = SimpleNamespace(run_id="reader-run")
+    runner_calls: list[dict[str, object]] = []
+    captured_settings: list[OpenAISettings] = []
+    captured_answer_settings: list[AnswerLLMSettings] = []
+    prompt_path = tmp_path / "custom_answer_prompt.txt"
+    prompt_path.write_text(
+        "Question: {question}\nMemory: {memory_context}\nAnswer:",
+        encoding="utf-8",
+    )
+    path_settings = SimpleNamespace(
+        project_root=tmp_path,
+        outputs_root=tmp_path / "outputs",
+    )
+    prepared_run = _build_prepared_run(
+        dataset_name="locomo",
+        variant="locomo10",
+        run_scope=RunScope.SMOKE,
+    )
+    benchmark_registration = SimpleNamespace(
+        name="locomo",
+        task_family=TaskFamily.CONVERSATION_QA,
+        required_capabilities=frozenset(
+            {
+                MethodCapability.CONVERSATION_ADD,
+                MethodCapability.MEMORY_RETRIEVAL,
+            }
+        ),
+        default_variant="locomo10",
+        variant_names=lambda: ("locomo10",),
+        prepare=lambda project_root, request: prepared_run,
+        prediction_enabled=True,
+    )
+    method_registration = SimpleNamespace(
+        name="mem0",
+        display_name="Mem0",
+        task_families=frozenset({TaskFamily.CONVERSATION_QA}),
+        provided_capabilities=frozenset(
+            {
+                MethodCapability.CONVERSATION_ADD,
+                MethodCapability.MEMORY_RETRIEVAL,
+            }
+        ),
+        requires_api=True,
+        resolve_profile_section=lambda profile_name: profile_name,
+        system_factory=lambda context: object(),
+        source_identity_factory=lambda settings: {"source_sha256": "abc"},
+        model_name_getter=lambda selected: selected.reader_model,
+        max_workers_getter=lambda selected: selected.max_workers,
+        workload_estimator=None,
+        allow_smoke_worker_override=True,
+        efficiency_model_inventory_getter=lambda selected: (
+            ModelDescriptor(
+                model_id="mem0-answer-llm",
+                model_name=selected.reader_model,
+                model_role="answer_llm",
+                execution_mode="api",
+                tokenizer_name=selected.reader_model,
+            ),
+        ),
+        efficiency_instrumentation_identity_getter=lambda settings, selected, source_identity: {
+            "collector_schema": 1,
+            "wrapper_sha256": "def",
+            "source_sha256": source_identity["source_sha256"],
+        },
+        retrieval_observation_contract_getter=lambda selected: RetrievalObservationContract(
+            required_by_profile=True,
+            supported_by_method=True,
+        ),
+    )
+
+    class FakeOpenAIAnswerClient:
+        """测试用 answer client，避免构造真实 OpenAI SDK client。"""
+
+        model_name = "fake-openai-answer"
+
+        def __init__(
+            self,
+            *,
+            settings: OpenAISettings,
+            answer_settings: AnswerLLMSettings,
+        ) -> None:
+            """记录传入的 OpenAI-compatible 配置对象。"""
+
+            captured_settings.append(settings)
+            captured_answer_settings.append(answer_settings)
+
+        def complete(self, *, prompt: str) -> str:
+            """返回固定答案；本测试不真正调用该方法。"""
+
+            return "unused"
+
+    monkeypatch.setattr(
+        prediction_cli,
+        "get_benchmark_registration",
+        lambda name: benchmark_registration,
+    )
+    monkeypatch.setattr(
+        prediction_cli,
+        "get_method_registration",
+        lambda name: method_registration,
+    )
+    monkeypatch.setattr(
+        prediction_cli,
+        "load_method_profile",
+        lambda **kwargs: config,
+    )
+    monkeypatch.setattr(
+        prediction_cli,
+        "load_path_settings",
+        lambda project_root: path_settings,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        prediction_cli,
+        "load_openai_settings",
+        lambda project_root: OpenAISettings(
+            api_key="sk-test",
+            base_url="https://example.test/v1",
+            model="gpt-4o-mini",
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        prediction_cli,
+        "OpenAICompatibleAnswerLLMClient",
+        FakeOpenAIAnswerClient,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        prediction_cli,
+        "_preflight_prediction_run",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        prediction_cli,
+        "run_predictions",
+        lambda **kwargs: runner_calls.append(kwargs) or expected_summary,
+    )
+
+    run_registered_conversation_qa_prediction(
+        project_root=tmp_path,
+        method_name="mem0",
+        benchmark_name="locomo",
+        profile_name="smoke",
+        run_id="reader-run",
+        confirm_api=True,
+        enable_efficiency_observability=True,
+        answer_prompt_file=prompt_path.name,
+        answer_prompt_profile="cost-estimate-reader",
+    )
+
+    answer_reader = runner_calls[0]["answer_reader"]
+    assert answer_reader.client.model_name == "fake-openai-answer"
+    assert answer_reader.prompt_template.template == prompt_path.read_text(
+        encoding="utf-8"
+    )
+    assert answer_reader.prompt_template.profile_name == "cost-estimate-reader"
+    assert runner_calls[0]["method_manifest"]["answer_reader"] == {
+        "answer_protocol": "retrieve_first_v1",
+        "answer_prompt_profile": "cost-estimate-reader",
+        "answer_prompt_file_sha256": hashlib.sha256(
+            prompt_path.read_bytes()
+        ).hexdigest(),
+        "answer_model": "gpt-4o-mini",
+        "answer_parameters": {
+            "message_role": "user",
+            "temperature": 0.0,
+            "max_tokens": 4096,
+            "top_p": None,
+            "timeout_seconds": 60.0,
+            "max_retries": 8,
+        },
+    }
+    assert {
+        descriptor.model_id for descriptor in runner_calls[0]["model_inventory"]
+    } == {
+        "mem0-answer-llm",
+        "gpt-4o-mini",
+    }
+    assert captured_settings == [
+        OpenAISettings(
+            api_key="sk-test",
+            base_url="https://example.test/v1",
+            model="gpt-4o-mini",
+        )
+    ]
+    assert captured_answer_settings == [
+        AnswerLLMSettings(
+            model="gpt-4o-mini",
+            message_role="user",
+            temperature=0.0,
+            max_tokens=4096,
+            top_p=None,
+            timeout_seconds=60.0,
+            max_retries=8,
+        )
+    ]
 
 
 def test_registered_prediction_rejects_cost_before_loading_settings(
@@ -664,6 +950,7 @@ def test_registered_prediction_allows_mem0_smoke_worker_override(
         smoke_turn_limit=2,
         smoke_conversation_limit=1,
         smoke_max_workers=2,
+        enable_efficiency_observability=False,
     )
 
     assert result.runs[0].summary is expected_summary
@@ -940,6 +1227,7 @@ def test_all_expands_in_registration_order_and_uses_explicit_variant_suffixes(
         variant="all",
         run_id="exp1",
         confirm_api=True,
+        enable_efficiency_observability=False,
     )
 
     assert result.selector == "all"
@@ -1036,6 +1324,7 @@ def test_longmemeval_single_variant_run_id_uses_explicit_suffix(
         variant="s_cleaned",
         run_id="exp1",
         confirm_api=True,
+        enable_efficiency_observability=False,
     )
 
     assert result.runs[0].run_id == "exp1-s-cleaned"
@@ -1118,6 +1407,7 @@ def test_locomo_run_id_does_not_add_single_variant_suffix(
         profile_name="smoke",
         run_id="exp1",
         confirm_api=True,
+        enable_efficiency_observability=False,
     )
 
     assert result.runs[0].run_id == "exp1"
@@ -1416,9 +1706,10 @@ def test_second_child_preflight_failure_creates_no_output_or_method(
             method_name="mem0",
             benchmark_name="longmemeval",
             profile_name="smoke",
-            variant="all",
-            run_id="exp1",
-            confirm_api=True,
+                variant="all",
+                run_id="exp1",
+                confirm_api=True,
+                enable_efficiency_observability=False,
         )
 
     assert preflight_variants == ["s_cleaned", "m_cleaned"]
@@ -1528,6 +1819,7 @@ def test_openai_settings_load_only_after_all_preflights(
         variant="all",
         run_id="exp1",
         confirm_api=True,
+        enable_efficiency_observability=False,
     )
 
     assert events[:2] == ["preflight:s_cleaned", "preflight:m_cleaned"]

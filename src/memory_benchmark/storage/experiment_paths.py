@@ -116,6 +116,20 @@ class ExperimentPaths:
         return self.artifacts_dir / "method_predictions.jsonl"
 
     @property
+    def answer_prompts_path(self) -> Path:
+        """返回 framework answer prompt JSONL 路径。"""
+
+        return self.artifacts_dir / "answer_prompts.prediction.jsonl"
+
+    @property
+    def conversation_prompts_path(self) -> Path:
+        """返回按 conversation 去重的 system/user prompt JSONL 路径。
+
+        避免同一 conversation 的多条预测记录重复储存大段 prompt 文本。
+        """
+        return self.artifacts_dir / "conversation_prompts.jsonl"
+
+    @property
     def evaluator_private_labels_path(self) -> Path:
         """返回 evaluator-only 私有标签 JSONL 路径。"""
 
@@ -132,6 +146,24 @@ class ExperimentPaths:
         """返回 prediction 阶段效率 observation JSONL 路径。"""
 
         return self.artifacts_dir / "efficiency_observations.prediction.jsonl"
+
+    @property
+    def prediction_efficiency_overall_summary_path(self) -> Path:
+        """返回 prediction 阶段 overall 效率摘要路径。"""
+
+        return self.summaries_dir / "efficiency_overall.prediction.json"
+
+    @property
+    def prediction_efficiency_by_conversation_summary_path(self) -> Path:
+        """返回 prediction 阶段按 conversation 聚合的效率摘要路径。"""
+
+        return self.summaries_dir / "efficiency_by_conversation.prediction.json"
+
+    @property
+    def prediction_efficiency_by_question_summary_path(self) -> Path:
+        """返回 prediction 阶段按 question 聚合的效率摘要路径。"""
+
+        return self.summaries_dir / "efficiency_by_question.prediction.json"
 
     def evaluator_model_inventory_path(self, metric_name: str) -> Path:
         """返回指定 evaluator 的独立模型清单路径。"""

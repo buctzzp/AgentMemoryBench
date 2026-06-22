@@ -1,8 +1,9 @@
 # AgentMemoryBench
 
 AgentMemoryBench 是一个面向 Agent Memory 方法的可复现、可扩展、可审计评测框架。
-它把不同 benchmark 的原始数据统一成可校验的数据模型，调用 memory method 生成回答，
-再把 prediction、运行观测和 evaluator 结果保存为可复算的标准实验产物。
+它把不同 benchmark 的原始数据统一成可校验的数据模型，调用 memory method 写入和检索
+记忆，由 framework reader 生成回答，再把 prediction、运行观测和 evaluator 结果保存为
+可复算的标准实验产物。
 
 GitHub 仓库：[buctzzp/AgentMemoryBench](https://github.com/buctzzp/AgentMemoryBench)
 
@@ -31,11 +32,38 @@ Phase 1 只跑纯文本闭环，先以 LoCoMo 打通各个 method，再接入 Lo
 | 暂缓 | HaluMem、MemBench、Mem-Gallery |
 | 已移除 | PrefEval，不恢复 adapter、测试、文档或原始仓库 |
 
+当前 Mem0 full 并发策略已调整：历史实现使用共享 OSS `Memory` 实例并保留过 LoCoMo
+turn-level resume；现在统一改为框架 isolated conversation 并发和 conversation-level
+resume。`mem0-locomo-full-v3` 已定位到 embedding API SSL 断连，当前已补 retry/timeout
+兜底。后续 `outputs/mem0-locomo-full-v4/` 已跑完 10 conversations / 1540 questions，并
+生成 F1、LLM judge 和 efficiency summary；OpenCode 发现的全局 `reference_date` 只传年份
+问题已记录为 informational，因为每条检索记忆自带完整日期，不判定 full-v4 作废。
+最新任务状态见
+[docs/task-ledger.md](docs/task-ledger.md)。
+
+当前主线已迁移到 retrieve-first memory-module 协议：method 实现
+`add(conversation) + retrieve(question)`，由 method adapter 返回完整 answer prompt
+messages，再由 framework reader 统一负责 answer LLM 调用。设计文档见
+[Retrieve-First Memory Module 架构设计](docs/superpowers/specs/2026-06-20-retrieve-first-memory-module-design.md)。
+实施计划见
+[Retrieve-First Memory Module 实施计划](docs/superpowers/plans/2026-06-20-retrieve-first-memory-module.md)。
+当前 core protocol、framework reader、retrieval artifact、retrieval/answer resume、
+registered prediction reader wiring、四个内置 method adapter 的 `retrieve()`、framework
+answer efficiency observation 和 artifact evaluation compatibility 均已落地。旧
+`get_answer()` 路径仍作为迁移期兼容保留；真实 retrieve-first API smoke 仍需用户确认
+method、benchmark、规模和 run_id 后再执行。
+
+LLM/provider 灵活配置方向也已完成设计：
+[LLM Provider 与 Prompt 配置设计](docs/superpowers/specs/2026-06-21-llm-provider-config-design.md)。
+第一版计划只实现 OpenAI-compatible provider，覆盖 OpenAI、ohmygpt、DeepSeek 兼容接口和
+本地 OpenAI-compatible server；Anthropic/Gemini 和进程内 Hugging Face provider 留作
+后续扩展。当前运行能力仍以 `.env` 中的 OpenAI-compatible `gpt-4o-mini` 配置为准。
+
 真实 API prediction、LLM judge 或 full profile 实验必须由用户显式确认 method、benchmark、
 样本规模和 `run_id`。框架不会在普通测试或默认命令里自动发起付费调用。
 
-最新任务状态以 [AGENTS.md](AGENTS.md) 和 [docs/current-roadmap.md](docs/current-roadmap.md)
-为准。长期架构设计见
+最新任务状态以 [AGENTS.md](AGENTS.md)、[docs/current-roadmap.md](docs/current-roadmap.md)
+和 [docs/task-ledger.md](docs/task-ledger.md) 为准。长期架构设计见
 [项目目标与架构设计](docs/superpowers/specs/2026-06-12-project-goals-architecture-design.md)。
 
 ## 快速开始
@@ -160,8 +188,9 @@ Dataset
   Conversation -> Question + GoldAnswerInfo
   ↓
 Prediction Runner
-  method.add([public Conversation])
-  method.get_answer(public Question)
+  method.add(public Conversation)
+  method.retrieve(public Question) -> AnswerPromptResult.prompt_messages
+  framework answer LLM(prompt_messages)
   ↓
 标准 predictions + runtime observations
   ↓
@@ -202,48 +231,67 @@ Dataset
 
 ## Method 接口
 
-完整记忆系统实现：
+当前主协议是 retrieve-first memory module。新 method 只需要写入 conversation，并按
+question 返回 method 自己构造好的完整 answer prompt messages：
 
 ```python
-from memory_benchmark.core import AddResult, AnswerResult, Conversation, Question
-from memory_benchmark.core.interfaces import BaseMemorySystem
+from memory_benchmark.core import (
+    AddResult,
+    AnswerPromptResult,
+    Conversation,
+    PromptMessage,
+    Question,
+)
 
 
-class MyMemorySystem(BaseMemorySystem):
-    def add(self, conversations: list[Conversation]) -> AddResult:
+class MyMemoryProvider:
+    def add(self, conversation: Conversation) -> AddResult:
         ...
 
-    def get_answer(self, question: Question) -> AnswerResult:
-        ...
+    def retrieve(self, question: Question) -> AnswerPromptResult:
+        return AnswerPromptResult(
+            question_id=question.question_id,
+            conversation_id=question.conversation_id,
+            prompt_messages=[
+                PromptMessage(role="system", content="You are a helpful assistant."),
+                PromptMessage(role="user", content="...method-owned prompt..."),
+            ],
+            metadata={"answer_context": "...optional debuggable memory text..."},
+        )
 ```
 
-可选检索能力实现：
+`AnswerPromptResult.prompt_messages` 是核心输出。它表示 method 内部已经完成 query
+rewrite、检索、rerank、merge、格式化和 answer prompt 构造，且保留官方 system/user
+role 结构。framework answer LLM 会直接使用这些 messages 生成最终答案。
+`AnswerPromptResult.answer_prompt` 只是兼容 artifact、日志和 token 估算的文本视图；
+如果未显式传入，会由 `prompt_messages` 自动生成。method 需要保留的调试信息、拆出的
+纯记忆上下文、原始检索项和 prompt profile 放进 `AnswerPromptResult.metadata`。
 
-```python
-from memory_benchmark.core import Question, RetrievalResult
-from memory_benchmark.core.interfaces import BaseMemoryRetriever
+四个内置 method adapter（Mem0、A-Mem、LightMem、MemoryOS）都已新增 `retrieve()` 并
+继承 `BaseMemoryProvider`。旧 `get_answer()` 暂时保留为兼容路径，主要用于历史复查和
+尚未删除的 legacy 测试；新 method 接入不应再实现完整 answer system。
 
+framework answer LLM 当前使用 `AnswerLLMSettings` 显式记录并传递 method × benchmark 的
+官方 answer 参数，例如 temperature、max_tokens、top_p、message role、timeout 和 retry。
+未在官方脚本中设置的字段保持 `None`，不会被框架猜默认值后传给 SDK。
 
-class MyRetriever(BaseMemoryRetriever):
-    def retrieve(self, question: Question) -> RetrievalResult:
-        ...
-```
+answer LLM 和 judge LLM 后续会统一到 `LLMClient -> LLMResponse` 抽象，标准返回包含
+文本、provider、model、usage、request id、finish reason、latency 和可选 debug raw
+response。当前 registered prediction 已能在 method 声明 `MEMORY_RETRIEVAL` 时构造
+OpenAI-compatible framework reader；完整多 provider 配置仍处于设计后续阶段，详见
+[LLM Provider 与 Prompt 配置设计](docs/superpowers/specs/2026-06-21-llm-provider-config-design.md)。
 
 接口约束：
 
 - 依靠 `conversation_id` 做记忆隔离，不提供 reset 接口。
-- `add()` 接收 `list[Conversation]`，不设计 `add(session)` 或强制 turn-only 接口。
-- `get_answer()` 只接收 `Question`，不能接收标准答案、检索结果或 top-k。
-- `retrieve()` 是可选能力；LoCoMo / LongMemEval 的 Phase 1 质量评测不要求它。
-- `top_k`、reader 模型、embedding 模型等参数属于 method profile，不放进统一接口参数。
+- 新 `add()` 接收单个 `Conversation`；runner 负责循环、并行、resume 和失败隔离。
+- `retrieve()` 只接收公开 `Question`，不能接收标准答案、evidence、top-k 或私有标签。
+- `top_k`、reader 模型、embedding 模型等参数属于 method profile，不放进统一函数参数。
+- 旧 `get_answer()` / `BaseMemorySystem` 路径只属于迁移期兼容；不要把它作为新 method
+  接入接口。
 
-method 分为：
-
-- `end_to_end`：method 自行写入记忆并生成答案。
-- `memory_module`：原始模块负责写入和检索，由框架 fixed-reader wrapper 组合成完整回答系统。
-
-自定义 method 当前通过 Python API 传入实现接口的实例；CLI 只运行官方集成。详细规则见
-[docs/method-interface.md](docs/method-interface.md)。
+自定义 method 当前通过 Python API 传入实现接口的实例；CLI 只运行官方集成。当前原生
+接口审计见 [docs/method-interface-inventory.md](docs/method-interface-inventory.md)。
 
 ## 统一命令行入口
 
@@ -254,6 +302,25 @@ method 分为：
 - `run`：先 prediction，再 evaluation，是前两步的便利组合。
 
 正式实验建议优先使用可独立恢复的 `predict` 和 `evaluate`。`run` 不复制业务逻辑。
+`predict` / `run` 默认写出 prediction 阶段的 token、latency 和模型身份 observation；
+只有临时调试时才建议显式传 `--disable-efficiency-observability` 关闭。
+小量调试可以用以下预算参数控制规模：
+
+- `--smoke-turn-limit N`：smoke profile 中每个 conversation/instance 最多写入的历史 turn
+  或完整 round。
+- `--smoke-conversation-limit N`：smoke profile 中最多加载的 conversation/instance 数。
+- `--question-limit-per-conversation N`：本次命令每个 conversation 最多回答的问题数；这是
+  可变命令预算，不进入 resume identity，后续可以用同一 `run_id --resume` 增加题数。
+- `--max-new-conversations N`：本次命令最多推进多少个未完成 conversation；用于 full
+  实验分批运行，不改变实验 identity。
+- `--retry-failed`：默认 resume 会跳过 checkpoint 中已标记 failed 的 conversation，
+  避免失败项反复触发付费调用；只有显式传入该参数才会重新尝试这些 conversation。
+
+这些参数语义都是上限：如果设置值大于当前 dataset / variant 的实际数量，框架应按实际
+可用数量运行。LoCoMo smoke adapter 会保留所有 evidence 完整落在截断历史里的问题，
+再由 runner 按 `--question-limit-per-conversation` 做本次命令预算裁剪；如果
+`--smoke-turn-limit` 小到没有任何完整 evidence 覆盖题，框架会 fail closed，要求提高
+turn limit，而不是执行无意义的付费 smoke。
 
 LoCoMo 小量真实链路示例：
 
@@ -264,7 +331,9 @@ uv run memory-benchmark predict \
   --profile smoke \
   --run-id mem0-locomo-smoke \
   --confirm-api \
-  --smoke-turn-limit 20
+  --smoke-turn-limit 20 \
+  --smoke-conversation-limit 5 \
+  --question-limit-per-conversation 2
 ```
 
 已有回答可以离线计算 LoCoMo F1，不读取 `.env`，也不会再次调用 method：
@@ -328,6 +397,13 @@ uv run memory-benchmark predict \
 `--max-new-conversations` 的语义是“本次命令最多推进 N 个尚未完成的 conversation”。
 它是运行预算，不是实验 identity；同一个 `run_id` 后续可以用不同预算继续 `--resume`。
 该选项已接入 `predict` / `run` / `calibrate-smoke`，用于把长实验拆成多次可恢复的小批次。
+如果某个 conversation 已在 `checkpoints/conversation_status.json` 中标记为 `failed`，默认
+`--resume` 不会再次处理它；确认资源和修复原因后，可用 `--retry-failed` 显式重试。
+
+当前 prediction/full run 的并行边界是 conversation 级：单个 method × 单个 benchmark
+内部可以用 worker 并行处理不同 conversation。多个 method 或多个 benchmark 同时跑实验时，
+当前推荐开多个终端分别运行并使用不同 `run_id`；框架暂不把 method×benchmark 外层并行作为
+full 实验主线。`calibrate-smoke` 只作为极小成本校准和批量 smoke 的便利入口。
 
 ## 配置
 
@@ -385,6 +461,9 @@ outputs/<run_id>/
   method_state/
   summaries/
     summary.json
+    efficiency_overall.prediction.json
+    efficiency_by_conversation.prediction.json
+    efficiency_by_question.prediction.json
 ```
 
 关键规则：
@@ -396,8 +475,17 @@ outputs/<run_id>/
 - `evaluator_private_labels.jsonl` 只给 evaluator 使用，不能传给 method。
 - `config.redacted.json` 只保存脱敏配置，不包含 secret。
 - `logs/run.log` 面向人工排查；`logs/events.jsonl` 是结构化事件日志。
-- 第三方 method 的 stdout/warning 不应直接打乱终端 Rich 进度；wrapper 应捕获、重定向到
-  日志或按配置静默。
+- `summaries/efficiency_*.prediction.json` 是从 raw observation 派生的人类可读聚合：
+  overall、per-conversation 和 per-question 三个视图，方便估算单个 conversation 的 token、
+  API call 和 latency；真实审计仍以 `artifacts/efficiency_observations.jsonl` 为准。
+- 第三方 method 的 stdout/warning 不应直接打乱终端 Rich 进度；wrapper 应可靠写入
+  `logs/run.log`/events，并用配置控制是否同步显示到终端，不应全局压掉用户 method 的
+  调试输出。
+- LightMem 可能输出 `LLM returned invalid source_id ... Auto-corrected`。这是 LightMem
+  官方 memory build 中对 LLM 生成 source id 越界的自动修正 warning，当前不代表 run
+  失败，但会污染终端，仍在 stdout/warning 治理待办中。
+- 本地 Qdrant 可能输出 payload index warning；本地模式下该索引 warning 通常不影响实验
+  结果，但同样应逐步重定向到日志。
 - 如果 question 带 `category`，evaluator summary 应同时输出 overall 和 by-category
   聚合；这不是某个 benchmark 的特例。
 
@@ -419,11 +507,19 @@ outputs/<run_id>/
 真实费用不绑定 OpenAI 官方价格。实验结束后按实际 API 服务商价格离线计算；本地模型成本
 保留为零成本或仅记录 token/latency。
 
+不同 method 的 token 来源会写入 `measurement_source`。`api_usage` 表示直接读取
+OpenAI-compatible response usage；`tokenizer_estimate` 表示 wrapper 无法拿到原始 usage 时
+用 tokenizer 估算，不能混同为精确 API 账单。
+同一个 method 内部也可能混合两种来源：例如 wrapper 可见的 reader 调用能记录
+`api_usage`，第三方内部 memory build 调用若暂时无法暴露 usage，则仍会保留
+`tokenizer_estimate` 并在后续审计中继续收敛。
+
 ## 日志结构
 
 开发日志和运行日志分开：
 
 - `docs/handoffs/`: 上下文压缩或额度中断前的交接文件。
+- `docs/task-ledger.md`: 当前任务和历史文档 open/closed 状态总账。
 - `docs/logs/`: 开发过程中的主题日志，命名规则见 [docs/logs/README.md](docs/logs/README.md)。
 - `outputs/<run_id>/logs/run.log`: 单次运行的人类可读日志。
 - `outputs/<run_id>/logs/events.jsonl`: 单次运行的结构化事件日志。
@@ -475,9 +571,11 @@ uv run python -m unittest tests/test_API.py -v
 
 - [AGENTS.md](AGENTS.md): 当前项目入口、断点和最高优先级工程规则。
 - [docs/current-roadmap.md](docs/current-roadmap.md): 动态路线图。
+- [docs/task-ledger.md](docs/task-ledger.md): 当前任务与文档状态总账。
 - [docs/benchmark-scope.md](docs/benchmark-scope.md): benchmark 范围。
 - [docs/method-interface.md](docs/method-interface.md): method 接口。
 - [docs/data-model.md](docs/data-model.md): core 数据模型说明。
 - [docs/method-resource-parameter-audit.md](docs/method-resource-parameter-audit.md): method 参数与资源审计。
 - [docs/huggingface-datasets.md](docs/huggingface-datasets.md): dataset 上传到 Hugging Face 的流程。
+- [docs/future-ideas.md](docs/future-ideas.md): 实验监控 AI、新 method 接入 skill 等后期想法。
 - [docs/superpowers/specs/2026-06-12-project-goals-architecture-design.md](docs/superpowers/specs/2026-06-12-project-goals-architecture-design.md): 长期项目目标与架构设计。

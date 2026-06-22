@@ -420,7 +420,7 @@ def test_locomo_registration_declares_conversation_qa_capabilities() -> None:
     assert registration.required_capabilities == frozenset(
         {
             MethodCapability.CONVERSATION_ADD,
-            MethodCapability.ANSWER_GENERATION,
+            MethodCapability.MEMORY_RETRIEVAL,
         }
     )
     assert registration.prediction_enabled is True
@@ -444,7 +444,7 @@ def test_longmemeval_registration_declares_both_variants_and_prediction_enabled(
     assert registration.required_capabilities == frozenset(
             {
                 MethodCapability.CONVERSATION_ADD,
-                MethodCapability.ANSWER_GENERATION,
+                MethodCapability.MEMORY_RETRIEVAL,
             }
     )
     assert registration.prediction_enabled is True
@@ -498,13 +498,13 @@ def test_longmemeval_registration_prepares_full_and_smoke_datasets() -> None:
     )
     assert smoke_run.dataset.metadata["variant"] == "m_cleaned"
     assert smoke_run.dataset.metadata["run_scope"] == "smoke"
-    assert smoke_run.dataset.metadata["total_raw_instances"] == 1
+    assert smoke_run.dataset.metadata["total_raw_instances"] == 99
     assert smoke_run.dataset.metadata["source_fully_scanned"] is False
     assert smoke_run.dataset.metadata["smoke_round_limit"] == 1
     assert smoke_run.dataset.metadata["smoke_original_turn_count"] > 2
-    assert smoke_run.dataset.metadata["smoke_retained_turn_count"] == 2
-    assert smoke_run.dataset.metadata["smoke_retained_round_count"] == 1
-    assert len(smoke_run.dataset.conversations) == 1
+    assert smoke_run.dataset.metadata["smoke_retained_turn_count"] == 198
+    assert smoke_run.dataset.metadata["smoke_retained_round_count"] == 99
+    assert len(smoke_run.dataset.conversations) == 99
     smoke_conversation = smoke_run.dataset.conversations[0]
     assert sum(len(session.turns) for session in smoke_conversation.sessions) == 2
     assert smoke_conversation.metadata["smoke_retained_round_count"] == 1

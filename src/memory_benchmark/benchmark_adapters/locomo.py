@@ -266,10 +266,10 @@ def build_locomo_smoke_dataset(
     输入:
         dataset: 至少包含一个完整 LoCoMo conversation 的统一数据集。
         turn_limit: 按原始 session/turn 顺序最多保留的 turn 数。
-        conversation_limit: 选择的 conversation 数；当前成本保护只允许 1 或 2。
+        conversation_limit: 选择的 conversation 数。
 
     输出:
-        Dataset: 每个 conversation 都只保留截断历史和一道 evidence 已覆盖的问题。
+        Dataset: 每个 conversation 都只保留截断历史和 evidence 已覆盖的问题。
 
     说明:
         私有 evidence 只用于选择有意义的测试夹具。runner 仍会把公开历史/问题与
@@ -278,10 +278,6 @@ def build_locomo_smoke_dataset(
 
     if turn_limit < 1:
         raise ConfigurationError("LoCoMo smoke turn_limit must be at least 1")
-    if conversation_limit not in {1, 2}:
-        raise ConfigurationError(
-            "LoCoMo smoke conversation_limit must be 1 or 2"
-        )
     if not dataset.conversations:
         raise ConfigurationError("LoCoMo smoke requires at least one conversation")
     if len(dataset.conversations) < conversation_limit:
@@ -310,14 +306,14 @@ def _build_locomo_smoke_conversation(
     source: Conversation,
     turn_limit: int,
 ) -> Conversation:
-    """裁剪一个 LoCoMo conversation，并选择 evidence 已覆盖的一道问题。
+    """裁剪一个 LoCoMo conversation，并选择 evidence 已覆盖的问题。
 
     输入:
         source: 待裁剪的完整 LoCoMo conversation。
         turn_limit: 按 session/turn 顺序最多保留的 turn 数。
 
     输出:
-        Conversation: 裁剪后的历史、一道可回答问题及对应私有标准答案。
+        Conversation: 裁剪后的历史、可回答问题及对应私有标准答案。
     """
 
     retained_sessions: list[Session] = []
@@ -342,16 +338,16 @@ def _build_locomo_smoke_conversation(
         )
         remaining -= len(retained_turns)
 
-    selected_question = None
-    selected_gold = None
+    selected_questions: list[Question] = []
+    selected_gold_answers: dict[str, GoldAnswerInfo] = {}
     for question in source.questions:
         gold = source.gold_answers[question.question_id]
         evidence_ids = set(gold.evidence)
         if evidence_ids and evidence_ids.issubset(retained_turn_ids):
             selected_question = copy.deepcopy(question)
-            selected_gold = copy.deepcopy(gold)
-            break
-    if selected_question is None or selected_gold is None:
+            selected_questions.append(selected_question)
+            selected_gold_answers[selected_question.question_id] = copy.deepcopy(gold)
+    if not selected_questions:
         raise ConfigurationError(
             "LoCoMo smoke history does not cover any complete private evidence set "
             f"for {source.conversation_id}; increase --smoke-turn-limit"
@@ -360,12 +356,15 @@ def _build_locomo_smoke_conversation(
     return Conversation(
         conversation_id=source.conversation_id,
         sessions=retained_sessions,
-        questions=[selected_question],
-        gold_answers={selected_question.question_id: selected_gold},
+        questions=selected_questions,
+        gold_answers=selected_gold_answers,
         metadata={
             **copy.deepcopy(source.metadata),
             "smoke_turn_limit": turn_limit,
-            "smoke_selected_question_id": selected_question.question_id,
+            "smoke_selected_question_id": selected_questions[0].question_id,
+            "smoke_selected_question_ids": [
+                question.question_id for question in selected_questions
+            ],
         },
     )
 

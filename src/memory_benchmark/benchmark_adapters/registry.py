@@ -174,7 +174,7 @@ def _prepare_longmemeval_run(
         dataset = adapter.load()
     elif request.run_scope is RunScope.SMOKE:
         dataset = _build_longmemeval_smoke_dataset(
-            adapter.load(limit=1),
+            adapter.load(limit=request.smoke_conversation_limit),
             round_limit=request.smoke_turn_limit,
         )
     else:  # pragma: no cover - RunScope 只有 smoke / full
@@ -422,7 +422,7 @@ def _build_default_registry() -> BenchmarkRegistry:
     conversation_qa_capabilities = frozenset(
         {
             MethodCapability.CONVERSATION_ADD,
-            MethodCapability.ANSWER_GENERATION,
+            MethodCapability.MEMORY_RETRIEVAL,
         }
     )
     # Task 7-8 会把这两个 adapter 迁移到 v2 数据模型；迁移前导入失败就跳过。

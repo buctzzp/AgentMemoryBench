@@ -26,12 +26,15 @@ from memory_benchmark.core import (
     ConfigurationError,
     Conversation,
     Question,
+    AnswerPromptResult,
+    PromptMessage,
     Turn,
 )
-from memory_benchmark.core.interfaces import BaseMemorySystem
+from memory_benchmark.core.interfaces import BaseMemoryProvider, BaseMemorySystem
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     EfficiencyStage,
+    extract_api_token_usage,
     resolve_token_usage,
 )
 from memory_benchmark.storage import atomic_write_json
@@ -41,6 +44,9 @@ AMEM_METHOD_DIRECTORY = "A-mem"
 AMEM_ADAPTER_VERSION = "conversation-qa-v1"
 AMEM_READER_PROMPT_VERSION = "amem-reader-v1"
 AMEM_QUERY_KEYWORD_PROMPT_VERSION = "amem-query-keywords-v1"
+AMEM_ANSWER_SYSTEM_MESSAGE = (
+    "Follow the format specified in the prompt exactly. Do not add extra commentary."
+)
 AMEM_STATE_SCHEMA_VERSION = 1
 AMEM_MEMORIES_FILENAME = "memories.pkl"
 AMEM_RETRIEVER_FILENAME = "retriever.pkl"
@@ -63,6 +69,8 @@ class AMemConfig:
         llm_model: A-Mem 写入、查询改写和 reader 使用的 LLM。
         embedding_model: A-Mem SimpleEmbeddingRetriever 使用的 SentenceTransformer 模型。
         retrieve_k: method 内部检索记忆数量，不进入统一接口参数。
+        api_timeout_seconds: OpenAI-compatible 请求超时秒数。
+        api_max_retries: OpenAI-compatible 请求最大重试次数。
         max_workers: runner 可读取的建议 conversation 并发数；初期保持 1。
         use_robust_layer: 是否使用官方 robust layer；当前必须为 true。
         suppress_official_stdout: 是否压制第三方源码中的 stdout。
@@ -73,6 +81,8 @@ class AMemConfig:
     embedding_model: str
     retrieve_k: int
     max_workers: int
+    api_timeout_seconds: float = 60.0
+    api_max_retries: int = 8
     use_robust_layer: bool = True
     suppress_official_stdout: bool = True
     profile_name: str = "custom"
@@ -86,6 +96,10 @@ class AMemConfig:
             raise ConfigurationError("A-Mem embedding_model is required")
         if self.retrieve_k < 1:
             raise ConfigurationError("A-Mem retrieve_k must be positive")
+        if self.api_timeout_seconds <= 0:
+            raise ConfigurationError("A-Mem api_timeout_seconds must be positive")
+        if self.api_max_retries < 0:
+            raise ConfigurationError("A-Mem api_max_retries cannot be negative")
         if self.max_workers < 1:
             raise ConfigurationError("A-Mem max_workers must be positive")
         if not self.use_robust_layer:
@@ -190,7 +204,7 @@ def import_amem_robust_classes(
                 sys.path.remove(root_text)
 
 
-class AMem(BaseMemorySystem):
+class AMem(BaseMemoryProvider, BaseMemorySystem):
     """使用官方 A-Mem robust memory layer 的统一 memory system。"""
 
     def __init__(
@@ -229,16 +243,19 @@ class AMem(BaseMemorySystem):
         self._efficiency_collector = efficiency_collector
         self._runtimes: dict[str, Any] = {}
 
-    def add(self, conversations: list[Conversation]) -> AddResult:
+    def add(self, conversations: Conversation | list[Conversation]) -> AddResult:
         """写入一个或多个 conversation。"""
 
+        if isinstance(conversations, Conversation):
+            conversations = [conversations]
         conversation_ids: list[str] = []
         for conversation in conversations:
             runtime = self._get_or_create_runtime(conversation.conversation_id)
             turn_count = 0
-            for turn in self._iter_turns(conversation):
-                self._call_runtime_add(runtime, turn)
-                turn_count += 1
+            for session in conversation.sessions:
+                for turn in session.turns:
+                    self._call_runtime_add(runtime, turn, session.session_time)
+                    turn_count += 1
             self._save_conversation_state(
                 conversation=conversation,
                 runtime=runtime,
@@ -283,13 +300,16 @@ class AMem(BaseMemorySystem):
             str(state_dir / AMEM_RETRIEVER_EMBEDDINGS_FILENAME),
         )
         self._runtimes[conversation_id] = runtime
-        if int(manifest.get("turn_count", -1)) != len(self._iter_turns(conversation)):
+        current_turn_count = sum(
+            len(session.turns) for session in conversation.sessions
+        )
+        if int(manifest.get("turn_count", -1)) != current_turn_count:
             raise ConfigurationError(
                 f"A-Mem state turn_count mismatch for {conversation_id}"
             )
 
-    def get_answer(self, question: Question) -> AnswerResult:
-        """基于 A-Mem 检索上下文回答公开问题。"""
+    def retrieve(self, question: Question) -> AnswerPromptResult:
+        """执行 A-Mem 官方 query keyword generation 和 memory retrieval。"""
 
         if question.conversation_id not in self._runtimes:
             raise ConfigurationError(
@@ -326,6 +346,10 @@ class AMem(BaseMemorySystem):
             )
         retrieval_latency_ms = _elapsed_ms(retrieval_started_ns)
         memory_context = str(context)
+        answer_prompt = self._build_answer_prompt(
+            question=question,
+            memory_context=memory_context,
+        )
         if collector is not None and collector.enabled:
             collector.record_retrieval_result(
                 latency_ms=retrieval_latency_ms,
@@ -334,11 +358,35 @@ class AMem(BaseMemorySystem):
                     self.config.llm_model,
                 ),
             )
-        prompt = self._build_answer_prompt(
-            question=question,
-            memory_context=memory_context,
+
+        return AnswerPromptResult(
+            question_id=question.question_id,
+            conversation_id=question.conversation_id,
+            answer_prompt=answer_prompt,
+            prompt_messages=[
+                PromptMessage(role="system", content=AMEM_ANSWER_SYSTEM_MESSAGE),
+                PromptMessage(role="user", content=answer_prompt),
+            ],
+            metadata={
+                "method": "amem",
+                "answer_context": memory_context,
+                "retrieve_k": retrieve_k,
+                "query_keywords": query_keywords,
+                "answer_prompt_profile": AMEM_READER_PROMPT_VERSION,
+                "query_keyword_prompt_version": AMEM_QUERY_KEYWORD_PROMPT_VERSION,
+            },
         )
+
+    def get_answer(self, question: Question) -> AnswerResult:
+        """基于 A-Mem 检索上下文回答公开问题。"""
+
+        retrieval = self.retrieve(question)
+        runtime = self._runtimes[question.conversation_id]
+        retrieve_k = int(retrieval.metadata["retrieve_k"])
+        query_keywords = str(retrieval.metadata["query_keywords"])
+        prompt = _user_prompt_from_prompt_messages(retrieval.prompt_messages)
         answer_started_ns = perf_counter_ns()
+        collector = self._efficiency_collector
         if collector is not None and collector.enabled:
             with collector.operation_stage(EfficiencyStage.ANSWER):
                 answer = self._call_answer_llm(
@@ -372,11 +420,16 @@ class AMem(BaseMemorySystem):
 
         if conversation_id not in self._runtimes:
             if self._runtime_factory is None:
-                self._runtimes[conversation_id] = self._create_official_runtime(
+                runtime = self._create_official_runtime(
                     conversation_id
                 )
             else:
-                self._runtimes[conversation_id] = self._runtime_factory(conversation_id)
+                runtime = self._runtime_factory(conversation_id)
+            self._install_memory_build_usage_observer(
+                runtime=runtime,
+                conversation_id=conversation_id,
+            )
+            self._runtimes[conversation_id] = runtime
         return self._runtimes[conversation_id]
 
     def _save_conversation_state(
@@ -518,6 +571,10 @@ class AMem(BaseMemorySystem):
             check_connection=False,
         )
         self._ensure_openai_base_url(runtime=runtime, conversation_id=conversation_id)
+        self._install_openai_usage_observer(
+            runtime=runtime,
+            conversation_id=conversation_id,
+        )
         return runtime
 
     def _ensure_openai_base_url(self, runtime: Any, conversation_id: str) -> None:
@@ -540,37 +597,105 @@ class AMem(BaseMemorySystem):
         llm.client = _create_openai_compatible_client(
             api_key=self._openai_api_key,
             base_url=self._openai_base_url,
+            timeout=self.config.api_timeout_seconds,
+            max_retries=self.config.api_max_retries,
         )
 
-    def _iter_turns(self, conversation: Conversation) -> list[Turn]:
-        """按 session 顺序展开公开 turn。"""
+    def _install_openai_usage_observer(
+        self,
+        runtime: Any,
+        conversation_id: str,
+    ) -> None:
+        """为官方 OpenAI client 安装只读 usage observer。
 
-        turns: list[Turn] = []
-        for session in conversation.sessions:
-            turns.extend(session.turns)
-        return turns
+        该 observer 只保存最近一次 response.usage 到官方 LLM 对象，不改变请求参数、
+        返回对象或重试逻辑。没有开启 efficiency collector 时不安装，避免无观测运行
+        增加额外包装。
+        """
 
-    def _call_runtime_add(self, runtime: Any, turn: Turn) -> None:
+        if self._efficiency_collector is None or not self._efficiency_collector.enabled:
+            return
+        llm_controller = getattr(runtime, "llm_controller", None)
+        llm = getattr(llm_controller, "llm", None)
+        client = getattr(llm, "client", None)
+        if llm is None or client is None:
+            raise ConfigurationError(
+                "A-Mem efficiency observation requires a patchable OpenAI "
+                f"client for {conversation_id}"
+            )
+        if getattr(client, "_memory_benchmark_usage_wrapped", False):
+            return
+        llm.client = _UsageTrackingOpenAIClient(client, llm)
+
+    def _install_memory_build_usage_observer(
+        self,
+        runtime: Any,
+        conversation_id: str,
+    ) -> None:
+        """包装官方 build LLM 入口，逐次记录 memory_build LLM token。
+
+        该包装只在 runner 已建立 conversation scope 时记录；question scope 的
+        query/answer 调用仍由 `_generate_query_keywords()` 和 `_call_answer_llm()`
+        显式记录，避免重复计数。
+        """
+
+        collector = self._efficiency_collector
+        if collector is None or not collector.enabled:
+            return
+        llm_controller = getattr(runtime, "llm_controller", None)
+        llm = getattr(llm_controller, "llm", None)
+        if llm is None or not hasattr(llm, "get_completion"):
+            return
+        if getattr(llm, "_memory_benchmark_build_usage_wrapped", False):
+            return
+        original_get_completion = llm.get_completion
+
+        def wrapped_get_completion(*args: Any, **kwargs: Any) -> Any:
+            """调用官方 LLM 方法并在 conversation scope 内记录 build token。"""
+
+            response = original_get_completion(*args, **kwargs)
+            if collector.active_scope_type() == "conversation":
+                prompt_text = ""
+                if args:
+                    prompt_text = str(args[0])
+                elif "prompt" in kwargs:
+                    prompt_text = str(kwargs["prompt"])
+                self._record_llm_call(
+                    model_id="amem-memory-build-llm",
+                    prompt_text=prompt_text,
+                    output_text=str(response),
+                    llm=llm,
+                )
+            return response
+
+        llm.get_completion = wrapped_get_completion
+        llm._memory_benchmark_build_usage_wrapped = True
+
+    def _call_runtime_add(
+        self, runtime: Any, turn: Turn, session_time: str | None = None,
+    ) -> None:
         """把一个公开 turn 写入 A-Mem runtime。"""
 
         content = f"Speaker {turn.speaker} says: {turn.content}"
-        self._suppress_stdout_if_needed(runtime.add_note, content, time=turn.turn_time)
+        timestamp = turn.turn_time or session_time
+        self._suppress_stdout_if_needed(runtime.add_note, content, time=timestamp)
 
     def _build_answer_prompt(self, question: Question, memory_context: str) -> str:
         """构造不含 gold answer 的固定 reader prompt。"""
 
+        question_text = _effective_question_text(question)
         if question.category == "2":
             return (
                 f"Based on the context: {memory_context}, answer the following question. "
                 "Use DATE of CONVERSATION to answer with an approximate date. "
                 "Please generate the shortest possible answer, using words from the "
                 "conversation where possible, and avoid using any subjects.\n\n"
-                f"Question: {question.text} Short answer:"
+                f"Question: {question_text} Short answer:"
             )
         return (
             f"Based on the context: {memory_context}, write an answer in the form of a "
             "short phrase for the following question. Answer with exact words from the "
-            f"context whenever possible.\n\nQuestion: {question.text} Short answer:"
+            f"context whenever possible.\n\nQuestion: {question_text} Short answer:"
         )
 
     def _generate_query_keywords(self, question: Question, runtime: Any) -> str:
@@ -585,10 +710,11 @@ class AMem(BaseMemorySystem):
         """
 
         llm = self._select_llm(runtime=runtime, question=question)
+        effective_text = _effective_question_text(question)
         prompt = (
             "Given the following question, generate several keywords separated by "
             "commas.\n\n"
-            f"Question: {question.text}\n\n"
+            f"Question: {effective_text}\n\n"
             "Keywords:"
         )
         response = self._suppress_stdout_if_needed(llm.get_completion, prompt)
@@ -597,9 +723,10 @@ class AMem(BaseMemorySystem):
             model_id="amem-query-llm",
             prompt_text=prompt,
             output_text=response_text,
+            llm=llm,
         )
         parsed_keywords = _parse_keywords_response(response_text)
-        return parsed_keywords or question.text
+        return parsed_keywords or effective_text
 
     def _retrieve_k_for_question(self, question: Question) -> int:
         """返回 A-Mem Table 8 的 GPT-4o-mini 类别检索深度。
@@ -645,6 +772,7 @@ class AMem(BaseMemorySystem):
             model_id="amem-answer-llm",
             prompt_text=prompt,
             output_text=response_text,
+            llm=answer_llm,
         )
         return response_text
 
@@ -654,15 +782,19 @@ class AMem(BaseMemorySystem):
         model_id: str,
         prompt_text: str,
         output_text: str,
+        llm: Any,
     ) -> None:
         """记录 A-Mem wrapper 可见的一次 LLM 调用 token。"""
 
         collector = self._efficiency_collector
         if collector is None or not collector.enabled:
             return
+        api_input_tokens, api_output_tokens = extract_api_token_usage(
+            getattr(llm, "last_usage", None)
+        )
         usage = resolve_token_usage(
-            api_input_tokens=None,
-            api_output_tokens=None,
+            api_input_tokens=api_input_tokens,
+            api_output_tokens=api_output_tokens,
             prompt_text=prompt_text,
             output_text=output_text,
             tokenizer=_TiktokenCounter(self.config.llm_model),
@@ -728,6 +860,18 @@ def _count_openai_tokens(text: str, model_name: str) -> int:
     return _TiktokenCounter(model_name).count_tokens(text)
 
 
+def _effective_question_text(question: Question) -> str:
+    """构造含可选时间上下文的有效问题文本。
+
+    LoCoMo 不含 question_time，返回原始文本。LongMemEval 的 question_time
+    会作为时间前缀拼接，供检索和回答 prompt 使用。
+    """
+
+    if question.question_time:
+        return f"Question time: {question.question_time}. Question: {question.text}"
+    return str(question.text)
+
+
 def _normalize_category(category: object) -> str | None:
     """把 benchmark category 归一为字符串；缺失时返回 None。"""
 
@@ -763,8 +907,13 @@ def _strip_markdown_fences(text: str) -> str:
     return text
 
 
-def _create_openai_compatible_client(api_key: str | None, base_url: str | None) -> Any:
-    """创建显式携带 base_url 的 OpenAI-compatible client。"""
+def _create_openai_compatible_client(
+    api_key: str | None,
+    base_url: str | None,
+    timeout: float,
+    max_retries: int,
+) -> Any:
+    """创建显式携带 base_url、timeout 和 retry 的 OpenAI-compatible client。"""
 
     try:
         from openai import OpenAI
@@ -772,7 +921,69 @@ def _create_openai_compatible_client(api_key: str | None, base_url: str | None) 
         raise ConfigurationError("openai package is required for A-Mem") from exc
     if not api_key:
         raise ConfigurationError("A-Mem OpenAI-compatible client requires API key")
-    return OpenAI(api_key=api_key, base_url=base_url)
+    return OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=timeout,
+        max_retries=max_retries,
+    )
+
+
+class _UsageTrackingOpenAIClient:
+    """透明包装 OpenAI client，只记录 response.usage。"""
+
+    _memory_benchmark_usage_wrapped = True
+
+    def __init__(self, client: Any, usage_target: Any) -> None:
+        """保存原始 client，并包装 chat completions 入口。"""
+
+        self._client = client
+        self.chat = _UsageTrackingChat(getattr(client, "chat"), usage_target)
+
+    def __getattr__(self, name: str) -> Any:
+        """未显式包装的属性全部转发给原始 client。"""
+
+        return getattr(self._client, name)
+
+
+class _UsageTrackingChat:
+    """透明包装 OpenAI chat namespace。"""
+
+    def __init__(self, chat: Any, usage_target: Any) -> None:
+        """保存原始 chat namespace，并包装 completions。"""
+
+        self._chat = chat
+        self.completions = _UsageTrackingCompletions(
+            getattr(chat, "completions"),
+            usage_target,
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        """未显式包装的属性全部转发给原始 chat namespace。"""
+
+        return getattr(self._chat, name)
+
+
+class _UsageTrackingCompletions:
+    """透明包装 OpenAI chat.completions namespace。"""
+
+    def __init__(self, completions: Any, usage_target: Any) -> None:
+        """保存原始 completions namespace 和 usage 写入目标。"""
+
+        self._completions = completions
+        self._usage_target = usage_target
+
+    def create(self, *args: Any, **kwargs: Any) -> Any:
+        """调用原始 create，并把 response.usage 保存到 A-Mem LLM 对象。"""
+
+        response = self._completions.create(*args, **kwargs)
+        self._usage_target.last_usage = getattr(response, "usage", None)
+        return response
+
+    def __getattr__(self, name: str) -> Any:
+        """未显式包装的属性全部转发给原始 completions namespace。"""
+
+        return getattr(self._completions, name)
 
 
 def _atomic_pickle_dump(path: Path, payload: Any) -> None:
@@ -795,6 +1006,15 @@ def _atomic_pickle_dump(path: Path, payload: Any) -> None:
     finally:
         with contextlib.suppress(FileNotFoundError):
             temporary_path.unlink()
+
+
+def _user_prompt_from_prompt_messages(messages: list[PromptMessage]) -> str:
+    """从 prompt_messages 中取 legacy A-Mem `get_completion()` 需要的 user prompt。"""
+
+    for message in messages:
+        if message.role == "user":
+            return message.content
+    raise ConfigurationError("A-Mem answer prompt is missing user message")
 
 
 def _sha256_file(path: Path) -> str:

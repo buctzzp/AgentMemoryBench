@@ -51,7 +51,11 @@ class PredictCommand:
     smoke_conversation_limit: int = 1
     smoke_max_workers: int | None = None
     max_new_conversations: int | None = None
-    enable_efficiency_observability: bool = False
+    retry_failed_conversations: bool = False
+    question_limit_per_conversation: int | None = None
+    enable_efficiency_observability: bool = True
+    answer_prompt_file: str | Path | None = None
+    answer_prompt_profile: str = "default"
 
 
 @dataclass(frozen=True)
@@ -63,6 +67,7 @@ class EvaluateCommand:
     metrics: tuple[str, ...]
     judge_profile: str = "compact"
     confirm_api: bool = False
+    max_eval_workers: int = 1
 
     def __post_init__(self) -> None:
         """强校验评测范围，避免空运行或路径逃逸。"""
@@ -125,7 +130,11 @@ def execute_predict(command: PredictCommand) -> PredictionBatchResult:
         smoke_conversation_limit=command.smoke_conversation_limit,
         smoke_max_workers=command.smoke_max_workers,
         max_new_conversations=command.max_new_conversations,
+        retry_failed_conversations=command.retry_failed_conversations,
+        question_limit_per_conversation=command.question_limit_per_conversation,
         enable_efficiency_observability=command.enable_efficiency_observability,
+        answer_prompt_file=command.answer_prompt_file,
+        answer_prompt_profile=command.answer_prompt_profile,
     )
 
 
@@ -176,7 +185,10 @@ def execute_evaluate(command: EvaluateCommand) -> tuple[Any, ...]:
         else:
             evaluator = create_evaluator(metric_name, benchmark_name)
         results.append(
-            run_artifact_evaluation(run_dir, evaluator, benchmark_name)
+            run_artifact_evaluation(
+                run_dir, evaluator, benchmark_name,
+                max_workers=command.max_eval_workers,
+            )
         )
     return tuple(results)
 

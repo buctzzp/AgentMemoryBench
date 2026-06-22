@@ -13,7 +13,8 @@ Dataset -> Conversation -> Session -> Turn
 ## 文件职责
 
 - `entities.py`: 数据实体，例如 `Conversation`、`Session`、`Turn`、`Question`、`GoldAnswerInfo`。
-- `interfaces.py`: method 抽象基类，包括完整记忆系统和可选检索能力。
+- `interfaces.py`: method 抽象基类。当前主接口是 retrieve-first
+  `BaseMemoryProvider`；完整 answer system 接口只作迁移期兼容。
 - `validators.py`: 数据结构强校验和公开 payload 私有字段泄漏检查。
 - `exceptions.py`: 项目领域异常，调用方可以稳定捕获。
 - `results.py`: dry-run 等框架级摘要对象。
@@ -97,22 +98,47 @@ Dataset -> Conversation -> Session -> Turn
 
 `ImageRef` 为后续多模态 benchmark 保留。Phase 1 不主动读取图片，但 core 允许 turn 带图片引用和 caption fallback。
 
-### AnswerResult / MetricResult / EvaluationResult
+### AnswerPromptResult / AnswerResult / MetricResult / EvaluationResult
 
-- `AnswerResult`: method 对公开问题的回答。
+- `AnswerPromptResult`: retrieve-first method 对公开问题返回的完整 answer prompt。
+- `AnswerResult`: framework reader 或 legacy method 对公开问题的回答。
 - `MetricResult`: evaluator 对单题的打分。
 - `EvaluationResult`: runner 汇总后的结果。
 
-### RetrievalResult
+### AnswerPromptResult
 
-`RetrievalResult` 是可选能力的输出。Phase 1 不要求 method 实现检索接口，也不计算检索召回类指标；该实体只为后续需要记忆模块诊断的 benchmark 保留。
+`AnswerPromptResult.prompt_messages` 是当前主协议的核心输出。它必须是 method 内部已经
+完成 query rewrite、检索、过滤、rerank、merge、格式化和 answer prompt 构造后的完整
+role messages。framework answer LLM 直接使用这些 messages 生成最终答案。Phase 1 不计算
+retrieval recall，但仍要求 conversation-QA method 通过 `retrieve(question)` 交出可回答
+问题的完整 prompt messages。
+
+`AnswerPromptResult.answer_prompt` 是兼容文本视图，用于 artifact、日志和 token 估算。
+当只传入 `prompt_messages` 时，实体会自动生成带 `[system]` / `[user]` 标记的
+`answer_prompt`；旧 artifact 只包含 `answer_prompt` 时，实体会自动降级为单条 user
+message。
+
+`AnswerPromptResult.metadata` 是 method 的扩展区，可保存 `answer_context`、原始检索项、
+prompt profile 和调试信息。只有当 method 能稳定拆出 `metadata["answer_context"]` 时，
+runner 才会额外统计 `injected_memory_context_tokens`。
 
 ## 接口
 
-完整记忆系统继承 `BaseMemorySystem`：
+新 method 接入优先继承 `BaseMemoryProvider`：
 
 ```python
-class MyMemorySystem(BaseMemorySystem):
+class MyMemoryProvider(BaseMemoryProvider):
+    def add(self, conversation: Conversation) -> AddResult:
+        ...
+
+    def retrieve(self, question: Question) -> AnswerPromptResult:
+        ...
+```
+
+迁移期仍保留完整记忆系统 `BaseMemorySystem`：
+
+```python
+class MyLegacyMemorySystem(BaseMemorySystem):
     def add(self, conversations: list[Conversation]) -> AddResult:
         ...
 
@@ -120,15 +146,9 @@ class MyMemorySystem(BaseMemorySystem):
         ...
 ```
 
-可选检索器继承 `BaseMemoryRetriever`：
-
-```python
-class MyRetriever(BaseMemoryRetriever):
-    def retrieve(self, question: Question) -> RetrievalResult:
-        ...
-```
-
-Phase 1 runner 只要求 `BaseMemorySystem`。
+`BaseMemorySystem`、`BaseResumableMemorySystem` 和 `BaseMemoryRetriever` 是历史兼容接口，
+不是新 method 接入目标。当前方向是在 retrieve-first 主路径稳定后逐步删除或降级这些旧
+接口。
 
 ## 校验规则
 

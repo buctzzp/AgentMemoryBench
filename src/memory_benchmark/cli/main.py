@@ -96,6 +96,13 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["compact", "detailed"],
     )
     evaluate_parser.add_argument("--confirm-api", action="store_true")
+    evaluate_parser.add_argument(
+        "--max-eval-workers",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Number of parallel workers for evaluation (default: 1, serial).",
+    )
 
     run_parser = subparsers.add_parser(
         "run",
@@ -153,25 +160,68 @@ def _add_prediction_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--smoke-conversation-limit",
         type=int,
-        choices=[1, 2],
         default=1,
     )
     parser.add_argument(
         "--smoke-max-workers",
         type=int,
-        choices=[1, 2],
         default=None,
+        help="Override smoke conversation worker count; validated by method profile.",
     )
-    parser.add_argument(
+    efficiency_group = parser.add_mutually_exclusive_group()
+    efficiency_group.add_argument(
         "--enable-efficiency-observability",
+        dest="enable_efficiency_observability",
         action="store_true",
-        help="Write raw token/latency observations for this prediction run.",
+        default=True,
+        help=(
+            "Write raw token/latency observations for this prediction run "
+            "(default)."
+        ),
+    )
+    efficiency_group.add_argument(
+        "--disable-efficiency-observability",
+        dest="enable_efficiency_observability",
+        action="store_false",
+        help="Disable prediction efficiency observation for this run.",
     )
     parser.add_argument(
         "--max-new-conversations",
         type=int,
         default=None,
         help=MAX_NEW_CONVERSATIONS_HELP,
+    )
+    parser.add_argument(
+        "--retry-failed",
+        dest="retry_failed_conversations",
+        action="store_true",
+        help=(
+            "Retry failed conversations recorded in checkpoints. By default, "
+            "failed conversations stay quarantined during resume to avoid "
+            "repeated API burn."
+        ),
+    )
+    parser.add_argument(
+        "--question-limit-per-conversation",
+        type=int,
+        default=None,
+        help=(
+            "Per-command question budget for each selected conversation. It is "
+            "not experiment identity, so a later resume can increase it."
+        ),
+    )
+    parser.add_argument(
+        "--answer-prompt-file",
+        default=None,
+        help=(
+            "Path to a custom framework answer prompt template containing "
+            "{question} and {memory_context}."
+        ),
+    )
+    parser.add_argument(
+        "--answer-prompt-profile",
+        default="default",
+        help="Answer prompt profile name written to framework-reader metadata.",
     )
 
 
@@ -225,7 +275,7 @@ def _add_calibration_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--max-parallel-runs",
         type=int,
-        choices=[1, 2, 4],
+        choices=[1, 2, 3, 4],
         default=2,
     )
 
@@ -243,6 +293,7 @@ def _dispatch(args: argparse.Namespace) -> Any:
                 metrics=tuple(args.metrics),
                 judge_profile=args.judge_profile,
                 confirm_api=args.confirm_api,
+                max_eval_workers=args.max_eval_workers,
             )
         )
     if args.command == "run":
@@ -287,7 +338,15 @@ def _prediction_command_from_args(args: argparse.Namespace) -> PredictCommand:
         smoke_conversation_limit=args.smoke_conversation_limit,
         smoke_max_workers=args.smoke_max_workers,
         max_new_conversations=args.max_new_conversations,
+        retry_failed_conversations=args.retry_failed_conversations,
+        question_limit_per_conversation=args.question_limit_per_conversation,
         enable_efficiency_observability=args.enable_efficiency_observability,
+        answer_prompt_file=(
+            None
+            if args.answer_prompt_file is None
+            else Path(args.answer_prompt_file)
+        ),
+        answer_prompt_profile=args.answer_prompt_profile,
     )
 
 

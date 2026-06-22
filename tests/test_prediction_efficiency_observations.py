@@ -15,17 +15,22 @@ from memory_benchmark.core import (
     ConfigurationError,
     Conversation,
     Question,
+    AnswerPromptResult,
 )
-from memory_benchmark.core.interfaces import BaseMemorySystem
+from memory_benchmark.core.interfaces import BaseMemoryProvider, BaseMemorySystem
 from memory_benchmark.observability import RunContext
 from memory_benchmark.observability.efficiency import (
     ConversationEfficiencyObservation,
     EfficiencyCollector,
     EfficiencyArtifactStore,
+    EfficiencyStage,
+    LLMCallObservation,
+    MeasurementSource,
     ModelDescriptor,
     QuestionEfficiencyObservation,
     RetrievalObservationContract,
 )
+from memory_benchmark.readers import FakeAnswerLLMClient, FrameworkAnswerReader
 from memory_benchmark.runners import prediction as prediction_module
 from memory_benchmark.runners.prediction import PredictionRunPolicy, run_predictions
 from memory_benchmark.storage import ExperimentPaths, atomic_write_json
@@ -133,6 +138,56 @@ class _ObservedFakeMethod(BaseMemorySystem):
             conversation_id=question.conversation_id,
             answer=f"answer:{question.question_id}",
         )
+
+
+class _RetrieveFirstFakeProvider(BaseMemoryProvider):
+    """返回固定 retrieval context 的 retrieve-first fake provider。"""
+
+    def __init__(self) -> None:
+        """初始化写入和检索调用记录。"""
+
+        self.added_conversation_ids: list[str] = []
+        self.retrieved_question_ids: list[str] = []
+
+    def add(self, conversation: Conversation) -> AddResult:
+        """记录单个 conversation 写入。"""
+
+        self.added_conversation_ids.append(conversation.conversation_id)
+        return AddResult(conversation_ids=[conversation.conversation_id])
+
+    def retrieve(self, question: Question) -> AnswerPromptResult:
+        """返回可直接注入 framework reader 的固定上下文。"""
+
+        self.retrieved_question_ids.append(question.question_id)
+        return AnswerPromptResult(
+            question_id=question.question_id,
+            conversation_id=question.conversation_id,
+            answer_prompt="Alice likes tea and keeps that preference in memory.",
+            metadata={
+                "method": "fake-provider",
+                "answer_context": "Alice likes tea and keeps that preference in memory.",
+            },
+        )
+
+
+class _InstrumentedRetrieveFirstFakeProvider(_RetrieveFirstFakeProvider):
+    """模拟内置 method adapter 自己已经记录 retrieval latency 的 provider。"""
+
+    def __init__(self, collector: EfficiencyCollector) -> None:
+        """保存 collector，并初始化父类调用记录。"""
+
+        super().__init__()
+        self.collector = collector
+
+    def retrieve(self, question: Question) -> AnswerPromptResult:
+        """先返回 retrieval，再模拟 adapter 层已记录 retrieval observation。"""
+
+        retrieval = super().retrieve(question)
+        self.collector.record_retrieval_result(
+            latency_ms=0.5,
+            injected_memory_context_tokens=None,
+        )
+        return retrieval
 
 
 def _run_with_efficiency(
@@ -297,6 +352,119 @@ def test_preflight_rejects_changed_observability_identity_without_writes(
     ) == original_manifest
 
 
+def test_retrieve_first_records_context_tokens_and_answer_latency(tmp_path) -> None:
+    """retrieve-first 路径必须记录 context tokens、retrieval latency 和 answer latency。"""
+
+    collector = EfficiencyCollector(run_id="efficiency-run", enabled=True)
+    provider = _RetrieveFirstFakeProvider()
+    reader = FrameworkAnswerReader(client=FakeAnswerLLMClient(answer="tea"))
+
+    run_predictions(
+        dataset=_build_dataset(),
+        system=provider,
+        run_context=_context(tmp_path, resume=False),
+        policy=PredictionRunPolicy(max_workers=1, progress_enabled=False),
+        method_manifest={"adapter": "retrieve-first-fake-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+        efficiency_collector=collector,
+        model_inventory=_inventory(),
+        instrumentation_identity={
+            "collector_schema": 1,
+            "wrapper_sha256": "retrieve-first-fake",
+        },
+        retrieval_observation_contract=RetrievalObservationContract(
+            required_by_profile=True,
+            supported_by_method=True,
+        ),
+        answer_reader=reader,
+    )
+
+    observations = EfficiencyArtifactStore.for_prediction(
+        ExperimentPaths(run_dir=tmp_path / "efficiency-run")
+    ).read_observations()
+    question_records = [
+        record
+        for record in observations
+        if isinstance(record, QuestionEfficiencyObservation)
+    ]
+
+    assert {record.question_id for record in question_records} == {
+        "conv-1:q1",
+        "conv-2:q1",
+    }
+    assert all(record.retrieval_latency_ms is not None for record in question_records)
+    assert all(
+        record.injected_memory_context_tokens is not None
+        and record.injected_memory_context_tokens > 0
+        for record in question_records
+    )
+    assert all(record.answer_generation_latency_ms > 0 for record in question_records)
+    llm_records = [
+        record for record in observations if isinstance(record, LLMCallObservation)
+    ]
+    assert len(llm_records) == 2
+    assert all(record.stage is EfficiencyStage.ANSWER for record in llm_records)
+    assert all(record.model_id == "fake-answer-llm" for record in llm_records)
+    assert all(record.input_tokens > 0 for record in llm_records)
+    assert all(record.output_tokens > 0 for record in llm_records)
+    assert all(
+        record.token_measurement_source is MeasurementSource.TOKENIZER_ESTIMATE
+        for record in llm_records
+    )
+
+
+def test_retrieve_first_fills_context_tokens_when_adapter_records_retrieval(
+    tmp_path,
+) -> None:
+    """adapter 已记录 retrieval 时，runner 只能补 context tokens，不能重复报错。"""
+
+    collector = EfficiencyCollector(run_id="efficiency-run", enabled=True)
+    provider = _InstrumentedRetrieveFirstFakeProvider(collector)
+    reader = FrameworkAnswerReader(client=FakeAnswerLLMClient(answer="tea"))
+
+    run_predictions(
+        dataset=_build_dataset(),
+        system=provider,
+        run_context=_context(tmp_path, resume=False),
+        policy=PredictionRunPolicy(max_workers=1, progress_enabled=False),
+        method_manifest={"adapter": "instrumented-retrieve-first-fake-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+        efficiency_collector=collector,
+        model_inventory=_inventory(),
+        instrumentation_identity={
+            "collector_schema": 1,
+            "wrapper_sha256": "retrieve-first-fake",
+        },
+        retrieval_observation_contract=RetrievalObservationContract(
+            required_by_profile=True,
+            supported_by_method=True,
+        ),
+        answer_reader=reader,
+    )
+
+    observations = EfficiencyArtifactStore.for_prediction(
+        ExperimentPaths(run_dir=tmp_path / "efficiency-run")
+    ).read_observations()
+    question_records = [
+        record
+        for record in observations
+        if isinstance(record, QuestionEfficiencyObservation)
+    ]
+
+    assert {record.question_id for record in question_records} == {
+        "conv-1:q1",
+        "conv-2:q1",
+    }
+    assert all(record.retrieval_latency_ms == 0.5 for record in question_records)
+    assert all(
+        record.injected_memory_context_tokens is not None
+        and record.injected_memory_context_tokens > 0
+        for record in question_records
+    )
+
+
 def test_runner_records_isolated_build_and_question_observations_concurrently(
     tmp_path,
 ) -> None:
@@ -441,3 +609,46 @@ def test_completed_resume_does_not_duplicate_efficiency_observations(
     assert resumed_system.answered_question_ids == []
     assert after == before
     assert len({record["observation_id"] for record in after}) == len(after)
+
+
+def test_runner_writes_human_readable_efficiency_summary_artifacts(tmp_path) -> None:
+    """prediction 完成后应写出按 run、conversation、question 聚合的效率摘要。
+
+    输入:
+        一个启用 efficiency collector 的最小 prediction run。
+    输出:
+        `summaries/` 下的三个 JSON 文件；其中 conversation 摘要能直接看出每个
+        conversation 的构建耗时、问题数和注入 prompt 的 memory token。
+    """
+
+    collector = EfficiencyCollector(run_id="efficiency-run", enabled=True)
+    _run_with_efficiency(
+        tmp_path,
+        system=_ObservedFakeMethod(collector),
+        collector=collector,
+        max_workers=2,
+    )
+
+    run_dir = tmp_path / "efficiency-run"
+    overall_path = run_dir / "summaries" / "efficiency_overall.prediction.json"
+    by_conversation_path = (
+        run_dir / "summaries" / "efficiency_by_conversation.prediction.json"
+    )
+    by_question_path = (
+        run_dir / "summaries" / "efficiency_by_question.prediction.json"
+    )
+
+    assert overall_path.exists()
+    assert by_conversation_path.exists()
+    assert by_question_path.exists()
+
+    by_conversation = json.loads(by_conversation_path.read_text(encoding="utf-8"))
+    records = {
+        record["conversation_id"]: record
+        for record in by_conversation["records"]
+    }
+    assert records["conv-1"]["question_count"] == 1
+    assert records["conv-1"]["retrieval_latency_ms_total"] == 1.0
+    assert records["conv-1"]["injected_memory_context_tokens_total"] == 10
+    assert records["conv-2"]["question_count"] == 1
+    assert records["conv-2"]["retrieval_latency_ms_total"] == 2.0

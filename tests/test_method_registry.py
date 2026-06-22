@@ -39,7 +39,7 @@ def test_mem0_registration_declares_capabilities_factory_and_api_boundary() -> N
     assert registration.provided_capabilities == frozenset(
         {
             MethodCapability.CONVERSATION_ADD,
-            MethodCapability.ANSWER_GENERATION,
+            MethodCapability.MEMORY_RETRIEVAL,
         }
     )
     assert registration.profile_names == frozenset({"smoke", "official-full"})
@@ -49,6 +49,7 @@ def test_mem0_registration_declares_capabilities_factory_and_api_boundary() -> N
     assert registration.source_identity_factory is not None
     assert registration.model_name_getter is not None
     assert registration.max_workers_getter is not None
+    assert registration.supports_shared_instance_parallelism is False
     assert not hasattr(registration, "supported_benchmarks")
     assert not hasattr(registration, "predictor")
     assert not hasattr(registration, "api_key")
@@ -65,11 +66,25 @@ def test_memoryos_registration_uses_generic_contract() -> None:
     assert registration.provided_capabilities == frozenset(
         {
             MethodCapability.CONVERSATION_ADD,
-            MethodCapability.ANSWER_GENERATION,
+            MethodCapability.MEMORY_RETRIEVAL,
         }
     )
     assert registration.profile_relative_path == Path("configs/methods/memoryos.toml")
     assert registration.requires_api is True
+
+
+def test_built_in_methods_advertise_memory_retrieval_capability() -> None:
+    """retrieve-first prediction 要求内置 method 声明 memory_retrieval。"""
+
+    for method_name in ("mem0", "memoryos", "amem", "lightmem"):
+        registration = get_method_registration(method_name)
+
+        assert MethodCapability.CONVERSATION_ADD in registration.provided_capabilities
+        assert MethodCapability.MEMORY_RETRIEVAL in registration.provided_capabilities
+        assert (
+            MethodCapability.ANSWER_GENERATION
+            not in registration.provided_capabilities
+        )
 
 
 def test_compatibility_requires_task_family_and_capabilities() -> None:
@@ -80,14 +95,14 @@ def test_compatibility_requires_task_family_and_capabilities() -> None:
         required_capabilities=frozenset(
             {
                 MethodCapability.CONVERSATION_ADD,
-                MethodCapability.ANSWER_GENERATION,
+                MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
         method_task_families=frozenset({TaskFamily.CONVERSATION_QA}),
         provided_capabilities=frozenset(
             {
                 MethodCapability.CONVERSATION_ADD,
-                MethodCapability.ANSWER_GENERATION,
+                MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
     )
@@ -114,7 +129,7 @@ def test_compatibility_rejects_missing_capabilities() -> None:
             required_capabilities=frozenset(
                 {
                     MethodCapability.CONVERSATION_ADD,
-                    MethodCapability.ANSWER_GENERATION,
+                    MethodCapability.MEMORY_RETRIEVAL,
                 }
             ),
             method_task_families=frozenset({TaskFamily.CONVERSATION_QA}),

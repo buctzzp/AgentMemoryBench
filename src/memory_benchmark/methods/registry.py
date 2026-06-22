@@ -520,7 +520,7 @@ _REGISTRATIONS = {
         provided_capabilities=frozenset(
             {
                 MethodCapability.CONVERSATION_ADD,
-                MethodCapability.ANSWER_GENERATION,
+                MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
         profile_sections=(
@@ -535,6 +535,7 @@ _REGISTRATIONS = {
         model_name_getter=_amem_model_name,
         max_workers_getter=_amem_max_workers,
         display_name="A-Mem",
+        allow_smoke_worker_override=True,
         efficiency_model_inventory_getter=_amem_efficiency_model_inventory,
         efficiency_instrumentation_identity_getter=(
             _amem_efficiency_instrumentation_identity
@@ -547,7 +548,7 @@ _REGISTRATIONS = {
         provided_capabilities=frozenset(
             {
                 MethodCapability.CONVERSATION_ADD,
-                MethodCapability.ANSWER_GENERATION,
+                MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
         profile_sections=(
@@ -568,7 +569,7 @@ _REGISTRATIONS = {
             _mem0_efficiency_instrumentation_identity
         ),
         retrieval_observation_contract_getter=_separable_retrieval_contract,
-        supports_shared_instance_parallelism=True,
+        supports_shared_instance_parallelism=False,
     ),
     "lightmem": MethodRegistration(
         name="lightmem",
@@ -576,7 +577,7 @@ _REGISTRATIONS = {
         provided_capabilities=frozenset(
             {
                 MethodCapability.CONVERSATION_ADD,
-                MethodCapability.ANSWER_GENERATION,
+                MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
         profile_sections=(
@@ -591,6 +592,7 @@ _REGISTRATIONS = {
         model_name_getter=_lightmem_model_name,
         max_workers_getter=_lightmem_max_workers,
         display_name="LightMem",
+        allow_smoke_worker_override=True,
         efficiency_model_inventory_getter=_lightmem_efficiency_model_inventory,
         efficiency_instrumentation_identity_getter=(
             _lightmem_efficiency_instrumentation_identity
@@ -603,7 +605,7 @@ _REGISTRATIONS = {
         provided_capabilities=frozenset(
             {
                 MethodCapability.CONVERSATION_ADD,
-                MethodCapability.ANSWER_GENERATION,
+                MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
         profile_sections=(
@@ -618,6 +620,7 @@ _REGISTRATIONS = {
         model_name_getter=_memoryos_model_name,
         max_workers_getter=_memoryos_max_workers,
         display_name="MemoryOS",
+        allow_smoke_worker_override=True,
         workload_estimator=_estimate_memoryos_update_batches,
         efficiency_model_inventory_getter=_memoryos_efficiency_model_inventory,
         efficiency_instrumentation_identity_getter=(

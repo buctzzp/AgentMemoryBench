@@ -1,9 +1,10 @@
 # 当前动态路线图
 
-更新日期：2026-06-19
+更新日期：2026-06-21
 
 本文件只记录当前主线、完成状态和阶段依赖。每完成一个任务必须立即勾选并同步
-`AGENTS.md`；详细实现步骤放在对应 `docs/superpowers/plans/` 文件中。
+`AGENTS.md`；逐项 open/closed 状态和历史文档状态以 `docs/task-ledger.md` 为准。
+详细实现步骤放在对应 `docs/superpowers/plans/` 文件中。
 
 ## 已完成
 
@@ -126,9 +127,9 @@ Table 级实验设置对齐。
 - [x] A-Mem：实现 wrapper 层 conversation-level 状态持久化；`add()` 完成后保存
   `memories.pkl`、官方 retriever cache/embeddings 和 `state_manifest.json`，
   resume 时由 registry 对 completed conversations 调 `load_existing_conversation_state()`。
-- [ ] A-Mem：category 5 adversarial 当前因 gold answer 冲突显式拒绝，不进入普通
-  public-input smoke；如需测 adversarial，必须另行对齐私有 gold 边界。
-- [ ] LightMem：补齐 Table 2 / Table 3 profile。
+- [x] A-Mem：category 5 adversarial 当前因 gold answer 冲突显式拒绝，不进入普通
+  public-input smoke；用户已确认当前不做 LoCoMo adversarial。
+- [x] LightMem：补齐当前阶段 Table 2 / Table 3 使用的固定 profile。
   - [x] 用户指定并落实 `(r=0.7, th=512)` official-mini profile。
   - [x] 对齐 LoCoMo / LongMemEval 增量写入粒度。
   - [x] 对齐 LongMemEval `question_time` reader prompt 和 LightMem LoCoMo prompt 布局。
@@ -137,21 +138,55 @@ Table 级实验设置对齐。
     `offline_update_all_entries(score_threshold=0.9)`。
   - [x] LightMem：实现 conversation-level resume；resume 时 registry 对 completed
     conversations 调 `load_existing_conversation_state()`，重建对应 backend 用于回答剩余问题。
+  - [ ] LightMem 内部算法参数未来可做成 profile/TOML 可配置；当前阶段固定
+    `(r=0.7, th=512)`，不把参数 sweep 加入主线。
   - [ ] LongMemEval OP-update 仍是可选 future profile；当前 LongMemEval 保持通用
     `LightMemory.retrieve()` online 路径。
 - [x] Mem0：将 `get_answer()` reader 改为 Mem0 memory-benchmarks 官方 LoCoMo /
   LongMemEval prompt，并固定当前阶段 answerer 为 `gpt-4o-mini`。
 - [x] Mem0：smoke profile 已恢复官方 `top_k=200`，成本控制只通过 benchmark 规模裁剪。
-- [x] Mem0：由于官方 LongMemEval 为 `CHUNK_SIZE=2` user+assistant pair，和当前
-  turn-level resume 语义不一致，Mem0 对 LoCoMo 保留 `CHUNK_SIZE=1` turn-level
-  写入和 resume；对 LongMemEval 使用官方 pair 级写入与 conversation-level resume。
+- [x] Mem0：LoCoMo 仍按官方 `CHUNK_SIZE=1` 在 adapter 内部逐条调用 `Memory.add()`；
+  LongMemEval 仍按官方 `CHUNK_SIZE=2` user+assistant pair 写入。2026-06-19 用户新决策后，
+  Mem0 不再暴露 runner turn-level resume，LoCoMo / LongMemEval 均使用
+  conversation-level resume。
 - [x] 完成 `docs/method-interface-inventory.md` 中四个 method 的完整输入输出清单，
   真实 smoke 前不得再依赖未记录假设。
 
-### Phase I：通用并行调度（顺延）
+### Phase H.5：Retrieve-first 协议收尾与架构减重（当前）
 
-- [ ] 明确 method execution policy：`serial`、`shared_thread`、`isolated_process`。
-- [ ] 保留 Mem0 的共享实例线程并行。
+- [x] 记录 retrieve-first 主协议设计：
+  `docs/superpowers/specs/2026-06-20-retrieve-first-memory-module-design.md`。
+- [x] 记录 LLM provider / prompt 配置设计：
+  `docs/superpowers/specs/2026-06-21-llm-provider-config-design.md`。
+- [x] 记录 registry / capability 减重方向：
+  `docs/superpowers/specs/2026-06-21-registry-capability-simplification-design.md`。
+- [x] 完成 retrieve-first 实施计划 Task 14：framework answer / retrieval efficiency
+  observation 收尾。
+- [x] 完成 retrieve-first 实施计划 Task 15：answer-level artifact evaluation 默认忽略
+  `answer_prompts.prediction.jsonl`，旧 LongMemEval offline 装配测试已迁移到
+  retrieve-first fake provider。
+- [x] 执行 retrieve-first 实施计划 Task 16：文档与迁移清理，更新 README、
+  method interface inventory、handoff 与 legacy `get_answer()` 兼容说明。
+- [ ] 在 retrieve-first 主路径稳定后，逐步弱化 `MethodCapability` 推理，把
+  conversation-QA method 兼容性收敛到 `BaseMemoryProvider` 继承关系。
+- [ ] 清理或废弃 `BaseMemorySystem`、`BaseResumableMemorySystem` 和
+  `BaseMemoryRetriever` 等历史接口；删除前必须保证四个内置 method、fake/offline
+  测试和 artifact-only evaluation 不依赖旧主路径。
+- [ ] 减重 evaluator registry：F1 / LLM judge 尽量统一为 metric profile + prompt
+  profile，不为每个 benchmark 复制过重 evaluator 类。
+
+### Phase I：Conversation 级并行与 Resume（当前边界）
+
+当前已重新对齐：prediction / full run 层只做 **单个 method × 单个 benchmark 内部的
+conversation 级并行**。不继续推进 shared method instance、method execution policy
+矩阵、method×benchmark 外层 full parallel orchestrator 等更复杂调度。多个 method 或
+多个 benchmark 的并行实验，当前可以由用户开多个终端分别运行；框架不为“少开终端”
+牺牲主线可调试性和可维护性。
+
+- [x] 明确当前并行边界：只保留 conversation-level parallel / resume；历史
+  `shared_thread`、`isolated_process` policy 设计不作为近期实现目标。
+- [x] Mem0 不再保留共享 OSS `Memory` 实例线程并行；统一改为框架 isolated
+  conversation 并发和 conversation-level resume。
 - [x] 完成 isolated worker 并行原型验收与修复：非共享实例 method 可创建独立 method
   instance；Codex 已补齐 completed conversation checkpoint、pending question 过滤和
   turn checkpoint fail-closed。
@@ -163,24 +198,54 @@ Table 级实验设置对齐。
   completed conversation / pending question 判断。
 - [x] isolated worker 补齐 conversation-level resume 和 question-level resume；已完成
   离线 focused 验证，真实 API/full 仍需用户确认并从小并发 smoke 开始。
+- [x] 修正 isolated worker state root 稳定性：当前 `worker_{idx}` 由剩余 work plan
+  动态分块得到，partial question resume 时可能把已完成 ingest 的 conversation 映射到
+  不同 worker state 目录；Mem0 切 isolated 前必须固定 conversation 到 state root 的映射。
 - [x] 新增 `max_new_conversations` 本次运行预算：每次只推进 N 个未完成 conversation，
   后续允许用同一 `run_id` 和不同预算 resume。
-- [ ] 为 MemoryOS `paper_eval` backend 实现独立 runtime 的进程/实例隔离并行，并补齐
-  conversation-level resume。
+- [x] 统一实验裁剪配置：smoke 支持最多 N 个 conversation 与每 conversation 最多
+  N 个 turns；`--question-limit-per-conversation` 和 `--max-new-conversations` 是本次
+  命令预算，不进入 resume identity，允许首次运行和后续 resume 分批推进。full 不随意
+  截断历史 turn，保持 official profile 语义。
+- [x] 修复 isolated worker 失败可诊断性：记录完整异常 traceback，并能写入具体
+  conversation failed checkpoint。该条早期 fail-fast 语义已被下方“局部失败 continue”
+  语义替代。
+- [x] 将 isolated worker 失败语义升级为 conversation 局部失败 continue：单个
+  conversation 失败后标记 failed、记录 traceback，当前 worker 继续后续 conversation，
+  其他 worker 不受影响；只有配置、manifest、依赖、source identity 等全局错误才
+  fail-fast。
+- [x] 增加 API/network retry 与 timeout 兜底，优先覆盖 Mem0 embedding API SSL 断连
+  事故路径；Mem0 vendored LLM/embedding OpenAI clients 已通过 `with_options()` 注入
+  `api_timeout_seconds=60.0` 和 `api_max_retries=8`。OpenCode 后续已为 A-Mem 和
+  LightMem 补齐同类配置与 client 注入；MemoryOS 已有 timeout/retry 配置。四个当前
+  OpenAI-compatible method 的基础 timeout/retry 兜底已覆盖，真实断网/限流韧性测试后续再做。
+- [x] 增加连续失败熔断，例如 `max_consecutive_failures`，避免全局网络或配置问题导致
+  多 worker 批量空烧 API。
+- [x] 补齐 `--retry-failed` 同 run 内最多尝试一次的测试：retry-failed 只影响 eligible
+  selection，不允许失败 conversation 在同一次 run 内被其他 worker 接手重试。
+- [x] 避免 isolated-only method 的根实例副作用：registered runner 在 isolated path
+  传 `_UnusedRootSystem` 占位，第三方 method 只在 `worker_*` 内构造，避免额外创建
+  顶层 `method_state/qdrant` 或 `history.db`。
+- [ ] 后续如需更高并发，只在 conversation-level worker 内优化隔离和资源控制，不重新引入
+  method×benchmark full orchestrator 或 shared method instance policy。
 - [ ] 证明不同 conversation 状态、日志、checkpoint 和 artifact 不串写。
 - [ ] 从 `max_workers=2` 开始做小量 API 并发 smoke，再决定 official 默认值。
-- [ ] 增加实验级 orchestrator，并通过 `max_parallel_runs` 控制多个独立 run。
-- [ ] 限制“实验并发 × conversation 并发”的总请求规模。
-- [x] 采纳并实现 resume 分层策略：Mem0 LoCoMo turn-level、Mem0 LongMemEval
-  conversation-level；MemoryOS/A-Mem/LightMem conversation-level。
+- [x] method×benchmark 外层并行降级为低优先级便利能力：`calibrate-smoke` 可继续服务极小
+  成本校准和批量 smoke，但不作为 full 实验调度主线；常规实验可用多个终端分别运行。
+- [x] 修正 Mem0 并发与 resume 策略：不再使用共享 OSS `Memory` 实例并发，不再保留
+  LoCoMo turn-level resume；统一改为框架 isolated conversation 并发和 conversation-level
+  resume。
+- [x] 历史 resume 分层策略已实现过：Mem0 LoCoMo turn-level、Mem0 LongMemEval
+  conversation-level；MemoryOS/A-Mem/LightMem conversation-level。该策略已被 2026-06-19
+  用户新决策 supersede，保留此条仅作历史说明。
 - [x] A-Mem wrapper 层状态持久化已完成，可支撑 conversation-level resume；仍不做
   turn-level resume。
 - [x] LightMem completed conversation backend 恢复已接入；写入完成但问题未答完时，
   resume 可重建 backend 并继续 question-level resume。
 
-说明：Phase J 已实现一个只用于成本校准的极小 smoke 外层 orchestrator。它不是
-Phase I 的 full parallel 调度替代品；full parallel 仍需处理更大规模、多 profile、
-method execution policy 和进程隔离策略。
+说明：Phase J 已实现一个只用于成本校准的极小 smoke 外层 orchestrator。它不是 full
+parallel 调度主线；当前不继续扩展 method×benchmark full parallel。若未来真实用户明确需要
+统一排队、统一展示或排行榜批处理，再重新设计。
 
 MemoryOS PyPI backend 已降为低优先级，本阶段不实现。
 
@@ -206,44 +271,209 @@ MemoryOS PyPI backend 已降为低优先级，本阶段不实现。
 - [x] LightMem vendored import 已加锁，并在当前进程保留 LightMem `src` 路径，
   避免并发 smoke 时反复插拔 `sys.path`。
 - [x] A-Mem / LightMem 补齐 wrapper 层可见 LLM token observation：A-Mem 记录
-  query-generation 与 answer LLM；LightMem 记录 answer LLM。二者当前因第三方
-  wrapper 只返回文本，token 来源为 `tokenizer_estimate`，不冒充 API usage。
+  query-generation 与 answer LLM；LightMem 记录 answer LLM。当前优先读取真实
+  response usage，缺失时回退 `tokenizer_estimate`，不冒充 API usage。
+- [x] A-Mem 内部 memory build LLM 调用提升到 `api_usage` 级：
+  A-Mem 已在 official runtime 的 `llm_controller.llm.get_completion()` 外围加透明
+  observer，并通过 fake/offline focused 验证。
+- [x] LightMem memory-build LLM observer 已完成 adapter 级修复并真实复验：真实旧 run
+  `lightmem-api-smoke-v2` 只记录了 answer LLM usage，根因是 OP-update 内部
+  `ThreadPoolExecutor.map()` 不传播 ContextVar scope；当前已用子线程 usage buffer
+  + `add()` 内 flush 方式修复，并通过 fake 线程池 OP-update 离线测试。OpenCode
+  后续运行 `lightmem-smoke-4c20t-w4-20260620`，确认 stage=`memory_build`、
+  model_id=`lightmem-memory-llm` 的 `llm_call(api_usage)` 已出现。旧 run 仍不能作为
+  完整 build LLM 成本依据。
 - [x] `calibrate-smoke` 在线程池启动前串行预加载 transformers / sentence-transformers
   相关依赖，规避 LightMem 与其他 method 并行启动时的 lazy import 竞态。
 - [x] OpenCode 已新增 `CalibrationProgressMonitor`，并在并行 calibrate-smoke 下禁用
   child run Rich progress、由外层读取 `checkpoints/progress.json` 渲染统一表格；
   Codex 已修正其新增测试的 Rich 宽度问题并验证离线测试通过。
+- [x] Codex 已同步审查 `opencode/opencode_result-6.19.md`，恢复
+  `opencode/opencode_result.md` 稳定索引，并修复 calibrate-smoke monitor 对
+  LongMemEval concrete variant child run 的 progress 路径解析；离线验证
+  `tests/test_calibration_progress_monitor.py tests/test_cost_calibration_smoke.py`
+  为 `24 passed`。
+- [x] 建立当前任务与文档状态总账 `docs/task-ledger.md`，把
+  `opencode_result-6.18.md`、`opencode_result-6.19.md` 和近期 handoff 中的 open /
+  closed / superseded 状态收敛到一个入口，避免旧文档中的已修问题被重复执行。
 - [x] 四 method 并行 LoCoMo 极小 smoke 已跑通：
   `locomo-smoke-20260618-token-rich-v1-{mem0,memoryos,amem,lightmem}-locomo`
   均为 1 conversation / 1 question completed，并全部写出 prediction efficiency
   observation。
+- [x] 四 method LoCoMo 4 conversations / 20 turns / 4 workers 真实 smoke 已跑通：
+  `mem0-smoke-4c20t-w4-20260620`、`memoryos-smoke-4c20t-w4-20260620`、
+  `amem-smoke-4c20t-w4-20260620`、`lightmem-smoke-4c20t-w4-20260620` 均为
+  4/4 conversations、4/4 questions completed。该轮验证关闭了 Mem0 isolated
+  conversation observation、LightMem OP-update memory-build LLM observation 和四 method
+  efficiency 覆盖矩阵。
 - [x] 用户已确认不做统一 OpenAI-compatible API gateway；当前只要求每个 method 记录
   可审计 token 消耗量，后续通过离线聚合汇总。
-- [ ] 经用户确认 run_prefix、并发数和 API 预算后运行 LongMemEval-S 极小成本校准
-  smoke；Mem0/A-Mem/LightMem 可尝试，MemoryOS 暂不跑 LongMemEval-S。
-- [ ] 自测并修复 Rich 终端输出的剩余显示问题：OpenCode 真实运行仍观察到 elapsed
-  停住、第三方 warning 插入进度区、isolated prediction 进度长时间不动；当前只确认
-  calibrate-smoke monitor 的离线逻辑测试通过，不能宣布终端体验完成。
-- [ ] 建立框架级 stdout 约束：所有第三方 method 的 `print()` / warning 都不能破坏
-  Rich 进度区；必要时在 wrapper 层统一捕获、重定向或写入 `logs/run.log`。
-- [ ] 建立 prediction artifact 瘦身规则：所有 method 的大段 system prompt、reader prompt、
-  injected context 或重复 metadata 都不能逐 question 重复写入 `method_predictions.jsonl`；
-  应按 run 或 conversation 单独记录一次，再由 prediction 记录引用。
-- [ ] 建立 evaluator 聚合契约：所有带 `category` 的 answer-level metric 都必须输出
-  overall summary 和 by-category summary；不限于 LoCoMo F1。
-- [ ] API 充值并经用户确认后运行 Mem0-LoCoMo `official-full` prediction。
-- [ ] API 条件允许并经用户确认后运行 LongMemEval-S 最小 smoke。
+- [x] 新增 prediction 阶段人类可读 efficiency summary artifacts：
+  `summaries/efficiency_overall.prediction.json`、
+  `summaries/efficiency_by_conversation.prediction.json`、
+  `summaries/efficiency_by_question.prediction.json`。raw observation JSONL 仍是事实来源，
+  summary 仅作离线聚合视图，便于估算单个 conversation / question 的 token、调用和延迟。
+- [x] 新增失败 conversation 默认隔离：`conversation_status.json` 中标记为 `failed`
+  的 conversation 在默认 resume 中不再重跑；只有显式 `--retry-failed` 才重新纳入
+  work plan。isolated worker 失败现在会写入具体 conversation 的 failed checkpoint。
+- [x] OpenCode 已补齐 A-Mem / LightMem / MemoryOS `allow_smoke_worker_override=True`，
+  让四个 method 的 smoke worker override 行为一致。
+- [x] OpenCode 已修复 isolated worker `add()` 缺少 conversation efficiency scope 的问题；
+  Codex 进一步修复 scope 退出前读取 `conv_scope.records` 导致 conversation observation
+  未随 worker bundle 返回的问题，并新增 isolated worker conversation observation 测试。
+- [x] 修复 LoCoMo smoke 下 `--question-limit-per-conversation > 1` 实际不生效的问题；
+  当前 LoCoMo smoke adapter 会保留所有 evidence 完整落在截断历史里的问题，再由
+  runner 按 question budget 裁剪。
+- [x] 为 Mem0 embedding API 调用增加 retry/timeout 兜底；v3 official-full 失败根因是
+  OpenAI-compatible embedding API SSL 断连。当前已在 Mem0 vendored LLM/embedding
+  clients 注入 timeout/max_retries，并通过 `mem0-smoke-4c20t-w4-20260620` 极小真实
+  API smoke 未复现断连。official-full 仍需新 run_id 重跑后才能关闭。
+- [x] LongMemEval-S 极小成本校准 smoke 已由用户真实运行 Mem0/A-Mem/LightMem 三路并行；
+  三个 child run 的 `progress.json` 和 `summary.json` 均显示 completed。终端最后仍显示
+  pending 的根因是 monitor 使用 base run id 读取 progress，而 LongMemEval 实际写入
+  `*-longmemeval-s-cleaned` child 目录；Codex 已用离线红绿测试修复 variant fallback。
+- [ ] 自测并修复 Rich 终端输出的剩余显示问题：第三方 warning/tqdm 仍会插入 Rich 区域；
+  isolated prediction 进度长时间不动仍是架构问题，不能宣布终端体验完成。
+- [ ] 建立框架级 stdout 约束：第三方 method 的 `print()` / warning / tqdm 不能破坏
+  Rich 进度区；但也不能全局压掉用户 method 的调试输出。目标是可靠写入
+  `logs/run.log`/events，并提供是否在终端显示的开关。
+- [x] 初版 prediction artifact 瘦身已由 OpenCode 实现并经 Codex focused 验证：
+  conversation 级 `system_prompt` 抽取到 `artifacts/conversation_prompts.jsonl`，
+  `method_predictions.jsonl` 中移除重复字段；MemoryOS adapter 不再写入 question 级
+  `user_prompt`。
+- [x] 初版 evaluator category 聚合已由 OpenCode 实现并经 Codex focused 验证：
+  `run_artifact_evaluation()` 对所有带 `category` 的 answer-level metric 写入
+  `category_breakdown`。
+- [ ] 补充/审查 prediction artifact 瘦身的长期兼容策略：旧 artifact 回读、未来更多
+  conversation-level metadata key、evaluator 是否需要引用 `conversation_prompts.jsonl`。
+- [x] 修复普通 full/predict 的 efficiency observation 易漏开问题：`predict` / `run`
+  现在默认开启 prediction token/latency observation；如需调试关闭，必须显式传
+  `--disable-efficiency-observability`。
+- [x] A-Mem LoCoMo full-v2 已完成 prediction、F1 和 judge；旧
+  `amem-locomo-0619-1303` 因 session time 缺失导致 temporal 结果无效，不再作为整体指标。
+  注意：A-Mem full-v2 历史 artifact 没有 efficiency observation，不能作为成本依据；
+  当前 A-Mem observation 链路以 `outputs/amem-smoke-4c20t-w4-20260620/` 为证据。
+- [x] Mem0-LoCoMo `official-full` prediction 已以 `outputs/mem0-locomo-full-v4/` 跑完：
+  10 conversations、1540 questions completed，并生成 F1、Judge 和 efficiency summary。
+  OpenCode 发现全局 `reference_date` 只传年份，但每条检索记忆自带完整日期；当前记录为
+  informational，不判定 full-v4 作废。
+- [ ] API 条件允许并经用户确认后运行四个 method 在 LoCoMo 上的 retrieve-first 极小
+  smoke，确认 `add(conversation) -> retrieve(question) -> framework reader` 真实链路。
+- [ ] 讨论并确认 LongMemEval-S 最小 smoke 方案：reader answer prompt、LLM judge
+  prompt/model、question_time 使用、以及 A-Mem/MemoryOS 是否在 retrieve-first 下可纳入。
 - [ ] 复用 prediction artifact 计算 LoCoMo F1。
-- [ ] 需要时单独运行 LoCoMo LLM judge。
+- [x] LoCoMo LLM judge prompt 已由用户/OpenCode 对齐为 LightMem 官方风格，compact
+  模式解析 CORRECT/WRONG；evaluator runner 已支持 `--max-eval-workers` 并行 judge，
+  LightMem/MemoryOS LoCoMo judge 已真实并行运行。
 - [ ] 完成 Mem0/MemoryOS/A-Mem/LightMem × LoCoMo/LongMemEval 的可选实验矩阵；
-  MemoryOS 暂不纳入 LongMemEval。
+  retrieve-first 后不再因为缺 method-specific answer prompt 直接排除某 method，但仍需
+  审计每个 adapter 的 LongMemEval 写入/检索路径是否成立。
 - [ ] 基于 Phase G 保存的原始 observation 离线计算真实服务商费用。
 
-### Phase K：后续扩展
+### Phase K：Retrieve-First Memory Module 协议重构（当前设计）
+
+设计方案：
+`docs/superpowers/specs/2026-06-20-retrieve-first-memory-module-design.md`
+
+实施计划：
+`docs/superpowers/plans/2026-06-20-retrieve-first-memory-module.md`
+
+2026-06-22 最新修订：用户已确认主协议继续叫 retrieve-first，但 `retrieve()` 的核心输出
+已从单字符串 `AnswerPromptResult.answer_prompt` 继续升级为
+`AnswerPromptResult.prompt_messages`。
+method 负责构造完整 answer prompt messages，framework answer LLM 直接使用这些 role
+messages；`answer_prompt` 只作为兼容 artifact、日志和 token 估算文本视图；调试信息、
+拆出的 `answer_context`、原始检索结果和 prompt profile 放进 `metadata`。
+
+当前已完成核心协议、framework reader、registered runner 接线和四个内置 method adapter
+的 `AnswerPromptResult` 主体迁移。核心方向：
+
+```text
+add(conversation)
+retrieve(question) -> AnswerPromptResult.prompt_messages
+framework answer LLM(prompt_messages) -> answer
+evaluate
+```
+
+- [x] 复核四个现有 method 的 `get_answer()` 实现，确认 Mem0、A-Mem、LightMem、
+  MemoryOS 都可拆成写入、检索、prompt 构造和最终 answer LLM 调用。
+- [x] 与用户确认 `retrieve()` 输出以完整 `AnswerPromptResult.prompt_messages` 为核心；
+  answer prompt messages 设计视为 method 的一部分。
+- [x] 与用户确认新基础 `add()` 接收单个 `Conversation`，runner 负责循环、并行和
+  resume；method 原生 batch ingest 作为未来可选优化。
+- [x] 与用户确认主线只保留 memory-module evaluation，不再要求新 method 实现
+  `get_answer()`。
+- [x] 与用户确认内置 method 可以在 future 修改第三方 provider/client 适配层以支持更多
+  internal LLM provider，但 Phase 1 仍统一默认 `gpt-4o-mini`。
+- [x] 写出正式设计 spec。
+- [x] 用户审阅 spec。
+- [x] 写实施计划。
+- [x] 写出 LLM Provider 与 Prompt 配置设计 spec，明确第一版只实现
+  OpenAI-compatible provider；Anthropic/Gemini、本地进程内 Hugging Face provider 作为
+  future provider；本地开源模型优先通过 OpenAI-compatible local server 接入。
+- [x] 新增 `AnswerPromptResult` protocol entity/interface。
+- [x] 新增 framework answer reader，并校验 answer prompt 非空、question/conversation id
+  严格对齐。
+- [x] 修改 prediction runner：支持 fake `BaseMemoryProvider` 的
+  retrieve -> framework answer LLM -> prediction 基础路径，并写出
+  `answer_prompts.prediction.jsonl`。
+- [x] 支持 answer prompt completed / answer pending 的 resume。
+- [x] 新增 answer prompt artifact path，避免 `method_predictions.jsonl` 重复写入大段 prompt。
+- [x] 新增 OpenAI-compatible framework answer client；当前 prompt 来自 method 返回的完整
+  `answer_prompt`。
+- [x] 在 registered prediction service 中实际构造 `FrameworkAnswerReader` 并传给
+  retrieve-first runner；当前只在 method 声明 `MEMORY_RETRIEVAL` capability 时启用，
+  legacy `ANSWER_GENERATION` 路径继续保持旧行为。
+- [x] registry capability 已切到 retrieve-first：LoCoMo / LongMemEval conversation-QA
+  prediction 现在要求 `CONVERSATION_ADD + MEMORY_RETRIEVAL`；Mem0、A-Mem、LightMem、
+  MemoryOS 均声明 `MEMORY_RETRIEVAL`，不再声明 `ANSWER_GENERATION`。
+- [x] 共享 mock/fake 测试层已迁移：新增 `MockMemoryProvider`，runner 测试可通过
+  `retrieve()` + `FrameworkAnswerReader` 生成 prediction；legacy `MockMemorySystem`
+  保留给旧 conversation runner 测试。
+- [x] Mem0 adapter 已迁移到 `retrieve(question) -> AnswerPromptResult`：保留 Mem0 search
+  和官方 LoCoMo / LongMemEval prompt 构造，旧 `get_answer()` 暂时作为兼容 wrapper。
+- [x] A-Mem adapter 已迁移到 `retrieve(question) -> AnswerPromptResult`：保留官方 query
+  keyword generation、Table 8 category k、adversarial public-input 拒绝、retrieval
+  efficiency observation 和 answer prompt 构造；旧 `get_answer()` 暂时作为兼容 wrapper。
+- [x] LightMem adapter 已迁移到 `retrieve(question) -> AnswerPromptResult`：LoCoMo 继续走
+  `search_locomo.py` 风格 Qdrant payload/vector combined 检索，LongMemEval 继续走
+  `LightMemory.retrieve()` online 路径，并由 adapter 构造完整 answer prompt；旧
+  `get_answer()` 暂时作为兼容 wrapper。
+- [x] MemoryOS adapter 已迁移到 `retrieve(question) -> AnswerPromptResult`：调用官方 eval
+  `retrieval_system.retrieve(...)`，并按官方 eval prompt 结构构造完整 answer prompt；旧
+  `get_answer()` 保持原行为，避免破坏 system prompt observer 和历史复查路径。
+- [x] Mem0/A-Mem/LightMem/MemoryOS 已继承 `BaseMemoryProvider`，并让 `add()` 在迁移期同时兼容单个
+  `Conversation` 和旧 list 输入；普通 runner 可进入 retrieve-first 分支。
+- [x] answer-level artifact evaluation 兼容 answer prompt artifact：`run_artifact_evaluation()`
+  默认仍只读取 `public_questions.jsonl`、`method_predictions.jsonl` 和
+  `evaluator_private_labels.jsonl`；`answer_prompts.prediction.jsonl` 可并存但不会影响
+  F1/Judge，除非未来 evaluator 显式声明需要 prompt/context。
+- [ ] 后续把当前 `OpenAISettings` 小步实现迁移到统一 `LLMRuntimeConfig` /
+  `LLMResponse`。
+- [x] 更新 CLI/config/manifest/source identity/observability 主体链路；旧 `get_answer()`
+  删除和统一 `LLMRuntimeConfig` 仍为后续任务。
+- [x] 完成四个内置 method adapter 的 fake/offline contract 和 focused 回归：四 adapter
+  `189 passed, 2 warnings, 2 subtests passed`；runner/registered/evaluation focused
+  `146 passed`。
+- [x] 完成 AnswerPromptResult 当前状态文档收尾。
+- [x] 正式 full 前新增 `AnswerLLMSettings` 或等价配置，把 framework answer LLM 的
+  `temperature`、`max_tokens`、`top_p`、timeout、retry 显式写入配置、manifest 和
+  model inventory。已按 method × benchmark 解析官方默认参数；当前审计见
+  `docs/method-resource-parameter-audit.md`。
+- [x] 将 `AnswerPromptResult` 从单字符串 `answer_prompt` 升级为 message role 结构：
+  主字段命名为 `prompt_messages`，元素为 `PromptMessage(role, content)`；`answer_prompt`
+  仅保留为兼容和 artifact 文本视图。四个内置 method 已返回各自官方 answer LLM 的
+  system/user message 结构，runner artifact/resume 已保留 `prompt_messages`。
+- [ ] 在用户确认 API 预算、规模、run_id 和 worker 后执行 retrieve-first 真实极小 smoke。
+
+### Phase L：后续扩展
 
 - [ ] 接入 HaluMem QA-only 的 Medium/Long variants。
 - [ ] 评估 MemBench 和 Mem-Gallery 可自然适配的 conversation-QA 切片。
 - [ ] tests 按 unit/integration/api/contract 分组。
+- [ ] 记录并调研实验监控 AI：读取 progress/events/summary，用自然语言或手机端 IM
+  查询实验状态，详见 `docs/future-ideas.md`。
+- [ ] 项目成熟后重做新 method 接入 skill，详见 `docs/future-ideas.md`。
 - [ ] 项目成熟后再考虑 PyPI 发布、benchmark 自动下载、自定义 method CLI 插件和排行榜。
 
 ## 当前约束

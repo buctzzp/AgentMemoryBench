@@ -3,6 +3,7 @@
 from .capabilities import MethodCapability, TaskFamily, validate_compatibility
 from .entities import (
     AddResult,
+    AnswerPromptResult,
     AnswerResult,
     Conversation,
     Dataset,
@@ -10,9 +11,9 @@ from .entities import (
     GoldAnswerInfo,
     ImageRef,
     MetricResult,
+    PromptMessage,
     Question,
     RetrievedMemory,
-    RetrievalResult,
     Session,
     Turn,
 )
@@ -26,13 +27,20 @@ from .exceptions import (
     MemoryBenchmarkError,
     UnknownBenchmarkError,
 )
-from .interfaces import BaseMemoryRetriever, BaseMemorySystem, BaseResumableMemorySystem
+from .interfaces import (
+    BaseMemoryProvider,
+    BaseMemoryRetriever,
+    BaseMemorySystem,
+    BaseResumableMemorySystem,
+)
 from .results import DryRunSummary
 
 __all__ = [
     "AddResult",
+    "AnswerPromptResult",
     "AdapterAlreadyRegisteredError",
     "AnswerResult",
+    "BaseMemoryProvider",
     "BaseMemoryRetriever",
     "BaseResumableMemorySystem",
     "BaseMemorySystem",
@@ -50,9 +58,9 @@ __all__ = [
     "MethodCapability",
     "MemoryBenchmarkError",
     "MetricResult",
+    "PromptMessage",
     "Question",
     "RetrievedMemory",
-    "RetrievalResult",
     "Session",
     "TaskFamily",
     "Turn",

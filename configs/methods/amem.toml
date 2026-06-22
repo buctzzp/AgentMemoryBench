@@ -5,6 +5,8 @@
 llm_model = "gpt-4o-mini"
 embedding_model = "all-MiniLM-L6-v2"
 retrieve_k = 10
+api_timeout_seconds = 60.0
+api_max_retries = 8
 max_workers = 1
 use_robust_layer = true
 suppress_official_stdout = true
@@ -13,6 +15,8 @@ suppress_official_stdout = true
 llm_model = "gpt-4o-mini"
 embedding_model = "all-MiniLM-L6-v2"
 retrieve_k = 10
+api_timeout_seconds = 60.0
+api_max_retries = 8
 max_workers = 10
 use_robust_layer = true
 suppress_official_stdout = true

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -62,17 +63,24 @@ def test_amem_source_identity_covers_official_core_files() -> None:
 class FakeAMemRuntime:
     """模拟 A-Mem runtime，只记录 wrapper 传入的公开内容。"""
 
-    def __init__(self) -> None:
+    def __init__(self, *, build_llm: object | None = None) -> None:
         """初始化 fake 调用记录。"""
 
         self.added_notes: list[dict[str, object]] = []
         self.queries: list[dict[str, object]] = []
         self.memories: dict[str, dict[str, object]] = {}
         self.retriever = FakeAMemRetriever()
+        if build_llm is not None:
+            self.llm_controller = SimpleNamespace(llm=build_llm)
 
     def add_note(self, content: str, time: str | None = None) -> str:
         """记录写入内容并返回 fake note id。"""
 
+        if hasattr(self, "llm_controller"):
+            self.llm_controller.llm.get_completion(
+                f"Analyze memory content: {content}",
+                temperature=0.3,
+            )
         self.added_notes.append({"content": content, "time": time})
         note_id = f"note-{len(self.added_notes)}"
         self.memories[note_id] = {
@@ -141,6 +149,17 @@ class FakeAMemLLM:
         return "fake answer"
 
 
+class FakeAMemLLMWithUsage(FakeAMemLLM):
+    """模拟能暴露 API usage 的 A-Mem LLM wrapper。"""
+
+    def get_completion(self, prompt: str, temperature: float = 0.7) -> str:
+        """记录 prompt，同时暴露最近一次 API usage。"""
+
+        response = super().get_completion(prompt, temperature=temperature)
+        self.last_usage = SimpleNamespace(prompt_tokens=11, completion_tokens=3)
+        return response
+
+
 def _conversation_with_private_gold() -> Conversation:
     """构造一个包含私有 gold/evidence 的最小 conversation。"""
 
@@ -205,6 +224,55 @@ def test_amem_add_and_get_answer_never_pass_private_gold_to_method(tmp_path) -> 
     assert "tea" not in prompt_text
     assert runtime.queries == [{"query": "generated keywords", "k": 40}]
     assert "generate several keywords separated by commas" in str(llm.prompts[0]["prompt"])
+
+
+def test_amem_retrieve_returns_query_keywords_and_context(tmp_path) -> None:
+    """retrieve 应保留官方 query keyword generation 和 Table 8 category k。"""
+
+    runtime = FakeAMemRuntime()
+    llm = FakeAMemLLM()
+    method = AMem(
+        config=AMemConfig(
+            llm_model="gpt-4o-mini",
+            embedding_model="all-MiniLM-L6-v2",
+            retrieve_k=2,
+            max_workers=1,
+            profile_name="official-mini",
+        ),
+        runtime_factory=lambda conversation_id: runtime,
+        answer_llm=llm,
+        storage_root=tmp_path,
+    )
+    conversation = _conversation_with_private_gold()
+    method.add([conversation])
+    question = Question(
+        question_id="q-1",
+        conversation_id="conv-1",
+        text="Where did Alice go?",
+        category="1",
+    )
+
+    retrieval = method.retrieve(question)
+
+    assert retrieval.question_id == "q-1"
+    assert retrieval.conversation_id == "conv-1"
+    assert [message.role for message in retrieval.prompt_messages] == [
+        "system",
+        "user",
+    ]
+    assert "Follow the format specified" in retrieval.prompt_messages[0].content
+    assert "memory content from fake runtime" in retrieval.answer_prompt
+    assert "Where did Alice go?" in retrieval.answer_prompt
+    assert retrieval.metadata["answer_context"] == "memory content from fake runtime"
+    assert retrieval.metadata["method"] == "amem"
+    assert retrieval.metadata["query_keywords"] == "generated keywords"
+    assert retrieval.metadata["retrieve_k"] == 40
+    assert retrieval.metadata["query_keyword_prompt_version"]
+    assert runtime.queries == [{"query": "generated keywords", "k": 40}]
+    assert len(llm.prompts) == 1
+    assert "generate several keywords separated by commas" in str(
+        llm.prompts[0]["prompt"]
+    )
 
 
 def test_amem_add_persists_conversation_state(tmp_path) -> None:
@@ -515,9 +583,9 @@ def test_amem_replaces_official_openai_client_when_base_url_is_configured(
     monkeypatch.setattr(
         amem_adapter_module,
         "_create_openai_compatible_client",
-        lambda api_key, base_url: created_clients.append(
-            {"api_key": api_key, "base_url": base_url}
-        )
+            lambda api_key, base_url, timeout, max_retries: created_clients.append(
+                {"api_key": api_key, "base_url": base_url, "timeout": timeout, "max_retries": max_retries}
+            )
         or "patched-client",
     )
     method = AMem(
@@ -536,7 +604,7 @@ def test_amem_replaces_official_openai_client_when_base_url_is_configured(
     method.add([_conversation_with_private_gold()])
 
     assert created_clients == [
-        {"api_key": "test-key", "base_url": "https://ohmygpt.example/v1"}
+        {"api_key": "test-key", "base_url": "https://ohmygpt.example/v1", "timeout": 60.0, "max_retries": 8}
     ]
     assert runtime_instances[0].llm_controller.llm.client == "patched-client"
 
@@ -591,3 +659,84 @@ def test_amem_records_question_efficiency_observations(tmp_path) -> None:
         record["token_measurement_source"] == "tokenizer_estimate"
         for record in llm_records
     )
+
+
+def test_amem_prefers_api_usage_when_llm_exposes_usage(tmp_path) -> None:
+    """A-Mem LLM 暴露 usage 时，应记录精确 `api_usage` 而不是 tokenizer 估算。"""
+
+    runtime = FakeAMemRuntime()
+    llm = FakeAMemLLMWithUsage()
+    collector = EfficiencyCollector(run_id="amem-api-usage-run", enabled=True)
+    method = AMem(
+        config=AMemConfig(
+            llm_model="gpt-4o-mini",
+            embedding_model="all-MiniLM-L6-v2",
+            retrieve_k=2,
+            max_workers=1,
+            profile_name="smoke",
+        ),
+        runtime_factory=lambda conversation_id: runtime,
+        answer_llm=llm,
+        efficiency_collector=collector,
+        storage_root=tmp_path,
+    )
+    conversation = _conversation_with_private_gold()
+    method.add([conversation])
+
+    with collector.question_scope("conv-1", "q-1") as scope:
+        method.get_answer(conversation.questions[0])
+
+    llm_records = [
+        record.to_dict()
+        for record in scope.records
+        if record.to_dict()["observation_type"] == "llm_call"
+    ]
+    assert llm_records
+    assert all(
+        record["token_measurement_source"] == "api_usage"
+        for record in llm_records
+    )
+    assert all(record["input_tokens"] == 11 for record in llm_records)
+    assert all(record["output_tokens"] == 3 for record in llm_records)
+
+
+def test_amem_records_memory_build_llm_api_usage(tmp_path) -> None:
+    """A-Mem add 阶段内部 LLM 调用应记录为 memory_build/api_usage。"""
+
+    build_llm = FakeAMemLLMWithUsage()
+    runtime = FakeAMemRuntime(build_llm=build_llm)
+    collector = EfficiencyCollector(run_id="amem-build-usage-run", enabled=True)
+    method = AMem(
+        config=AMemConfig(
+            llm_model="gpt-4o-mini",
+            embedding_model="all-MiniLM-L6-v2",
+            retrieve_k=2,
+            max_workers=1,
+            profile_name="smoke",
+        ),
+        runtime_factory=lambda conversation_id: runtime,
+        answer_llm=FakeAMemLLM(),
+        efficiency_collector=collector,
+        storage_root=tmp_path,
+    )
+
+    with collector.conversation_scope("conv-1") as scope:
+        method.add([_conversation_with_private_gold()])
+        collector.record_memory_build_total_latency(latency_ms=1.0)
+
+    llm_records = [
+        record.to_dict()
+        for record in scope.records
+        if record.to_dict()["observation_type"] == "llm_call"
+    ]
+    assert len(llm_records) == 2
+    assert {record["stage"] for record in llm_records} == {"memory_build"}
+    assert {record["model_id"] for record in llm_records} == {
+        "amem-memory-build-llm"
+    }
+    assert all(
+        record["token_measurement_source"] == "api_usage"
+        for record in llm_records
+    )
+    assert sum(record["input_tokens"] for record in llm_records) == 22
+    assert sum(record["output_tokens"] for record in llm_records) == 6

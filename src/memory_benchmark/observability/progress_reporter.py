@@ -2,12 +2,16 @@
 
 本模块为长时间 benchmark run 提供终端进度展示和可恢复检查的轻量快照文件。
 progress.json 只保存公开运行进度，不包含 gold answer、secret 或 method 私有状态。
+
+当未显式传入 Console 时，默认使用 sys.__stdout__ 创建，以免疫 child thread 中
+contextlib.redirect_stdout 对全局 sys.stdout 的替换。
 """
 
 from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -47,7 +51,7 @@ class ProgressReporter:
 
         输入:
             progress_path: 字符串或 Path，指向要覆盖写入的 progress.json。
-            console: 可选 Rich Console。
+            console: 可选 Rich Console。未提供时使用系统原始 stdout 创建。
             enabled: False 时禁用终端渲染，但保留文件快照。
             snapshot_interval: 高频更新之间的最小落盘间隔。
             clock: 返回单调时间秒数的可调用对象。
@@ -74,13 +78,17 @@ class ProgressReporter:
             "current_conversation_id": None,
             "current_question_id": None,
         }
+        if console is not None:
+            self._console = console
+        else:
+            self._console = Console(file=sys.__stdout__ or sys.stdout)
         self.progress = Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             TextColumn("{task.completed}/{task.total}"),
             TimeElapsedColumn(),
-            console=console,
+            console=self._console,
             disable=not enabled,
         )
         self._stage_task_id: TaskID | None = None

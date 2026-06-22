@@ -33,11 +33,13 @@ from memory_benchmark.core import (
     AnswerResult,
     Conversation,
     Question,
+    AnswerPromptResult,
+    PromptMessage,
     Session,
     Turn,
 )
 from memory_benchmark.core.exceptions import ConfigurationError
-from memory_benchmark.core.interfaces import BaseResumableMemorySystem
+from memory_benchmark.core.interfaces import BaseMemoryProvider, BaseResumableMemorySystem
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     EfficiencyStage,
@@ -73,6 +75,8 @@ class Mem0Config:
         max_workers: conversation 级建议并发数，由 runner policy 读取。
         ingestion_chunk_size: 每次 Mem0 add 包含的 turn 数；官方 LoCoMo 配置为 1。
         infer: 是否启用 Mem0 官方事实提取、ADD/UPDATE/DELETE 算法。
+        api_timeout_seconds: Mem0 内部 OpenAI-compatible LLM/embedding 请求超时秒数。
+        api_max_retries: Mem0 内部 OpenAI-compatible LLM/embedding 请求最大重试次数。
         profile_name: 可审计的 profile 名称。
     """
 
@@ -84,6 +88,8 @@ class Mem0Config:
     max_workers: int
     ingestion_chunk_size: int = 1
     infer: bool = True
+    api_timeout_seconds: float = 60.0
+    api_max_retries: int = 8
     profile_name: str = "custom"
 
     def __post_init__(self) -> None:
@@ -109,6 +115,14 @@ class Mem0Config:
             raise ConfigurationError(
                 "Mem0 benchmark adapter requires infer=True to test the Mem0 algorithm"
             )
+        if self.api_timeout_seconds <= 0:
+            raise ConfigurationError(
+                "Mem0 api_timeout_seconds must be positive"
+            )
+        if self.api_max_retries < 0:
+            raise ConfigurationError(
+                "Mem0 api_max_retries cannot be negative"
+            )
 
     @classmethod
     def smoke(cls) -> "Mem0Config":
@@ -128,6 +142,8 @@ class Mem0Config:
             max_workers=1,
             ingestion_chunk_size=1,
             infer=True,
+            api_timeout_seconds=60.0,
+            api_max_retries=8,
             profile_name="smoke",
         )
 
@@ -144,6 +160,8 @@ class Mem0Config:
             max_workers=10,
             ingestion_chunk_size=1,
             infer=True,
+            api_timeout_seconds=60.0,
+            api_max_retries=8,
             profile_name="official_full",
         )
 
@@ -232,7 +250,7 @@ def build_mem0_source_identity(
     }
 
 
-class Mem0(BaseResumableMemorySystem):
+class Mem0(BaseMemoryProvider, BaseResumableMemorySystem):
     """使用官方 Mem0 OSS `Memory` 算法的统一 memory system。"""
 
     def __init__(
@@ -300,6 +318,7 @@ class Mem0(BaseResumableMemorySystem):
             raise ConfigurationError(
                 "Mem0 existing_conversation_ids cannot contain empty ids"
             )
+        self._configure_backend_openai_clients()
         self._install_efficiency_observers()
 
     @staticmethod
@@ -352,16 +371,18 @@ class Mem0(BaseResumableMemorySystem):
             "history_db_path": str(root / "history.db"),
         }
 
-    def add(self, conversations: list[Conversation]) -> AddResult:
+    def add(self, conversations: Conversation | list[Conversation]) -> AddResult:
         """按原始顺序逐 turn 写入一个或多个 conversation。
 
         输入:
-            conversations: runner 已清洗的公开 conversation 列表。
+            conversations: runner 已清洗的单个公开 conversation，或迁移期兼容列表。
 
         输出:
             AddResult: 成功写入的 conversation ids 和公开统计信息。
         """
 
+        if isinstance(conversations, Conversation):
+            conversations = [conversations]
         if not conversations:
             raise ConfigurationError("Mem0.add() requires at least one conversation")
 
@@ -390,17 +411,17 @@ class Mem0(BaseResumableMemorySystem):
         )
 
     def supports_turn_resume(self, conversation: Conversation) -> bool:
-        """Mem0 仅对 LoCoMo 等 `CHUNK_SIZE=1` conversation 启用逐 turn resume。
+        """Mem0 统一交给 runner 使用 conversation-level resume。
 
         输入:
             conversation: runner 清洗后的公开 conversation。
 
         输出:
-            bool: LongMemEval 官方写入粒度是 user+assistant pair，因此返回 False，
-            让 runner 使用 conversation-level resume。
+            bool: 始终返回 False。LoCoMo 内部仍按官方 `CHUNK_SIZE=1` 逐条调用
+            Mem0 `Memory.add()`，但不再暴露 runner turn checkpoint。
         """
 
-        return not self._is_longmemeval_conversation(conversation)
+        return False
 
     def add_from_turn(
         self,
@@ -539,14 +560,14 @@ class Mem0(BaseResumableMemorySystem):
             },
         )
 
-    def get_answer(self, question: Question) -> AnswerResult:
-        """在 question 所属 conversation namespace 内检索并生成回答。
+    def retrieve(self, question: Question) -> AnswerPromptResult:
+        """检索当前 question 所属 conversation，并构造完整 Mem0 prompt messages。
 
         输入:
             question: 不含 gold/evidence 的公开问题。
 
         输出:
-            AnswerResult: reader 生成的非空答案和不含原始记忆的公开诊断信息。
+            AnswerPromptResult: `prompt_messages` 可直接交给 framework answer LLM。
         """
 
         with self._namespace_lock:
@@ -578,6 +599,8 @@ class Mem0(BaseResumableMemorySystem):
             )
         memories = self._normalize_search_results(raw_result)
         injected_memory_text = self._memory_context_text(memories)
+        reader_messages = self._reader_messages(question, memories)
+        answer_prompt = _messages_to_answer_prompt(reader_messages)
         if collector is not None and collector.enabled:
             collector.record_retrieval_result(
                 latency_ms=_elapsed_ms(retrieval_started_ns),
@@ -588,8 +611,42 @@ class Mem0(BaseResumableMemorySystem):
                 ),
             )
 
-        reader_messages = self._reader_messages(question, memories)
+        return AnswerPromptResult(
+            question_id=question.question_id,
+            conversation_id=question.conversation_id,
+            answer_prompt=answer_prompt,
+            prompt_messages=_prompt_messages_from_dicts(reader_messages),
+            metadata={
+                "method": "mem0",
+                "answer_context": injected_memory_text,
+                "retrieved_memories": [
+                    {
+                        "content": memory["memory"],
+                        "score": memory.get("score"),
+                        "created_at": memory.get("created_at"),
+                    }
+                    for memory in memories
+                ],
+                "retrieved_memory_count": len(memories),
+                "top_k": self.config.top_k,
+                "answer_prompt_profile": self._reader_prompt_kind(question),
+            },
+        )
+
+    def get_answer(self, question: Question) -> AnswerResult:
+        """在 question 所属 conversation namespace 内检索并生成回答。
+
+        输入:
+            question: 不含 gold/evidence 的公开问题。
+
+        输出:
+            AnswerResult: reader 生成的非空答案和不含原始记忆的公开诊断信息。
+        """
+
+        prompt_result = self.retrieve(question)
+        reader_messages = [{"role": "user", "content": prompt_result.answer_prompt}]
         answer_started_ns = perf_counter_ns()
+        collector = self._efficiency_collector
         if collector is not None and collector.enabled:
             with collector.operation_stage(EfficiencyStage.ANSWER):
                 response = self._reader.chat.completions.create(
@@ -603,6 +660,8 @@ class Mem0(BaseResumableMemorySystem):
             )
         answer_latency_ms = _elapsed_ms(answer_started_ns)
         answer = self._extract_reader_answer(response)
+        if self._reader_prompt_kind(question) == "locomo":
+            answer = self._extract_final_answer(answer)
         if not answer:
             raise ConfigurationError(
                 f"Mem0 reader returned an empty answer: {question.question_id}"
@@ -622,7 +681,10 @@ class Mem0(BaseResumableMemorySystem):
             answer=answer,
             metadata={
                 "method": "mem0",
-                "retrieved_memory_count": len(memories),
+                "retrieved_memory_count": prompt_result.metadata.get(
+                    "retrieved_memory_count",
+                    0,
+                ),
                 "top_k": self.config.top_k,
                 "reader_model": self.config.reader_model,
             },
@@ -678,6 +740,37 @@ class Mem0(BaseResumableMemorySystem):
             raise ConfigurationError(
                 f"Failed to prewarm Mem0 entity store: {exc}"
             ) from exc
+
+    def _configure_backend_openai_clients(self) -> None:
+        """给 vendored Mem0 内部 OpenAI clients 注入 timeout/retry。
+
+        说明:
+            当前 Mem0 2.0.4 的 OpenAI LLM 和 OpenAIEmbedding 构造函数不会从
+            Mem0 config 读取 timeout/max_retries。这里在 adapter 层对已构造的
+            SDK client 调用 `with_options()`，只影响网络兜底，不改变算法、prompt、
+            检索或状态写入逻辑。fake 或非 OpenAI client 没有 `with_options()` 时
+            保持原样。
+        """
+
+        self._configure_owner_openai_client(getattr(self._memory, "llm", None))
+        self._configure_owner_openai_client(
+            getattr(self._memory, "embedding_model", None)
+        )
+
+    def _configure_owner_openai_client(self, owner: Any) -> None:
+        """如果对象持有 OpenAI SDK client，则替换为带 timeout/retry 的 client。"""
+
+        if owner is None:
+            return
+        client = getattr(owner, "client", None)
+        with_options = getattr(client, "with_options", None)
+        if not callable(with_options):
+            return
+        configured_client = with_options(
+            timeout=self.config.api_timeout_seconds,
+            max_retries=self.config.api_max_retries,
+        )
+        setattr(owner, "client", configured_client)
 
     def _install_efficiency_observers(self) -> None:
         """给 Mem0 backend 安装纯 observation wrapper，不改变算法返回值。"""
@@ -1141,6 +1234,19 @@ class Mem0(BaseResumableMemorySystem):
             ) from exc
         return str(content or "").strip()
 
+    @staticmethod
+    def _extract_final_answer(text: str) -> str:
+        """从 LoCoMo 推理链文本中提取最终 ANSWER: 之后的部分。
+
+        LoCoMo 官方 prompt 指示 LLM 输出 7 步推理 + "ANSWER:" 标记后的最终答案。
+        若无 "ANSWER:" 标记，返回原文（兼容旧 prompt 或无推理链的输出）。
+        """
+
+        idx = text.rfind("ANSWER:")
+        if idx == -1:
+            return text
+        return text[idx + len("ANSWER:"):].strip()
+
 
 class _TiktokenCounter:
     """按 OpenAI-compatible 模型名计数 token 的轻量 wrapper。"""
@@ -1270,6 +1376,32 @@ def _reference_year_from_memories(memories: list[dict[str, Any]]) -> str | None:
             if year.isdigit():
                 return year
     return None
+
+
+def _messages_to_answer_prompt(messages: list[dict[str, str]]) -> str:
+    """把 method reader messages 转为单条 answer LLM prompt。"""
+
+    if len(messages) == 1:
+        return messages[0].get("content", "")
+    parts: list[str] = []
+    for message in messages:
+        role = str(message.get("role") or "user").upper()
+        content = str(message.get("content") or "").strip()
+        if content:
+            parts.append(f"{role}:\n{content}")
+    return "\n\n".join(parts)
+
+
+def _prompt_messages_from_dicts(messages: list[dict[str, str]]) -> list[PromptMessage]:
+    """把官方 reader message 字典转换为核心 PromptMessage。"""
+
+    prompt_messages: list[PromptMessage] = []
+    for message in messages:
+        role = str(message.get("role") or "user")
+        content = str(message.get("content") or "")
+        if content.strip():
+            prompt_messages.append(PromptMessage(role=role, content=content))
+    return prompt_messages
 
 
 __all__ = [

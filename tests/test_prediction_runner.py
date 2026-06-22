@@ -11,6 +11,7 @@ import json
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -23,12 +24,19 @@ from memory_benchmark.core import (
     DatasetValidationError,
     GoldAnswerInfo,
     Question,
+    AnswerPromptResult,
     Session,
     Turn,
 )
 from memory_benchmark.benchmark_adapters.contracts import RunScope
-from memory_benchmark.core.interfaces import BaseMemorySystem, BaseResumableMemorySystem
+from memory_benchmark.core.interfaces import (
+    BaseMemoryProvider,
+    BaseMemorySystem,
+    BaseResumableMemorySystem,
+)
 from memory_benchmark.observability import RunContext
+from memory_benchmark.readers.answer import FakeAnswerLLMClient, FrameworkAnswerReader
+from memory_benchmark.methods.mock import MockMemoryProvider
 from memory_benchmark.runners.ingest_resume import TurnIngestCheckpointStore
 from memory_benchmark.runners.prediction import (
     PredictionRunPolicy,
@@ -216,6 +224,62 @@ class RecordingPredictionSystem(BaseMemorySystem):
         )
 
 
+class RecordingMemoryProvider(BaseMemoryProvider):
+    """记录 add/retrieve 调用的 retrieve-first fake provider。"""
+
+    def __init__(self) -> None:
+        """初始化线程安全调用记录。"""
+
+        self.added_conversation_ids: list[str] = []
+        self.retrieved_question_ids: list[str] = []
+        self._lock = threading.Lock()
+
+    def add(self, conversation: Conversation) -> AddResult:
+        """记录单个公开 conversation 写入。"""
+
+        with self._lock:
+            self.added_conversation_ids.append(conversation.conversation_id)
+        return AddResult(conversation_ids=[conversation.conversation_id])
+
+    def retrieve(self, question: Question) -> AnswerPromptResult:
+        """记录公开问题检索，并返回可注入 prompt 的上下文。"""
+
+        with self._lock:
+            self.retrieved_question_ids.append(question.question_id)
+        return AnswerPromptResult(
+            question_id=question.question_id,
+            conversation_id=question.conversation_id,
+            answer_prompt=f"memory for {question.text}",
+            metadata={"provider": "recording"},
+        )
+
+
+class FailingAnswerClient(FakeAnswerLLMClient):
+    """第一次调用失败，后续调用返回固定答案。"""
+
+    def __init__(self) -> None:
+        """初始化一次性失败开关。"""
+
+        super().__init__(answer="second answer")
+        self.fail_once = True
+
+    def complete(self, *, prompt: str) -> str:
+        """第一次 answer 调用抛错，模拟 retrieval 已成功但 answer 失败。"""
+
+        if self.fail_once:
+            self.fail_once = False
+            raise RuntimeError("answer failed once")
+        return super().complete(prompt=prompt)
+
+    def complete_messages_with_metadata(self, *, messages):  # type: ignore[no-untyped-def]
+        """第一次 message-based answer 调用同样抛错。"""
+
+        if self.fail_once:
+            self.fail_once = False
+            raise RuntimeError("answer failed once")
+        return super().complete_messages_with_metadata(messages=messages)
+
+
 class ResumablePredictionSystem(BaseResumableMemorySystem):
     """可故障注入的逐 turn fake method。
 
@@ -380,6 +444,19 @@ def _create_provisional_context(
     )
 
 
+def _make_build_context(tmp_path: Path):
+    """创建 isolated worker 测试用 build context。"""
+
+    from memory_benchmark.methods.registry import MethodBuildContext
+
+    return MethodBuildContext(
+        config={},
+        openai_settings=None,
+        path_settings=None,
+        storage_root=tmp_path / "prediction-run" / "method_state",
+    )
+
+
 def test_preflight_prediction_run_accepts_matching_resume_without_writes(
     tmp_path: Path,
 ) -> None:
@@ -396,7 +473,7 @@ def test_preflight_prediction_run_accepts_matching_resume_without_writes(
         resume=True,
         ensure_directories=False,
     )
-    dataset = _build_dataset()
+    dataset = _build_two_question_dataset()
     policy = PredictionRunPolicy(max_workers=1, resume=True)
     dataset_fingerprint, manifest = prediction_module._build_prediction_resume_artifacts(
         dataset=dataset,
@@ -445,7 +522,7 @@ def test_preflight_prediction_run_rejects_changed_source_file_on_resume(
         resume=True,
         ensure_directories=False,
     )
-    dataset = _build_dataset()
+    dataset = _build_two_question_dataset()
     policy = PredictionRunPolicy(max_workers=1, resume=True)
     _, manifest = prediction_module._build_prediction_resume_artifacts(
         dataset=dataset,
@@ -766,6 +843,149 @@ def test_runner_writes_predictions_and_private_labels_separately(tmp_path: Path)
         "标准答案 2",
     }
     assert not (context.artifacts_dir / "answer_scores.locomo_f1.jsonl").exists()
+
+
+def test_runner_uses_retrieve_first_provider_and_framework_reader(
+    tmp_path: Path,
+) -> None:
+    """新 provider 路径应先 retrieve，再由 framework reader 生成 answer。"""
+
+    dataset = _build_dataset()
+    provider = RecordingMemoryProvider()
+    answer_client = FakeAnswerLLMClient(answer="framework answer")
+    reader = FrameworkAnswerReader(client=answer_client)
+    context = _create_context(tmp_path)
+
+    summary = run_predictions(
+        dataset=dataset,
+        system=provider,
+        run_context=context,
+        policy=PredictionRunPolicy(max_workers=1),
+        answer_reader=reader,
+        method_manifest={"adapter": "recording-provider-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+    )
+
+    predictions = read_jsonl(context.artifacts_dir / "method_predictions.jsonl")
+    retrievals = read_jsonl(
+        context.artifacts_dir / "answer_prompts.prediction.jsonl"
+    )
+
+    assert summary.completed_questions == 2
+    assert provider.added_conversation_ids == ["conv-1", "conv-2"]
+    assert provider.retrieved_question_ids == ["conv-1:q1", "conv-2:q1"]
+    assert [record["answer"] for record in predictions] == [
+        "framework answer",
+        "framework answer",
+    ]
+    assert retrievals[0]["answer_prompt"] == "memory for 问题 1"
+    assert retrievals[0]["prompt_messages"] == [
+        {"role": "user", "content": "memory for 问题 1"}
+    ]
+    assert "memory for 问题 1" in answer_client.calls[0]["prompt"]
+    assert answer_client.calls[0]["messages"] == [
+        {"role": "user", "content": "memory for 问题 1"}
+    ]
+
+
+def test_shared_mock_provider_uses_framework_reader(tmp_path: Path) -> None:
+    """共享 mock provider 应走 retrieve-first reader，而不是 method 自己回答。"""
+
+    dataset = _build_dataset()
+    provider = MockMemoryProvider(
+        context_by_question_id={"conv-1:q1": "conv-1 custom memory"}
+    )
+    answer_client = FakeAnswerLLMClient(answer="framework mock answer")
+    reader = FrameworkAnswerReader(client=answer_client)
+    context = _create_context(tmp_path)
+
+    summary = run_predictions(
+        dataset=dataset,
+        system=provider,
+        run_context=context,
+        policy=PredictionRunPolicy(max_workers=1),
+        answer_reader=reader,
+        method_manifest={"adapter": "shared-mock-provider-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+    )
+
+    predictions = read_jsonl(context.artifacts_dir / "method_predictions.jsonl")
+    retrievals = read_jsonl(
+        context.artifacts_dir / "answer_prompts.prediction.jsonl"
+    )
+
+    assert summary.completed_questions == 2
+    assert provider.added_conversation_ids == ["conv-1", "conv-2"]
+    assert [record["answer"] for record in predictions] == [
+        "framework mock answer",
+        "framework mock answer",
+    ]
+    assert retrievals[0]["answer_prompt"] == "conv-1 custom memory"
+    assert retrievals[0]["prompt_messages"] == [
+        {"role": "user", "content": "conv-1 custom memory"}
+    ]
+    assert retrievals[1]["answer_prompt"] == "mock-context-for:conv-2:q1"
+    assert "conv-1 custom memory" in answer_client.calls[0]["prompt"]
+
+
+def test_resume_reuses_completed_retrieval_when_answer_failed(
+    tmp_path: Path,
+) -> None:
+    """retrieve 已落盘但 answer 失败时，resume 不应重新调用 provider.retrieve。"""
+
+    dataset = _build_two_question_dataset()
+    provider = RecordingMemoryProvider()
+    failing_reader = FrameworkAnswerReader(client=FailingAnswerClient())
+    context = _create_context(tmp_path)
+
+    with pytest.raises(RuntimeError, match="answer failed once"):
+        run_predictions(
+            dataset=dataset,
+            system=provider,
+            run_context=context,
+            policy=PredictionRunPolicy(max_workers=1),
+            answer_reader=failing_reader,
+            method_manifest={"adapter": "recording-provider-v1"},
+            benchmark_variant="test_variant",
+            run_scope=RunScope.FULL,
+        )
+
+    retrievals_after_failure = read_jsonl(
+        context.artifacts_dir / "answer_prompts.prediction.jsonl"
+    )
+    assert provider.retrieved_question_ids == ["conv-1:q1"]
+    assert [record["question_id"] for record in retrievals_after_failure] == [
+        "conv-1:q1"
+    ]
+
+    provider_after_resume = RecordingMemoryProvider()
+    success_reader = FrameworkAnswerReader(
+        client=FakeAnswerLLMClient(answer="resumed answer")
+    )
+    resumed_context = _create_context(tmp_path, resume=True)
+
+    run_predictions(
+        dataset=dataset,
+        system=provider_after_resume,
+        run_context=resumed_context,
+        policy=PredictionRunPolicy(max_workers=1, resume=True),
+        answer_reader=success_reader,
+        method_manifest={"adapter": "recording-provider-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+    )
+
+    predictions = read_jsonl(context.artifacts_dir / "method_predictions.jsonl")
+    assert provider_after_resume.retrieved_question_ids == ["conv-1:q2"]
+    assert success_reader.client.calls[0]["messages"] == [
+        {"role": "user", "content": "memory for 问题 1"}
+    ]
+    assert [record["answer"] for record in predictions] == [
+        "resumed answer",
+        "resumed answer",
+    ]
 
 
 def test_runner_rebuilds_public_objects_before_calling_method(tmp_path: Path) -> None:
@@ -1236,6 +1456,58 @@ def test_policy_can_limit_conversations_and_questions_without_changing_dataset(
     assert summary.completed_questions == 1
 
 
+def test_question_limit_is_resume_budget_not_manifest_identity(
+    tmp_path: Path,
+) -> None:
+    """同一 run_id 可先答少量题，随后用更大题数预算 resume 继续。"""
+
+    first_system = RecordingPredictionSystem()
+    first_summary = run_predictions(
+        dataset=_build_two_question_dataset(),
+        system=first_system,
+        run_context=_create_context(tmp_path),
+        policy=PredictionRunPolicy(
+            max_workers=1,
+            question_limit_per_conversation=1,
+        ),
+        method_manifest={"adapter": "recording-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+    )
+
+    resumed_system = RecordingPredictionSystem()
+    resumed_summary = run_predictions(
+        dataset=_build_two_question_dataset(),
+        system=resumed_system,
+        run_context=_create_context(tmp_path, resume=True),
+        policy=PredictionRunPolicy(
+            max_workers=1,
+            question_limit_per_conversation=2,
+            resume=True,
+        ),
+        method_manifest={"adapter": "recording-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+    )
+
+    assert [item.question_id for item in first_system.answered_questions] == [
+        "conv-1:q1"
+    ]
+    assert [item.question_id for item in resumed_system.answered_questions] == [
+        "conv-1:q2"
+    ]
+    assert first_summary.completed_questions == 1
+    assert resumed_summary.total_questions == 2
+    assert resumed_summary.completed_questions == 2
+    predictions = read_jsonl(
+        tmp_path / "prediction-run" / "artifacts" / "method_predictions.jsonl"
+    )
+    assert [row["question_id"] for row in predictions] == [
+        "conv-1:q1",
+        "conv-1:q2",
+    ]
+
+
 def test_prediction_budget_limits_new_unfinished_conversations(
     tmp_path: Path,
 ) -> None:
@@ -1269,6 +1541,8 @@ def test_prediction_budget_limits_new_unfinished_conversations(
     assert summary.completed_questions == 2
     assert summary.metadata["run_control"] == {
         "max_new_conversations": 2,
+        "retry_failed_conversations": False,
+        "skipped_failed_conversations": [],
         "budget_exhausted": True,
     }
     summary_payload = json.loads(
@@ -1278,6 +1552,8 @@ def test_prediction_budget_limits_new_unfinished_conversations(
     )
     assert summary_payload["metadata"]["run_control"] == {
         "max_new_conversations": 2,
+        "retry_failed_conversations": False,
+        "skipped_failed_conversations": [],
         "budget_exhausted": True,
     }
 
@@ -1327,6 +1603,8 @@ def test_prediction_budget_skips_completed_conversations_on_resume(
     assert summary.completed_questions == 3
     assert summary.metadata["run_control"] == {
         "max_new_conversations": 1,
+        "retry_failed_conversations": False,
+        "skipped_failed_conversations": [],
         "budget_exhausted": True,
     }
     predictions = read_jsonl(
@@ -1336,6 +1614,107 @@ def test_prediction_budget_skips_completed_conversations_on_resume(
         "conv-1:q1",
         "conv-2:q1",
         "conv-3:q1",
+    ]
+
+
+def test_prediction_work_plan_quarantines_failed_conversations_by_default() -> None:
+    """默认 resume 不应重跑已标记 failed 的 conversation，避免失败后空烧 API。
+
+    输入:
+        conversation_status: 模拟上次运行中 `conv-1` 已在 add 或 answer 阶段失败。
+        prediction_records: 空，表示没有任何问题已经完成。
+
+    输出:
+        默认 policy 只推进 `conv-2`；显式 retry policy 才会重新纳入 `conv-1`。
+    """
+
+    from memory_benchmark.runners.prediction import _build_prediction_work_plan
+
+    dataset = _build_numbered_dataset(2)
+    selected_questions = {
+        conversation.conversation_id: list(conversation.questions)
+        for conversation in dataset.conversations
+    }
+    conversation_status = {
+        "conv-1": {
+            "status": "failed",
+            "error_type": "RuntimeError",
+            "error": "boom",
+        }
+    }
+
+    default_plan = _build_prediction_work_plan(
+        conversations=list(dataset.conversations),
+        selected_questions=selected_questions,
+        conversation_status=conversation_status,
+        prediction_records={},
+        policy=PredictionRunPolicy(resume=True),
+    )
+    assert [
+        item.conversation.conversation_id for item in default_plan.items
+    ] == ["conv-2"]
+
+    retry_plan = _build_prediction_work_plan(
+        conversations=list(dataset.conversations),
+        selected_questions=selected_questions,
+        conversation_status=conversation_status,
+        prediction_records={},
+        policy=PredictionRunPolicy(resume=True, retry_failed_conversations=True),
+    )
+    assert [
+        item.conversation.conversation_id for item in retry_plan.items
+    ] == ["conv-1", "conv-2"]
+
+
+def test_retry_failed_ingested_conversation_resumes_pending_questions_only() -> None:
+    """retry failed 时已完成写入的 conversation 不应重复 add。
+
+    输入:
+        conversation_status: `conv-1` 上次失败，但 `ingested=true` 表示 memory state
+            已经持久化完成。
+        prediction_records: `q1` 已有预测，`q2` 尚未回答。
+
+    输出:
+        work plan 只回答 `q2`，且 `needs_ingest=False`。
+    """
+
+    from memory_benchmark.runners.prediction import _build_prediction_work_plan
+
+    dataset = _build_two_question_dataset()
+    conversation = dataset.conversations[0]
+    selected_questions = {
+        conversation.conversation_id: list(conversation.questions),
+    }
+    plan = _build_prediction_work_plan(
+        conversations=list(dataset.conversations),
+        selected_questions=selected_questions,
+        conversation_status={
+            "conv-1": {
+                "status": "failed",
+                "stage": "isolated_worker",
+                "error_type": "RuntimeError",
+                "error": "reader failed",
+                "ingested": True,
+            }
+        },
+        prediction_records={
+            "conv-1:q1": {
+                "question_id": "conv-1:q1",
+                "conversation_id": "conv-1",
+                "answer": "partial",
+            }
+        },
+        policy=PredictionRunPolicy(
+            resume=True,
+            retry_failed_conversations=True,
+        ),
+    )
+
+    assert len(plan.items) == 1
+    assert plan.items[0].conversation.conversation_id == "conv-1"
+    assert plan.items[0].needs_ingest is False
+    assert [question.question_id for question in plan.items[0].pending_questions] == [
+        "conv-1:q2"
     ]
 
 
@@ -1449,6 +1828,19 @@ def test_split_into_chunks_handles_single_conversation() -> None:
     chunks = _split_into_chunks(convs, 1)
     assert len(chunks) == 1
     assert len(chunks[0]) == 1
+
+
+def test_experiment_paths_include_answer_prompt_artifact(
+    tmp_path: Path,
+) -> None:
+    """answer-prompt runner 需要单独保存 method 生成的完整 prompt。"""
+
+    from memory_benchmark.storage import ExperimentPaths
+
+    paths = ExperimentPaths.create(tmp_path / "run")
+
+    assert paths.answer_prompts_path.name == "answer_prompts.prediction.jsonl"
+    assert paths.answer_prompts_path.parent == paths.artifacts_dir
 
 
 def test_isolated_worker_pipeline_creates_per_worker_instances(
@@ -1677,6 +2069,527 @@ def test_isolated_worker_restores_state_and_skips_completed_questions(
     ] == ["conv-1:q1", "conv-1:q2"]
 
 
+def test_isolated_worker_persists_conversation_efficiency_observation(
+    tmp_path: Path,
+) -> None:
+    """isolated worker 应把 add 阶段 conversation efficiency 写入 artifact。"""
+
+    from memory_benchmark.methods.registry import MethodBuildContext
+    from memory_benchmark.observability.efficiency import (
+        EfficiencyCollector,
+        ModelDescriptor,
+        RetrievalObservationContract,
+    )
+
+    class _EfficiencyAwareSystem(BaseMemorySystem):
+        """在 question scope 内记录 answer latency 的 fake method。"""
+
+        def __init__(self, context: MethodBuildContext) -> None:
+            """保存 collector，模拟真实 adapter 通过 build context 获取观测器。"""
+
+            self.collector = context.efficiency_collector
+
+        def add(self, conversations: list[Conversation]) -> AddResult:
+            """模拟一次完整 conversation 写入。"""
+
+            return AddResult(
+                conversation_ids=[
+                    conversation.conversation_id for conversation in conversations
+                ]
+            )
+
+        def get_answer(self, question: Question) -> AnswerResult:
+            """记录 answer latency 并返回固定答案。"""
+
+            assert self.collector is not None
+            self.collector.record_answer_generation(latency_ms=1.0)
+            return AnswerResult(
+                question_id=question.question_id,
+                conversation_id=question.conversation_id,
+                answer=f"回答:{question.text}",
+            )
+
+    def fake_factory(context: MethodBuildContext) -> BaseMemorySystem:
+        """为每个 isolated worker 构造带 collector 的 fake method。"""
+
+        return _EfficiencyAwareSystem(context)
+
+    context = _create_context(tmp_path)
+    collector = EfficiencyCollector(run_id=context.run_id, enabled=True)
+
+    run_predictions(
+        dataset=_build_dataset(),
+        system=RecordingPredictionSystem(),
+        run_context=context,
+        policy=PredictionRunPolicy(max_workers=2),
+        method_manifest={"adapter": "recording-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+        efficiency_collector=collector,
+        model_inventory=(
+            ModelDescriptor(
+                model_id="fake-answer",
+                model_name="fake-answer",
+                model_role="answer_llm",
+                execution_mode="local",
+            ),
+        ),
+        instrumentation_identity={"observer_version": "test-v1"},
+        retrieval_observation_contract=RetrievalObservationContract(
+            required_by_profile=False,
+            supported_by_method=False,
+            unsupported_reason="fake method does not expose retrieval latency",
+        ),
+        system_factory=fake_factory,
+        build_context_template=MethodBuildContext(
+            config={},
+            openai_settings=None,
+            path_settings=None,
+            storage_root=context.run_dir / "method_state",
+            efficiency_collector=collector,
+        ),
+        supports_shared_instance_parallelism=False,
+    )
+
+    observations = read_jsonl(
+        context.artifacts_dir / "efficiency_observations.prediction.jsonl"
+    )
+    assert [
+        observation["observation_type"]
+        for observation in observations
+        if observation["observation_type"] == "conversation_efficiency"
+    ] == ["conversation_efficiency", "conversation_efficiency"]
+
+
+def test_isolated_worker_resume_keeps_stable_worker_state_root(
+    tmp_path: Path,
+) -> None:
+    """partial question resume 时同一 conversation 必须回到稳定 worker state 目录。
+
+    这个测试模拟首轮四个 conversation 以两 worker 运行，其中 `conv-2` 按完整数据集
+    顺序属于 `worker_1`。首轮完成 ingest 后只保留 `conv-2` 的第一题 prediction，
+    resume 时 work plan 只剩 `conv-2`。正确行为是仍把它的 completed conversation
+    state 挂到 `worker_1`，不能因为剩余列表重分块而变成 `worker_0`。
+    """
+
+    conversations: list[Conversation] = []
+    for index in range(4):
+        conversation_id = f"conv-{index + 1}"
+        questions = [
+            Question(
+                question_id=f"{conversation_id}:q1",
+                conversation_id=conversation_id,
+                text=f"问题 {index + 1}-1",
+            ),
+            Question(
+                question_id=f"{conversation_id}:q2",
+                conversation_id=conversation_id,
+                text=f"问题 {index + 1}-2",
+            ),
+        ]
+        conversations.append(
+            Conversation(
+                conversation_id=conversation_id,
+                sessions=[
+                    Session(
+                        session_id=f"{conversation_id}:s1",
+                        turns=[
+                            Turn(
+                                turn_id=f"{conversation_id}:t1",
+                                speaker="Speaker",
+                                content=f"公开记忆 {index + 1}",
+                            )
+                        ],
+                    )
+                ],
+                questions=questions,
+                gold_answers={
+                    question.question_id: GoldAnswerInfo(
+                        question_id=question.question_id,
+                        answer=f"标准答案 {question.question_id}",
+                    )
+                    for question in questions
+                },
+            )
+        )
+    dataset = Dataset(dataset_name="fake-conversation-qa", conversations=conversations)
+
+    run_predictions(
+        dataset=dataset,
+        system=RecordingPredictionSystem(),
+        run_context=_create_context(tmp_path),
+        policy=PredictionRunPolicy(max_workers=2),
+        method_manifest={"adapter": "recording-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+        system_factory=lambda context: RecordingPredictionSystem(),
+        build_context_template=_make_build_context(tmp_path),
+        supports_shared_instance_parallelism=False,
+    )
+
+    run_dir = tmp_path / "prediction-run"
+    predictions = read_jsonl(run_dir / "artifacts" / "method_predictions.jsonl")
+    atomic_write_jsonl(
+        run_dir / "artifacts" / "method_predictions.jsonl",
+        [record for record in predictions if record["question_id"] != "conv-2:q2"],
+    )
+
+    from memory_benchmark.methods.registry import MethodBuildContext
+
+    resume_contexts: list[MethodBuildContext] = []
+
+    class _ResumeStateProbe(RecordingPredictionSystem):
+        """记录 resume 时 completed conversation 使用的 state root。"""
+
+        def __init__(self, context: MethodBuildContext):
+            """保存 isolated worker build context。"""
+
+            super().__init__()
+            resume_contexts.append(context)
+
+    def fake_factory(context: MethodBuildContext) -> BaseMemorySystem:
+        """创建会记录 build context 的 fake system。"""
+
+        return _ResumeStateProbe(context)
+
+    run_predictions(
+        dataset=dataset,
+        system=RecordingPredictionSystem(),
+        run_context=_create_context(tmp_path, resume=True),
+        policy=PredictionRunPolicy(max_workers=2, resume=True),
+        method_manifest={"adapter": "recording-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+        system_factory=fake_factory,
+        build_context_template=_make_build_context(tmp_path),
+        supports_shared_instance_parallelism=False,
+    )
+
+    completed_contexts = [
+        context
+        for context in resume_contexts
+        if any(
+            conversation.conversation_id == "conv-2"
+            for conversation in context.completed_conversations
+        )
+    ]
+    assert len(completed_contexts) == 1
+    assert completed_contexts[0].storage_root == run_dir / "method_state" / "worker_1"
+
+
+def test_isolated_worker_marks_failed_conversation_and_continues_work(
+    tmp_path: Path,
+) -> None:
+    """单个 conversation 失败后应标记 failed，但 worker 继续后续 conversation。"""
+
+    from memory_benchmark.methods.registry import MethodBuildContext
+    from memory_benchmark.observability import ProgressReporter
+    from memory_benchmark.runners.prediction import (
+        _build_prediction_work_plan,
+        _run_isolated_worker_pipeline,
+    )
+    from memory_benchmark.storage import ExperimentPaths
+    from memory_benchmark.utils.run_logger import RunLogger
+
+    dataset = _build_numbered_dataset(4)
+    calls: list[tuple[str, str, str]] = []
+    calls_lock = threading.Lock()
+
+    class _FailFastSystem(RecordingPredictionSystem):
+        """按 worker 和 conversation 注入失败或等待的 fake system。"""
+
+        def __init__(self, context: MethodBuildContext) -> None:
+            """根据 storage_root 判断当前 worker id。"""
+
+            super().__init__()
+            self.worker_id = context.storage_root.name
+
+        def add(self, conversations: list[Conversation]) -> AddResult:
+            """worker_0 在第一个 conversation 失败，但之后仍应继续 conv-3。"""
+
+            conversation_id = conversations[0].conversation_id
+            with calls_lock:
+                calls.append((self.worker_id, "add", conversation_id))
+            if self.worker_id == "worker_0" and conversation_id == "conv-1":
+                raise RuntimeError("boom from worker_0")
+            if self.worker_id == "worker_1" and conversation_id == "conv-2":
+                time.sleep(0.2)
+            return AddResult(conversation_ids=[conversation_id])
+
+        def get_answer(self, question: Question) -> AnswerResult:
+            """记录 answer 调用，便于确认失败不会阻断其他 conversation。"""
+
+            with calls_lock:
+                calls.append((self.worker_id, "answer", question.conversation_id))
+            return super().get_answer(question)
+
+    def fake_factory(context: MethodBuildContext) -> BaseMemorySystem:
+        """创建带失败注入的 isolated worker system。"""
+
+        return _FailFastSystem(context)
+
+    run_dir = tmp_path / "run"
+    paths = ExperimentPaths.create(run_dir)
+    conversation_status: dict[str, dict[str, str]] = {}
+    work_plan = _build_prediction_work_plan(
+        conversations=list(dataset.conversations),
+        selected_questions={
+            conversation.conversation_id: list(conversation.questions)
+            for conversation in dataset.conversations
+        },
+        conversation_status={},
+        prediction_records={},
+        policy=PredictionRunPolicy(max_workers=2),
+    )
+
+    with ProgressReporter(paths.progress_path, enabled=False) as progress:
+        progress.start_conversations(len(dataset.conversations))
+        progress.start_questions(4)
+        prediction_records: dict[str, dict[str, object]] = {}
+        question_status: dict[str, dict[str, object]] = {}
+        _run_isolated_worker_pipeline(
+            work_plan=work_plan,
+            system_factory=fake_factory,
+            build_context_template=MethodBuildContext(
+                config={},
+                openai_settings=None,
+                path_settings=None,
+                storage_root=paths.method_state_dir,
+            ),
+            policy=PredictionRunPolicy(max_workers=2),
+            paths=paths,
+            progress=progress,
+            logger=RunLogger(paths.logs_dir),
+            efficiency_collector=None,
+            efficiency_store=None,
+            retrieval_observation_contract=None,
+            prediction_records=prediction_records,
+            conversation_status=conversation_status,
+            question_status=question_status,
+            question_order=[f"conv-{index}:q1" for index in range(1, 5)],
+        )
+
+    assert ("worker_0", "add", "conv-3") in calls
+    assert ("worker_1", "add", "conv-4") in calls
+    assert conversation_status["conv-1"]["status"] == "failed"
+    assert conversation_status["conv-1"]["stage"] == "isolated_worker"
+    assert conversation_status["conv-1"]["error_type"] == "RuntimeError"
+    assert conversation_status["conv-2"]["status"] == "completed"
+    assert conversation_status["conv-3"]["status"] == "completed"
+    assert conversation_status["conv-4"]["status"] == "completed"
+    assert set(prediction_records) == {"conv-2:q1", "conv-3:q1", "conv-4:q1"}
+    persisted_status = json.loads(paths.conversation_status_path.read_text())
+    assert persisted_status["conv-1"]["status"] == "failed"
+    assert persisted_status["conv-3"]["status"] == "completed"
+    events = read_jsonl(paths.logs_dir / "events.jsonl")
+    failure_events = [
+        event for event in events if event["event"] == "conversation_failed_isolated"
+    ]
+    assert failure_events
+    assert failure_events[0]["payload"]["worker_idx"] == 0
+    assert failure_events[0]["payload"]["conversation_id"] == "conv-1"
+    assert failure_events[0]["payload"]["error_type"] == "RuntimeError"
+    assert "boom from worker_0" in failure_events[0]["payload"]["traceback"]
+
+
+def test_isolated_worker_stops_after_consecutive_failure_threshold(
+    tmp_path: Path,
+) -> None:
+    """连续失败达到阈值后，应停止后续 conversation，避免批量空烧。"""
+
+    from memory_benchmark.methods.registry import MethodBuildContext
+    from memory_benchmark.observability import ProgressReporter
+    from memory_benchmark.runners.prediction import (
+        _build_prediction_work_plan,
+        _run_isolated_worker_pipeline,
+    )
+    from memory_benchmark.storage import ExperimentPaths
+    from memory_benchmark.utils.run_logger import RunLogger
+
+    dataset = _build_numbered_dataset(3)
+    calls: list[str] = []
+
+    class _AlwaysFailFirstTwoSystem(RecordingPredictionSystem):
+        """前两个 conversation 失败，第三个不应被尝试。"""
+
+        def add(self, conversations: list[Conversation]) -> AddResult:
+            """记录 add，并让 conv-1/conv-2 失败。"""
+
+            conversation_id = conversations[0].conversation_id
+            calls.append(conversation_id)
+            if conversation_id in {"conv-1", "conv-2"}:
+                raise RuntimeError(f"boom {conversation_id}")
+            return AddResult(conversation_ids=[conversation_id])
+
+    def fake_factory(context: MethodBuildContext) -> BaseMemorySystem:
+        """创建会连续失败的 fake system。"""
+
+        return _AlwaysFailFirstTwoSystem()
+
+    run_dir = tmp_path / "run"
+    paths = ExperimentPaths.create(run_dir)
+    conversation_status: dict[str, dict[str, object]] = {}
+    work_plan = _build_prediction_work_plan(
+        conversations=list(dataset.conversations),
+        selected_questions={
+            conversation.conversation_id: list(conversation.questions)
+            for conversation in dataset.conversations
+        },
+        conversation_status={},
+        prediction_records={},
+        policy=PredictionRunPolicy(max_workers=1, max_consecutive_failures=2),
+    )
+
+    with ProgressReporter(paths.progress_path, enabled=False) as progress:
+        progress.start_conversations(len(dataset.conversations))
+        progress.start_questions(3)
+        _run_isolated_worker_pipeline(
+            work_plan=work_plan,
+            system_factory=fake_factory,
+            build_context_template=MethodBuildContext(
+                config={},
+                openai_settings=None,
+                path_settings=None,
+                storage_root=paths.method_state_dir,
+            ),
+            policy=PredictionRunPolicy(max_workers=1, max_consecutive_failures=2),
+            paths=paths,
+            progress=progress,
+            logger=RunLogger(paths.logs_dir),
+            efficiency_collector=None,
+            efficiency_store=None,
+            retrieval_observation_contract=None,
+            prediction_records={},
+            conversation_status=conversation_status,
+            question_status={},
+            question_order=[f"conv-{index}:q1" for index in range(1, 4)],
+        )
+
+    assert calls == ["conv-1", "conv-2"]
+    assert conversation_status["conv-1"]["status"] == "failed"
+    assert conversation_status["conv-2"]["status"] == "failed"
+    assert "conv-3" not in conversation_status
+
+
+def test_registered_isolated_prediction_does_not_construct_root_system(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """registered isolated path 不应构造顶层 method instance 产生副作用。"""
+
+    from memory_benchmark.benchmark_adapters import PreparedBenchmarkRun
+    from memory_benchmark.cli import run_prediction as run_prediction_module
+    from memory_benchmark.core import MethodCapability, TaskFamily
+    from memory_benchmark.methods.registry import MethodBuildContext, MethodRegistration
+
+    class _FakeConfig:
+        """registered prediction 测试用最小 method config。"""
+
+        profile_name = "smoke"
+        max_workers = 2
+
+        def to_manifest(self) -> dict[str, object]:
+            """返回公开配置快照。"""
+
+            return {"profile_name": self.profile_name, "max_workers": self.max_workers}
+
+    class _SideEffectSystem(RecordingPredictionSystem):
+        """构造时写 marker，用于检测是否创建了根实例。"""
+
+        def __init__(self, context: MethodBuildContext) -> None:
+            """在当前 storage_root 写入构造 marker。"""
+
+            super().__init__()
+            context.storage_root.mkdir(parents=True, exist_ok=True)
+            (context.storage_root / "constructed.txt").write_text(
+                context.storage_root.name,
+                encoding="utf-8",
+            )
+
+    def fake_factory(context: MethodBuildContext) -> BaseMemorySystem:
+        """创建带构造副作用的 fake system。"""
+
+        return _SideEffectSystem(context)
+
+    dataset = _build_numbered_dataset(2)
+    benchmark_registration = SimpleNamespace(
+        name="fake-benchmark",
+        task_family=TaskFamily.CONVERSATION_QA,
+        required_capabilities=frozenset(
+            {
+                MethodCapability.CONVERSATION_ADD,
+                MethodCapability.ANSWER_GENERATION,
+            }
+        ),
+        default_variant="default",
+        variant_names=lambda: ("default",),
+        prepare=lambda project_root, request: PreparedBenchmarkRun(
+            variant="default",
+            run_scope=request.run_scope,
+            dataset=dataset,
+            source_relative_paths=(),
+        ),
+        prediction_enabled=True,
+    )
+    method_registration = MethodRegistration(
+        name="fake-method",
+        task_families=frozenset({TaskFamily.CONVERSATION_QA}),
+        provided_capabilities=frozenset(
+            {
+                MethodCapability.CONVERSATION_ADD,
+                MethodCapability.ANSWER_GENERATION,
+            }
+        ),
+        profile_sections=(("smoke", "smoke"),),
+        profile_relative_path=Path("configs/methods/fake.toml"),
+        config_type=_FakeConfig,
+        requires_api=False,
+        system_factory=fake_factory,
+        source_identity_factory=lambda path_settings: {"source_sha256": "fake"},
+        model_name_getter=lambda config: "fake-model",
+        max_workers_getter=lambda config: config.max_workers,
+        display_name="FakeMethod",
+        supports_shared_instance_parallelism=False,
+    )
+    monkeypatch.setattr(
+        run_prediction_module,
+        "load_path_settings",
+        lambda project_root: SimpleNamespace(
+            project_root=tmp_path,
+            outputs_root=tmp_path / "outputs",
+        ),
+    )
+    monkeypatch.setattr(
+        run_prediction_module,
+        "get_benchmark_registration",
+        lambda benchmark_name: benchmark_registration,
+    )
+    monkeypatch.setattr(
+        run_prediction_module,
+        "get_method_registration",
+        lambda method_name: method_registration,
+    )
+    monkeypatch.setattr(
+        run_prediction_module,
+        "load_method_profile",
+        lambda **kwargs: _FakeConfig(),
+    )
+
+    run_prediction_module.run_registered_conversation_qa_prediction(
+        project_root=tmp_path,
+        method_name="fake-method",
+        benchmark_name="fake-benchmark",
+        profile_name="smoke",
+        run_id="isolated-root-side-effect",
+        enable_efficiency_observability=False,
+    )
+
+    state_root = tmp_path / "outputs" / "isolated-root-side-effect" / "method_state"
+    assert not (state_root / "constructed.txt").exists()
+    assert (state_root / "worker_0" / "constructed.txt").is_file()
+    assert (state_root / "worker_1" / "constructed.txt").is_file()
+
+
 def test_isolated_worker_rejects_turn_checkpoint_resume(
     tmp_path: Path,
 ) -> None:
@@ -1720,3 +2633,67 @@ def test_isolated_worker_rejects_turn_checkpoint_resume(
             ),
             supports_shared_instance_parallelism=False,
         )
+
+
+def test_build_conversation_prompts_extracts_system_prompt() -> None:
+    """_build_conversation_prompts 从 metadata 提取 system_prompt 到按 conversation 去重的 dict。"""
+
+    from memory_benchmark.runners.prediction import (
+        _build_conversation_prompts,
+    )
+
+    records = {
+        "q-0": {
+            "question_id": "q-0",
+            "conversation_id": "conv-a",
+            "metadata": {"system_prompt": "You are a helpful assistant.", "method": "test"},
+        },
+        "q-1": {
+            "question_id": "q-1",
+            "conversation_id": "conv-a",
+            "metadata": {"system_prompt": "You are a helpful assistant.", "method": "test"},
+        },
+        "q-2": {
+            "question_id": "q-2",
+            "conversation_id": "conv-b",
+            "metadata": {"method": "test"},
+        },
+    }
+    prompts = _build_conversation_prompts(records)
+    assert prompts == {"conv-a": {"system_prompt": "You are a helpful assistant."}}
+
+
+def test_strip_conversation_metadata_removes_system_prompt() -> None:
+    """_strip_conversation_metadata 从 metadata 中移除 system_prompt。"""
+
+    from memory_benchmark.runners.prediction import (
+        _strip_conversation_metadata,
+    )
+
+    records = {
+        "q-0": {
+            "question_id": "q-0",
+            "conversation_id": "conv-a",
+            "metadata": {"system_prompt": "You are helpful.", "method": "test"},
+        },
+    }
+    _strip_conversation_metadata(records)
+    assert "system_prompt" not in records["q-0"]["metadata"]
+    assert records["q-0"]["metadata"] == {"method": "test"}
+
+
+def test_conversation_prompts_empty_when_no_matching_keys() -> None:
+    """无 conversation 级 metadata 时 _build_conversation_prompts 返回空 dict。"""
+
+    from memory_benchmark.runners.prediction import (
+        _build_conversation_prompts,
+    )
+
+    records = {
+        "q-0": {
+            "question_id": "q-0",
+            "conversation_id": "conv-a",
+            "metadata": {"method": "test"},
+        },
+    }
+    assert _build_conversation_prompts(records) == {}

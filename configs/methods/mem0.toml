@@ -7,6 +7,8 @@ top_k = 200
 max_workers = 1
 ingestion_chunk_size = 1
 infer = true
+api_timeout_seconds = 60.0
+api_max_retries = 8
 
 ["official_full"]
 extraction_model = "gpt-4o-mini"
@@ -17,3 +19,5 @@ top_k = 200
 max_workers = 10
 ingestion_chunk_size = 1
 infer = true
+api_timeout_seconds = 60.0
+api_max_retries = 8

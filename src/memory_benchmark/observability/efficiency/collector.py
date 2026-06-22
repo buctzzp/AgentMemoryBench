@@ -142,6 +142,20 @@ class EfficiencyCollector:
         finally:
             self._stage_var.reset(token)
 
+    def active_scope_type(self) -> str | None:
+        """返回当前线程的 observation scope 类型；无 scope 时返回 None。
+
+        该只读方法供 method adapter 在第三方内部回调中判断是否处于
+        conversation/question/judge 作用域，避免在 runner 未建立 scope 时误写观测。
+        """
+
+        if not self.enabled:
+            return None
+        state = self._scope_var.get()
+        if state is None:
+            return None
+        return state.scope_type
+
     def record_memory_build_total_latency(self, *, latency_ms: float) -> None:
         """记录当前 conversation 完成记忆构建所需的总耗时。"""
 
@@ -174,6 +188,35 @@ class EfficiencyCollector:
         state.retrieval_recorded = True
         state.retrieval_latency_ms = latency_ms
         state.injected_memory_context_tokens = injected_memory_context_tokens
+
+    def record_retrieval_result_if_missing(
+        self,
+        *,
+        latency_ms: float,
+        injected_memory_context_tokens: int | None,
+    ) -> None:
+        """仅在 adapter 未上报 retrieval 时记录；已上报时补齐 context tokens。
+
+        answer-prompt 路径中，adapter 可能能精确记录检索耗时，但 runner 才能统一读取
+        method metadata 中可选的 `answer_context`。这个方法避免重复 retrieval
+        observation，同时允许 runner 回填可诊断的 memory context token 数。
+        """
+
+        state = self._active_state_or_none()
+        if state is None:
+            return
+        self._require_question_state(state)
+        if state.retrieval_recorded:
+            if (
+                state.injected_memory_context_tokens is None
+                and injected_memory_context_tokens is not None
+            ):
+                state.injected_memory_context_tokens = injected_memory_context_tokens
+            return
+        self.record_retrieval_result(
+            latency_ms=latency_ms,
+            injected_memory_context_tokens=injected_memory_context_tokens,
+        )
 
     def record_retrieval_unsupported(self, reason: str) -> None:
         """声明当前 method 无法精确拆分 question 的 retrieval。"""

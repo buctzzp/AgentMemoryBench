@@ -14,6 +14,7 @@ import io
 import json
 import math
 import openai as openai_package
+import re
 import sys
 import threading
 import time
@@ -30,9 +31,16 @@ import httpx
 from openai import APIConnectionError, APITimeoutError, OpenAI
 
 from memory_benchmark.config.settings import PathSettings, load_path_settings, load_settings
-from memory_benchmark.core import AddResult, AnswerResult, Conversation, Question
+from memory_benchmark.core import (
+    AddResult,
+    AnswerResult,
+    Conversation,
+    Question,
+    AnswerPromptResult,
+    PromptMessage,
+)
 from memory_benchmark.core.exceptions import ConfigurationError
-from memory_benchmark.core.interfaces import BaseMemorySystem
+from memory_benchmark.core.interfaces import BaseMemoryProvider, BaseMemorySystem
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     EfficiencyStage,
@@ -462,7 +470,7 @@ class _MemoryOSEvalModules:
     main_loco_parse: ModuleType
 
 
-class MemoryOS(BaseMemorySystem):
+class MemoryOS(BaseMemoryProvider, BaseMemorySystem):
     """MemoryOS 的 conversation-QA v2 method wrapper。"""
 
     def __init__(
@@ -529,17 +537,19 @@ class MemoryOS(BaseMemorySystem):
         self._patch_eval_modules()
         self._states: dict[str, MemoryOSConversationState] = {}
 
-    def add(self, conversations: list[Conversation]) -> AddResult:
+    def add(self, conversations: Conversation | list[Conversation]) -> AddResult:
         """写入一个或多个 conversation。
 
         输入:
-            conversations: runner 传入的公开 Conversation 列表；即使对象上有
+            conversations: runner 传入的单个公开 Conversation 或迁移期兼容列表；即使对象上有
                 gold_answers，本方法也只读取 sessions、turns 和公开 metadata。
 
         输出:
             AddResult: 本次成功写入的 conversation ids。
         """
 
+        if isinstance(conversations, Conversation):
+            conversations = [conversations]
         if not conversations:
             raise ConfigurationError("MemoryOS.add() requires at least one conversation")
 
@@ -568,6 +578,66 @@ class MemoryOS(BaseMemorySystem):
             },
         )
 
+    def retrieve(self, question: Question) -> AnswerPromptResult:
+        """执行 MemoryOS 官方 retrieval 并格式化上下文。"""
+
+        state = self._states.get(question.conversation_id)
+        if state is None:
+            raise ConfigurationError(
+                f"MemoryOS has no conversation state for question: {question.conversation_id}"
+            )
+
+        collector = self._efficiency_collector
+        effective_text = _effective_question_text(question)
+        retrieval_started_ns = time.perf_counter_ns()
+        with self._official_stdout_context():
+            if collector is not None and collector.enabled:
+                with collector.operation_stage(EfficiencyStage.RETRIEVAL):
+                    retrieval_result = state.retrieval_system.retrieve(
+                        effective_text,
+                        segment_threshold=self.config.segment_threshold,
+                        page_threshold=self.config.page_threshold,
+                        knowledge_threshold=self.config.knowledge_threshold,
+                        client=self._client,
+                    )
+            else:
+                retrieval_result = state.retrieval_system.retrieve(
+                    effective_text,
+                    segment_threshold=self.config.segment_threshold,
+                    page_threshold=self.config.page_threshold,
+                    knowledge_threshold=self.config.knowledge_threshold,
+                    client=self._client,
+                )
+        prompt_messages, answer_prompt, memory_context = _build_memoryos_answer_prompt(
+            query=effective_text,
+            state=state,
+            retrieval_result=retrieval_result,
+        )
+        if collector is not None and collector.enabled:
+            collector.record_retrieval_result(
+                latency_ms=_elapsed_ms(retrieval_started_ns),
+                injected_memory_context_tokens=_count_openai_tokens(
+                    memory_context,
+                    self.config.llm_model,
+                ),
+            )
+
+        retrieval_queue = retrieval_result.get("retrieval_queue") or []
+        long_term_knowledge = retrieval_result.get("long_term_knowledge") or []
+        return AnswerPromptResult(
+            question_id=question.question_id,
+            conversation_id=question.conversation_id,
+            answer_prompt=answer_prompt,
+            prompt_messages=prompt_messages,
+            metadata={
+                "method": "MemoryOS",
+                "answer_context": memory_context,
+                "retrieved_page_count": len(retrieval_queue),
+                "retrieved_knowledge_count": len(long_term_knowledge),
+                "answer_prompt_profile": "memoryos_official_eval",
+            },
+        )
+
     def get_answer(self, question: Question) -> AnswerResult:
         """基于已写入的 conversation 回答公开问题。
 
@@ -585,12 +655,13 @@ class MemoryOS(BaseMemorySystem):
             )
 
         collector = self._efficiency_collector
+        effective_text = _effective_question_text(question)
         retrieval_started_ns = time.perf_counter_ns()
         with self._official_stdout_context():
             if collector is not None and collector.enabled:
                 with collector.operation_stage(EfficiencyStage.RETRIEVAL):
                     retrieval_result = state.retrieval_system.retrieve(
-                        question.text,
+                        effective_text,
                         segment_threshold=self.config.segment_threshold,
                         page_threshold=self.config.page_threshold,
                         knowledge_threshold=self.config.knowledge_threshold,
@@ -598,7 +669,7 @@ class MemoryOS(BaseMemorySystem):
                     )
             else:
                 retrieval_result = state.retrieval_system.retrieve(
-                    question.text,
+                    effective_text,
                     segment_threshold=self.config.segment_threshold,
                     page_threshold=self.config.page_threshold,
                     knowledge_threshold=self.config.knowledge_threshold,
@@ -614,7 +685,7 @@ class MemoryOS(BaseMemorySystem):
                     with collector.operation_stage(EfficiencyStage.ANSWER):
                         answer, system_prompt, user_prompt = (
                             self._modules.main_loco_parse.generate_system_response_with_meta(
-                                question.text,
+                                effective_text,
                                 state.short_memory,
                                 state.long_memory,
                                 retrieval_result["retrieval_queue"],
@@ -632,7 +703,7 @@ class MemoryOS(BaseMemorySystem):
                 else:
                     answer, system_prompt, user_prompt = (
                         self._modules.main_loco_parse.generate_system_response_with_meta(
-                            question.text,
+                            effective_text,
                             state.short_memory,
                             state.long_memory,
                             retrieval_result["retrieval_queue"],
@@ -676,7 +747,6 @@ class MemoryOS(BaseMemorySystem):
                 "retrieved_page_count": len(retrieval_result["retrieval_queue"]),
                 "retrieved_knowledge_count": len(retrieval_result["long_term_knowledge"]),
                 "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
             },
         )
 
@@ -1248,6 +1318,18 @@ class _TiktokenCounter:
         return len(self._encoding.encode(text or ""))
 
 
+def _effective_question_text(question: Question) -> str:
+    """构造含可选时间上下文的有效问题文本。
+
+    LoCoMo 不含 question_time，返回原始文本。LongMemEval 的 question_time
+    会作为时间前缀拼接，供检索和回答 prompt 使用。
+    """
+
+    if question.question_time:
+        return f"Question time: {question.question_time}. Question: {question.text}"
+    return str(question.text)
+
+
 def _elapsed_ms(started_ns: int) -> float:
     """把 perf_counter_ns 起点转换为非负毫秒。"""
 
@@ -1301,6 +1383,101 @@ def _memoryos_retrieved_context_text(retrieval_result: dict[str, Any]) -> str:
         if text:
             parts.append(text)
     return "\n".join(parts)
+
+
+def _build_memoryos_answer_prompt(
+    *,
+    query: str,
+    state: MemoryOSConversationState,
+    retrieval_result: dict[str, Any],
+) -> tuple[list[PromptMessage], str, str]:
+    """按 MemoryOS 官方 eval prompt 逻辑构造完整 answer role messages。"""
+
+    speaker_a = state.speaker_a
+    speaker_b = state.speaker_b
+    history = state.short_memory.get_all()
+    history_text = "\n".join(
+        [
+            f"{speaker_a}: {qa.get('user_input', '')}\n"
+            f"{speaker_b}: {qa.get('agent_response', '')}\n"
+            f"Time: ({qa.get('timestamp', '')})"
+            for qa in history
+        ]
+    )
+
+    retrieval_queue = retrieval_result.get("retrieval_queue") or []
+    retrieval_text = "\n".join(
+        [
+            f"【Historical Memory】 {speaker_a}: {page.get('user_input', '')}\n"
+            f"{speaker_b}: {page.get('agent_response', '')}\n"
+            f"Time:({page.get('timestamp', '')})\n"
+            f"Conversation chain overview:({page.get('meta_info', '')})\n"
+            for page in retrieval_queue
+            if isinstance(page, dict)
+        ]
+    )
+
+    profile_obj = state.long_memory.get_user_profile(state.conversation_id)
+    user_profile_text = str(profile_obj.get("data", "None")) if profile_obj else "None"
+    background = f"【User Profile】\n{user_profile_text}\n\n"
+    for knowledge in retrieval_result.get("long_term_knowledge") or []:
+        if isinstance(knowledge, dict):
+            background += f"{knowledge.get('knowledge', '')}\n"
+        else:
+            background += f"{knowledge}\n"
+    background = re.sub(r"(?i)\buser\b", speaker_a, background)
+    background = re.sub(r"(?i)\bassistant\b", speaker_b, background)
+
+    assistant_knowledge = state.long_memory.get_assistant_knowledge()
+    assistant_knowledge_text = "【Assistant Knowledge】\n"
+    for knowledge in assistant_knowledge:
+        assistant_knowledge_text += (
+            f"- {knowledge.get('knowledge', '')} ({knowledge.get('timestamp', '')})\n"
+        )
+    assistant_knowledge_text = re.sub(r"\bI\b", speaker_b, assistant_knowledge_text)
+
+    system_prompt = (
+        f"You are role-playing as {speaker_b} in a conversation with the user is playing is  {speaker_a}. "
+        f"Here are some of your character traits and knowledge:\n{assistant_knowledge_text}\n"
+        f"Any content referring to 'User' in the prompt refers to {speaker_a}'s content, and any content referring to 'AI'or 'assiant' refers to {speaker_b}'s content."
+        f"Your task is to answer questions about {speaker_a} or {speaker_b} in an extremely concise manner.\n"
+        f"When the question is: \"What did the charity race raise awareness for?\", you should not answer in the form of: \"The charity race raised awareness for mental health.\" Instead, it should be: \"mental health\", as this is more concise."
+    )
+    user_prompt = (
+        f"<CONTEXT>\n"
+        f"Recent conversation between {speaker_a} and {speaker_b}:\n"
+        f"{history_text}\n\n"
+        f"<MEMORY>\n"
+        f"Relevant past conversations:\n"
+        f"{retrieval_text}\n\n"
+        f"<CHARACTER TRAITS>\n"
+        f"Characteristics of {speaker_a}:\n"
+        f"{background}\n\n"
+        f"the question is: {query}\n"
+        f"Your task is to answer questions about {speaker_a} or {speaker_b} in an extremely concise manner.\n"
+        f"Please only provide the content of the answer, without including 'answer:'\n"
+        f"For questions that require answering a date or time, strictly follow the format \"15 July 2023\" and provide a specific date whenever possible. For example, if you need to answer \"last year,\" give the specific year of last year rather than just saying \"last year.\" Only provide one year, date, or time, without any extra responses.\n"
+        f"If the question is about the duration, answer in the form of several years, months, or days.\n"
+        f"Generate answers primarily composed of concrete entities, such as Mentoring program, school speech, etc"
+    )
+    answer_context = "\n\n".join(
+        text
+        for text in (
+            history_text,
+            retrieval_text,
+            background,
+            assistant_knowledge_text,
+        )
+        if text.strip()
+    )
+    prompt_messages = [
+        PromptMessage(role="system", content=system_prompt),
+        PromptMessage(role="user", content=user_prompt),
+    ]
+    answer_prompt = "\n\n".join(
+        f"[{message.role}]\n{message.content}" for message in prompt_messages
+    )
+    return prompt_messages, answer_prompt, answer_context
 
 
 def _memoryos_memory_context_payload_text(payload: dict[str, Any]) -> str:

@@ -91,7 +91,7 @@ class JudgePromptBuilderTest(unittest.TestCase):
         self.gold = GoldAnswerInfo(question_id="q1", answer="green tea")
 
     def test_locomo_prompt_includes_inputs_without_api_key(self) -> None:
-        """LoCoMo prompt 应包含题目、预测和标准答案，但不包含 API key。"""
+        """LoCoMo judge prompt 应包含题目、预测和标准答案，但不包含 API key。"""
 
         prompt = LoCoMoJudgeEvaluator().build_prompt(
             self.question,
@@ -99,7 +99,7 @@ class JudgePromptBuilderTest(unittest.TestCase):
             self.gold,
         )
 
-        self.assertIn("LoCoMo", prompt)
+        self.assertIn("label an answer", prompt)
         self.assertIn(self.question.text, prompt)
         self.assertIn(self.prediction.answer, prompt)
         self.assertIn(self.gold.answer, prompt)
@@ -123,7 +123,7 @@ class JudgePromptBuilderTest(unittest.TestCase):
         self.assertNotIn("OPENAI", prompt.upper())
 
     def test_locomo_compact_prompt_requests_true_false_not_json(self) -> None:
-        """LoCoMo compact 模式的 prompt 必须和 true/false parser 对齐。"""
+        """LoCoMo compact 模式的 prompt 必须和 CORRECT/WRONG parser 对齐。"""
 
         prompt = LoCoMoJudgeEvaluator(mode="compact").build_prompt(
             self.question,
@@ -131,8 +131,8 @@ class JudgePromptBuilderTest(unittest.TestCase):
             self.gold,
         )
 
-        self.assertIn("true", prompt.lower())
-        self.assertIn("false", prompt.lower())
+        self.assertIn("CORRECT", prompt)
+        self.assertIn("WRONG", prompt)
         self.assertNotIn("Return JSON", prompt)
         self.assertNotIn("is_correct", prompt)
 

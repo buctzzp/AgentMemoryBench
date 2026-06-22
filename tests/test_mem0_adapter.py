@@ -214,6 +214,37 @@ class ObservableEmbeddingModel:
         return [[0.1, 0.2, 0.3] for _ in texts]
 
 
+class OptionTrackingOpenAIClient:
+    """记录 OpenAI SDK `with_options()` 调用的 fake client。"""
+
+    def __init__(self):
+        """初始化 option 调用记录。"""
+
+        self.option_calls: list[dict[str, object]] = []
+
+    def with_options(self, **kwargs):
+        """记录 timeout/retry 参数，并模拟 OpenAI SDK 返回新 client。"""
+
+        self.option_calls.append(kwargs)
+        return self
+
+
+class OpenAIClientBackend(FakeMemoryBackend):
+    """模拟 vendored Mem0 中持有 OpenAI client 的 LLM 与 embedding backend。"""
+
+    def __init__(self):
+        """初始化可被 adapter 配置的 fake OpenAI clients。"""
+
+        super().__init__()
+        self.llm = SimpleNamespace(
+            config=SimpleNamespace(response_callback=None),
+            client=OptionTrackingOpenAIClient(),
+        )
+        self.embedding_model = SimpleNamespace(
+            client=OptionTrackingOpenAIClient(),
+        )
+
+
 def _fake_usage_response(prompt_tokens: int, completion_tokens: int):
     """构造带 OpenAI-compatible usage 的 fake response。"""
 
@@ -357,6 +388,8 @@ def test_mem0_profiles_separate_smoke_and_official_full_parameters() -> None:
     assert smoke.max_workers == 1
     assert smoke.ingestion_chunk_size == 1
     assert smoke.infer is True
+    assert smoke.api_timeout_seconds == 60.0
+    assert smoke.api_max_retries == 8
 
     assert full.extraction_model == "gpt-4o-mini"
     assert full.embedding_model == "text-embedding-3-small"
@@ -365,6 +398,34 @@ def test_mem0_profiles_separate_smoke_and_official_full_parameters() -> None:
     assert full.max_workers == 10
     assert full.ingestion_chunk_size == 1
     assert full.infer is True
+    assert full.api_timeout_seconds == 60.0
+    assert full.api_max_retries == 8
+
+
+def test_mem0_config_rejects_invalid_api_retry_settings() -> None:
+    """Mem0 API timeout/retry 配置必须强校验，避免长实验无兜底运行。"""
+
+    with pytest.raises(ConfigurationError, match="api_timeout_seconds"):
+        Mem0Config(
+            extraction_model="gpt-4o-mini",
+            embedding_model="text-embedding-3-small",
+            embedding_dimensions=1536,
+            reader_model="gpt-4o-mini",
+            top_k=200,
+            max_workers=1,
+            api_timeout_seconds=0,
+        )
+
+    with pytest.raises(ConfigurationError, match="api_max_retries"):
+        Mem0Config(
+            extraction_model="gpt-4o-mini",
+            embedding_model="text-embedding-3-small",
+            embedding_dimensions=1536,
+            reader_model="gpt-4o-mini",
+            top_k=200,
+            max_workers=1,
+            api_max_retries=-1,
+        )
 
 
 def test_mem0_source_identity_records_version_and_deterministic_core_hash() -> None:
@@ -516,8 +577,8 @@ def test_add_batches_longmemeval_turns_as_user_assistant_pairs() -> None:
     assert all(call["run_id"] == "lme-q1" for call in backend.add_calls)
 
 
-def test_mem0_turn_level_resume_is_only_enabled_for_non_longmemeval() -> None:
-    """Mem0 LongMemEval 走 conversation-level resume，LoCoMo 保留 turn-level resume。"""
+def test_mem0_turn_level_resume_is_disabled_for_all_benchmarks() -> None:
+    """Mem0 统一使用 conversation-level resume，不再启用 runner turn checkpoint。"""
 
     system = Mem0(
         config=Mem0Config.smoke(),
@@ -525,7 +586,7 @@ def test_mem0_turn_level_resume_is_only_enabled_for_non_longmemeval() -> None:
         reader_client=FakeReaderClient(),
     )
 
-    assert system.supports_turn_resume(_build_conversation()) is True
+    assert system.supports_turn_resume(_build_conversation()) is False
     assert system.supports_turn_resume(_build_longmemeval_conversation()) is False
 
 
@@ -606,8 +667,58 @@ def test_get_answer_searches_only_question_conversation_and_calls_reader() -> No
         "reader_model": "gpt-4o-mini",
     }
     reader_messages = reader.calls[0]["messages"]
+    assert len(reader_messages) == 1
     assert "Alice likes jasmine tea." in reader_messages[0]["content"]
-    assert question.text == reader_messages[1]["content"]
+    assert question.text in reader_messages[0]["content"]
+
+
+def test_mem0_retrieve_returns_answer_prompt() -> None:
+    """retrieve 只检索当前 conversation，并返回完整 answer prompt。"""
+
+    backend = FakeMemoryBackend()
+    reader = FakeReaderClient()
+    config = Mem0Config.smoke()
+    system = Mem0(
+        config=config,
+        memory_backend=backend,
+        reader_client=reader,
+    )
+    system.add([_build_conversation()])
+    question = Question(
+        question_id="conv-1:q1",
+        conversation_id="conv-1",
+        text="What kind of tea does Alice like?",
+    )
+
+    retrieval = system.retrieve(question)
+
+    assert backend.search_calls == [
+        {
+            "query": question.text,
+            "filters": {"run_id": "conv-1"},
+            "top_k": config.top_k,
+        }
+    ]
+    assert reader.calls == []
+    assert retrieval.question_id == question.question_id
+    assert retrieval.conversation_id == question.conversation_id
+    assert [message.role for message in retrieval.prompt_messages] == [
+        "system",
+        "user",
+    ]
+    assert "Alice likes jasmine tea." in retrieval.answer_prompt
+    assert question.text in retrieval.answer_prompt
+    assert retrieval.metadata["answer_context"] == "- Alice likes jasmine tea."
+    assert retrieval.metadata["retrieved_memories"] == [
+        {
+            "content": "Alice likes jasmine tea.",
+            "score": 0.91,
+            "created_at": None,
+        }
+    ]
+    assert retrieval.metadata["method"] == "mem0"
+    assert retrieval.metadata["top_k"] == config.top_k
+    assert retrieval.metadata["answer_prompt_profile"] == "generic"
 
 
 def test_get_answer_uses_mem0_locomo_official_answer_prompt() -> None:
@@ -920,3 +1031,32 @@ def test_production_config_injects_openai_and_local_storage_without_secrets_in_m
     assert backend_config["history_db_path"] == str(tmp_path / "history.db")
     assert "secret-test-key" not in str(manifest)
     assert "api_key" not in str(manifest)
+
+
+def test_mem0_configures_vendored_openai_clients_with_timeout_and_retries() -> None:
+    """adapter 应给 vendored LLM/embedding OpenAI client 注入 timeout 和 retry。"""
+
+    backend = OpenAIClientBackend()
+    config = Mem0Config(
+        extraction_model="gpt-4o-mini",
+        embedding_model="text-embedding-3-small",
+        embedding_dimensions=1536,
+        reader_model="gpt-4o-mini",
+        top_k=200,
+        max_workers=1,
+        api_timeout_seconds=12.5,
+        api_max_retries=6,
+    )
+
+    Mem0(
+        config=config,
+        memory_backend=backend,
+        reader_client=FakeReaderClient(),
+    )
+
+    assert backend.llm.client.option_calls == [
+        {"timeout": 12.5, "max_retries": 6}
+    ]
+    assert backend.embedding_model.client.option_calls == [
+        {"timeout": 12.5, "max_retries": 6}
+    ]

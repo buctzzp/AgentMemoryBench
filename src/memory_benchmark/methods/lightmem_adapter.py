@@ -34,13 +34,17 @@ from memory_benchmark.core import (
     ConfigurationError,
     Conversation,
     Question,
+    AnswerPromptResult,
+    PromptMessage,
     Session,
     Turn,
 )
-from memory_benchmark.core.interfaces import BaseMemorySystem
+from memory_benchmark.core.interfaces import BaseMemoryProvider, BaseMemorySystem
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     EfficiencyStage,
+    MeasurementSource,
+    extract_api_token_usage,
     resolve_token_usage,
 )
 
@@ -48,6 +52,7 @@ from memory_benchmark.observability.efficiency import (
 LIGHTMEM_METHOD_DIRECTORY = "LightMem"
 LIGHTMEM_ADAPTER_VERSION = "conversation-qa-v1"
 LIGHTMEM_READER_PROMPT_VERSION = "lightmem-reader-v1"
+LIGHTMEM_MEMORY_LLM_MODEL_ID = "lightmem-memory-llm"
 _LIGHTMEM_IMPORT_LOCK = threading.Lock()
 LIGHTMEM_MODEL_DOWNLOADS = {
     "embedding_model_path": "sentence-transformers/all-MiniLM-L6-v2",
@@ -55,6 +60,22 @@ LIGHTMEM_MODEL_DOWNLOADS = {
         "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
     ),
 }
+
+
+@dataclass(frozen=True)
+class _BufferedMemoryManagerUsage:
+    """LightMem 子线程中暂存的 memory manager LLM usage。
+
+    字段:
+        input_tokens: API usage 或 tokenizer 回退得到的输入 token 数。
+        output_tokens: API usage 或 tokenizer 回退得到的输出 token 数。
+        token_measurement_source: token 计量来源，保留 api_usage / tokenizer_estimate
+            的区别。
+    """
+
+    input_tokens: int
+    output_tokens: int
+    token_measurement_source: MeasurementSource
 
 
 @dataclass(frozen=True)
@@ -66,6 +87,8 @@ class LightMemConfig:
         embedding_model_path: 本地 embedding 模型路径或名称。
         llmlingua_model_path: 本地 LLMLingua 压缩模型路径或名称。
         retrieve_limit: method 内部检索条数，不进入统一接口参数。
+        api_timeout_seconds: OpenAI-compatible 请求超时秒数。
+        api_max_retries: OpenAI-compatible 请求最大重试次数。
         max_workers: runner 可读取的建议 conversation 并发数。
         pre_compress: 是否启用官方预压缩。
         compression_rate: LLMLingua-2 预压缩率；LightMem Table 2/3 的
@@ -83,6 +106,8 @@ class LightMemConfig:
     llmlingua_model_path: str
     retrieve_limit: int
     max_workers: int
+    api_timeout_seconds: float = 60.0
+    api_max_retries: int = 8
     pre_compress: bool = True
     compression_rate: float = 0.7
     stm_threshold: int = 512
@@ -106,6 +131,10 @@ class LightMemConfig:
             raise ConfigurationError("LightMem llmlingua_model_path is required")
         if self.retrieve_limit < 1:
             raise ConfigurationError("LightMem retrieve_limit must be positive")
+        if self.api_timeout_seconds <= 0:
+            raise ConfigurationError("LightMem api_timeout_seconds must be positive")
+        if self.api_max_retries < 0:
+            raise ConfigurationError("LightMem api_max_retries cannot be negative")
         if self.max_workers < 1:
             raise ConfigurationError("LightMem max_workers must be positive")
         if self.embedding_dimensions < 1:
@@ -239,7 +268,7 @@ def build_lightmem_source_identity(
     }
 
 
-class LightMem(BaseMemorySystem):
+class LightMem(BaseMemoryProvider, BaseMemorySystem):
     """使用官方 LightMemory 的统一 memory system。"""
 
     def __init__(
@@ -282,6 +311,11 @@ class LightMem(BaseMemorySystem):
         self._efficiency_collector = efficiency_collector
         self._backends: dict[str, Any] = {}
         self._conversation_metadata: dict[str, dict[str, Any]] = {}
+        self._memory_manager_usage_lock = threading.Lock()
+        self._buffered_memory_manager_usages: dict[
+            str,
+            list[_BufferedMemoryManagerUsage],
+        ] = {}
         if self._backend_factory is None:
             self.config.validate_required_local_resources(self.path_settings)
 
@@ -399,9 +433,11 @@ class LightMem(BaseMemorySystem):
             },
         }
 
-    def add(self, conversations: list[Conversation]) -> AddResult:
+    def add(self, conversations: Conversation | list[Conversation]) -> AddResult:
         """写入一个或多个 conversation。"""
 
+        if isinstance(conversations, Conversation):
+            conversations = [conversations]
         conversation_ids: list[str] = []
         for conversation in conversations:
             backend = self._get_or_create_backend(conversation.conversation_id)
@@ -428,6 +464,7 @@ class LightMem(BaseMemorySystem):
                 )
             if _is_locomo_conversation(conversation):
                 self._run_locomo_offline_update(backend, conversation.conversation_id)
+            self._flush_buffered_memory_manager_usages(conversation.conversation_id)
             conversation_ids.append(conversation.conversation_id)
         return AddResult(conversation_ids=conversation_ids)
 
@@ -454,8 +491,8 @@ class LightMem(BaseMemorySystem):
                 f"LightMem backend cannot be restored: {conversation.conversation_id}"
             )
 
-    def get_answer(self, question: Question) -> AnswerResult:
-        """基于 LightMem 检索上下文回答公开问题。"""
+    def retrieve(self, question: Question) -> AnswerPromptResult:
+        """检索 LightMem context，不生成最终 answer。"""
 
         if question.conversation_id not in self._backends:
             raise ConfigurationError(
@@ -465,6 +502,7 @@ class LightMem(BaseMemorySystem):
         collector = self._efficiency_collector
         retrieval_started_ns = perf_counter_ns()
         if _is_longmemeval_question(question, self._conversation_metadata):
+            retrieval_profile = "lightmemory_retrieve"
             if collector is not None and collector.enabled:
                 with collector.operation_stage(EfficiencyStage.RETRIEVAL):
                     memories = backend.retrieve(
@@ -479,12 +517,19 @@ class LightMem(BaseMemorySystem):
                     filters=None,
                 )
         else:
+            retrieval_profile = "locomo_qdrant_combined"
             if collector is not None and collector.enabled:
                 with collector.operation_stage(EfficiencyStage.RETRIEVAL):
                     memories = self._retrieve_locomo_memories(backend, question)
             else:
                 memories = self._retrieve_locomo_memories(backend, question)
-        memory_context = "\n".join(str(memory) for memory in memories)
+        memory_context = "\n".join(
+            _format_lightmem_memory(memory) for memory in memories
+        )
+        prompt_messages = self._build_prompt_messages(question, memories)
+        answer_prompt = "\n\n".join(
+            f"[{message.role}]\n{message.content}" for message in prompt_messages
+        )
         if collector is not None and collector.enabled:
             collector.record_retrieval_result(
                 latency_ms=_elapsed_ms(retrieval_started_ns),
@@ -493,8 +538,35 @@ class LightMem(BaseMemorySystem):
                     self.config.llm_model,
                 ),
             )
-        prompt = self._build_answer_prompt(question, memories)
+        return AnswerPromptResult(
+            question_id=question.question_id,
+            conversation_id=question.conversation_id,
+            answer_prompt=answer_prompt,
+            prompt_messages=prompt_messages,
+            metadata={
+                "method": "lightmem",
+                "answer_context": memory_context,
+                "retrieved_memories": [
+                    self._metadata_memory_from_lightmem_item(memory)
+                    for memory in memories
+                ],
+                "retrieve_limit": self.config.retrieve_limit,
+                "retrieval_profile": retrieval_profile,
+                "answer_prompt_profile": (
+                    "longmemeval"
+                    if _is_longmemeval_question(question, self._conversation_metadata)
+                    else "locomo"
+                ),
+            },
+        )
+
+    def get_answer(self, question: Question) -> AnswerResult:
+        """基于 LightMem 检索上下文回答公开问题。"""
+
+        retrieval = self.retrieve(question)
+        prompt = _user_visible_prompt_text(retrieval.prompt_messages)
         answer_started_ns = perf_counter_ns()
+        collector = self._efficiency_collector
         if collector is not None and collector.enabled:
             with collector.operation_stage(EfficiencyStage.ANSWER):
                 answer = self._call_answer_client(prompt=prompt, question=question)
@@ -518,15 +590,20 @@ class LightMem(BaseMemorySystem):
 
         if conversation_id not in self._backends:
             if self._backend_factory is None:
-                self._backends[conversation_id] = self._create_official_backend(
+                backend = self._create_official_backend(
                     conversation_id
                 )
             else:
-                self._backends[conversation_id] = self._backend_factory(conversation_id)
+                backend = self._backend_factory(conversation_id)
+            self._install_memory_manager_usage_observer(
+                backend=backend,
+                conversation_id=conversation_id,
+            )
+            self._backends[conversation_id] = backend
         return self._backends[conversation_id]
 
     def _create_official_backend(self, conversation_id: str) -> Any:
-        """构造当前 conversation 独占的官方 LightMemory backend。"""
+        """构造当前 conversation 独占的官方 LightMemory backend，并注入 timeout/retry。"""
 
         if self._openai_settings is None:
             raise ConfigurationError(
@@ -542,7 +619,162 @@ class LightMem(BaseMemorySystem):
             conversation_id=conversation_id,
             project_root=self.path_settings.project_root,
         )
-        return self._suppress_stdout_if_needed(lightmemory_cls.from_config, backend_config)
+        backend = self._suppress_stdout_if_needed(lightmemory_cls.from_config, backend_config)
+        self._inject_api_retry_timeout(backend, conversation_id)
+        return backend
+
+    def _inject_api_retry_timeout(
+        self,
+        backend: Any,
+        conversation_id: str,
+    ) -> None:
+        """对 vendored LightMem memory manager 的 OpenAI client 注入 timeout/retry。
+
+        不修改 vendored 源码；只在 backend 构造完成后通过 with_options 注入网络兜底参数。
+        """
+        manager = getattr(backend, "manager", None)
+        if manager is None or not hasattr(manager, "client"):
+            return
+        client = manager.client
+        with_options = getattr(client, "with_options", None)
+        if not callable(with_options):
+            return
+        timeout = self.config.api_timeout_seconds
+        max_retries = self.config.api_max_retries
+        manager.client = with_options(
+            timeout=timeout,
+            max_retries=max_retries,
+        )
+
+    def _install_memory_manager_usage_observer(
+        self,
+        backend: Any,
+        conversation_id: str,
+    ) -> None:
+        """包装 LightMem memory manager 的 LLM 入口，记录 build 阶段 API usage。
+
+        LightMem 官方 `OpenaiManager.generate_response()` 会返回
+        `(parsed_response, usage_info)`。这里只读取 usage_info 并写入当前
+        conversation scope，不改变返回值、prompt、并发或 LightMem 内部算法。
+        """
+
+        collector = self._efficiency_collector
+        if collector is None or not collector.enabled:
+            return
+        manager = getattr(backend, "manager", None)
+        if manager is None or not hasattr(manager, "generate_response"):
+            return
+        if getattr(manager, "_memory_benchmark_usage_wrapped", False):
+            return
+        original_generate_response = manager.generate_response
+
+        def wrapped_generate_response(*args: Any, **kwargs: Any) -> Any:
+            """调用官方 LightMem manager，并把 usage 归还给当前 conversation。"""
+
+            response = original_generate_response(*args, **kwargs)
+            usage = self._resolve_memory_manager_usage(
+                response=response,
+                args=args,
+                kwargs=kwargs,
+            )
+            if collector.active_scope_type() == "conversation":
+                self._record_memory_manager_usage(collector, usage)
+            else:
+                self._buffer_memory_manager_usage(conversation_id, usage)
+            return response
+
+        manager.generate_response = wrapped_generate_response
+        manager._memory_benchmark_usage_wrapped = True
+
+    def _resolve_memory_manager_usage(
+        self,
+        *,
+        response: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> _BufferedMemoryManagerUsage:
+        """从 LightMem manager 返回值中解析一次 LLM token usage。
+
+        输入:
+            response: 官方 `generate_response()` 原始返回值，常见为
+                `(parsed_response, usage_info)`。
+            args/kwargs: 原始调用参数，用于 API usage 缺失时回退 tokenizer 估算。
+
+        输出:
+            _BufferedMemoryManagerUsage: 可直接记录或跨线程暂存的 usage。
+        """
+
+        parsed_response = response[0] if isinstance(response, tuple) else response
+        usage_info = (
+            response[1]
+            if isinstance(response, tuple) and len(response) > 1
+            else None
+        )
+        api_input_tokens, api_output_tokens = extract_api_token_usage(usage_info)
+        messages = kwargs.get("messages")
+        if messages is None and args:
+            messages = args[0]
+        usage = resolve_token_usage(
+            api_input_tokens=api_input_tokens,
+            api_output_tokens=api_output_tokens,
+            prompt_text=str(messages or ""),
+            output_text=str(parsed_response or ""),
+            tokenizer=_TiktokenCounter(self.config.llm_model),
+        )
+        return _BufferedMemoryManagerUsage(
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            token_measurement_source=usage.source,
+        )
+
+    def _record_memory_manager_usage(
+        self,
+        collector: EfficiencyCollector,
+        usage: _BufferedMemoryManagerUsage,
+    ) -> None:
+        """把 LightMem memory manager usage 记录到当前 collector scope。"""
+
+        collector.record_llm_call(
+            model_id=LIGHTMEM_MEMORY_LLM_MODEL_ID,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            token_measurement_source=usage.token_measurement_source,
+        )
+
+    def _buffer_memory_manager_usage(
+        self,
+        conversation_id: str,
+        usage: _BufferedMemoryManagerUsage,
+    ) -> None:
+        """暂存子线程中无法直接写入 ContextVar scope 的 memory manager usage。"""
+
+        with self._memory_manager_usage_lock:
+            self._buffered_memory_manager_usages.setdefault(
+                conversation_id,
+                [],
+            ).append(usage)
+
+    def _flush_buffered_memory_manager_usages(self, conversation_id: str) -> None:
+        """把子线程暂存 usage 刷回当前 conversation scope。
+
+        LightMem LoCoMo OP-update 使用线程池，ContextVar 不会自动传播。Adapter 在
+        `add()` 返回前仍处于 runner 的 conversation scope，因此这里把暂存 usage 统一
+        写回，避免真实 OP-update 的 build LLM token 丢失。
+        """
+
+        with self._memory_manager_usage_lock:
+            usages = self._buffered_memory_manager_usages.pop(conversation_id, [])
+        if not usages:
+            return
+        collector = self._efficiency_collector
+        if (
+            collector is None
+            or not collector.enabled
+            or collector.active_scope_type() != "conversation"
+        ):
+            return
+        for usage in usages:
+            self._record_memory_manager_usage(collector, usage)
 
     def _run_locomo_offline_update(self, backend: Any, conversation_id: str) -> None:
         """执行 LightMem LoCoMo 官方构建脚本中的 post-build offline update。"""
@@ -614,6 +846,29 @@ class LightMem(BaseMemorySystem):
             )
         retrieved.sort(key=lambda item: item["score"], reverse=True)
         return retrieved[: self.config.retrieve_limit]
+
+    @staticmethod
+    def _metadata_memory_from_lightmem_item(memory: Any) -> dict[str, Any]:
+        """把 LightMem retrieval item 转成 metadata 中的轻量诊断字典。"""
+
+        score: float | None = None
+        metadata: dict[str, Any] = {}
+        if isinstance(memory, dict):
+            raw_score = memory.get("score")
+            if isinstance(raw_score, (int, float)):
+                score = float(raw_score)
+            for key in ("id", "source", "_retrieved_speaker"):
+                value = memory.get(key)
+                if value is not None:
+                    metadata[key] = value
+            payload = memory.get("payload")
+            if isinstance(payload, dict):
+                metadata["payload"] = payload
+        return {
+            "content": _format_lightmem_memory(memory),
+            "score": score,
+            "metadata": metadata,
+        }
 
     def _conversation_to_lightmem_batches(
         self,
@@ -741,14 +996,34 @@ class LightMem(BaseMemorySystem):
     ) -> str:
         """构造不含 gold answer 的 LightMem reader prompt。"""
 
+        return _user_visible_prompt_text(self._build_prompt_messages(question, memories))
+
+    def _build_prompt_messages(
+        self,
+        question: Question,
+        memories: list[Any],
+    ) -> list[PromptMessage]:
+        """构造 LightMem 官方 answer LLM role messages。"""
+
         if _is_longmemeval_question(question, self._conversation_metadata):
             memory_context = "\n".join(str(memory) for memory in memories)
-            return (
-                f"Question time:{question.question_time} and question:{question.text}\n"
-                "Please answer the question based on the following memories: "
-                f"{memory_context}"
+            return [
+                PromptMessage(role="system", content="You are a helpful assistant."),
+                PromptMessage(
+                    role="user",
+                    content=(
+                        f"Question time:{question.question_time} and question:{question.text}\n"
+                        "Please answer the question based on the following memories: "
+                        f"{memory_context}"
+                    ),
+                ),
+            ]
+        return [
+            PromptMessage(
+                role="system",
+                content=self._build_locomo_answer_prompt(question, memories),
             )
-        return self._build_locomo_answer_prompt(question, memories)
+        ]
 
     def _build_locomo_answer_prompt(
         self,
@@ -798,9 +1073,12 @@ class LightMem(BaseMemorySystem):
         collector = self._efficiency_collector
         if collector is None or not collector.enabled:
             return
+        api_input_tokens, api_output_tokens = extract_api_token_usage(
+            getattr(self._answer_client, "last_usage", None)
+        )
         usage = resolve_token_usage(
-            api_input_tokens=None,
-            api_output_tokens=None,
+            api_input_tokens=api_input_tokens,
+            api_output_tokens=api_output_tokens,
             prompt_text=prompt_text,
             output_text=output_text,
             tokenizer=_TiktokenCounter(self.config.llm_model),
@@ -1073,6 +1351,16 @@ def _cosine_similarity(left: Any, right: Any) -> float:
     return dot_product / (left_norm * right_norm)
 
 
+def _user_visible_prompt_text(messages: list[PromptMessage]) -> str:
+    """把 LightMem role messages 转成 legacy reader 使用的 prompt 文本。"""
+
+    if len(messages) == 1:
+        return messages[0].content
+    return "\n\n".join(
+        f"[{message.role}]\n{message.content}" for message in messages
+    )
+
+
 class _OpenAIAnswerClient:
     """LightMem 固定 reader 的 OpenAI-compatible client wrapper。"""
 
@@ -1081,6 +1369,7 @@ class _OpenAIAnswerClient:
 
         self._client = client
         self._model = model
+        self.last_usage: Any | None = None
 
     def create_answer(self, prompt: str) -> str:
         """调用 chat completion 并返回文本答案。"""
@@ -1089,6 +1378,7 @@ class _OpenAIAnswerClient:
             model=self._model,
             messages=[{"role": "user", "content": prompt}],
         )
+        self.last_usage = getattr(response, "usage", None)
         try:
             return str(response.choices[0].message.content or "").strip()
         except (AttributeError, IndexError, TypeError) as exc:

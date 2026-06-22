@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import hashlib
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -22,11 +23,22 @@ from memory_benchmark.benchmark_adapters.contracts import (
     normalize_variant_run_id_token,
 )
 from memory_benchmark.config.settings import (
+    AnswerLLMSettings,
+    DEFAULT_OPENAI_MODEL,
     load_openai_settings,
     load_path_settings,
+    resolve_answer_llm_settings,
 )
-from memory_benchmark.core import validate_compatibility
+from memory_benchmark.core import (
+    AddResult,
+    AnswerResult,
+    Conversation,
+    MethodCapability,
+    Question,
+    validate_compatibility,
+)
 from memory_benchmark.core.exceptions import ConfigurationError
+from memory_benchmark.core.interfaces import BaseMemorySystem
 from memory_benchmark.methods.mem0_adapter import Mem0Config
 from memory_benchmark.methods.registry import (
     MethodBuildContext,
@@ -38,6 +50,11 @@ from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     ModelDescriptor,
     RetrievalObservationContract,
+)
+from memory_benchmark.readers import (
+    FrameworkAnswerReader,
+    OpenAICompatibleAnswerLLMClient,
+    load_answer_prompt_template,
 )
 from memory_benchmark.runners.conversation_qa import _make_public_conversation
 from memory_benchmark.runners.ingest_resume import (
@@ -54,6 +71,7 @@ from memory_benchmark.runners.prediction import (
 SUPPORTED_BENCHMARK = "locomo"
 SUPPORTED_METHOD = "mem0"
 DEFAULT_SMOKE_TURN_LIMIT = 20
+MAX_SMOKE_WORKERS = 10
 
 
 @dataclass(frozen=True)
@@ -72,6 +90,26 @@ class PredictionBatchResult:
     benchmark: str
     selector: str
     runs: tuple[PredictionVariantResult, ...]
+
+
+class _UnusedRootSystem(BaseMemorySystem):
+    """isolated worker path 的根 system 占位对象。
+
+    registered runner 在 isolated path 中只需要 worker 内的 method instance。这个占位
+    对象避免提前构造第三方 method，从而避免顶层 method_state 副作用。
+    """
+
+    def add(self, conversations: list[Conversation]) -> AddResult:
+        """isolated path 不应调用根 system add。"""
+
+        raise ConfigurationError("isolated root system must not be used for add")
+
+    def get_answer(self, question: Question) -> AnswerResult:
+        """isolated path 不应调用根 system get_answer。"""
+
+        raise ConfigurationError(
+            "isolated root system must not be used for get_answer"
+        )
 
 
 @dataclass(frozen=True)
@@ -136,7 +174,7 @@ def resolve_prediction_max_workers(
 
     输入:
         config: 已确认的 Mem0 smoke 或 official-full profile。
-        smoke_max_workers: 可选 smoke 并发覆盖，仅允许 1 或 2。
+        smoke_max_workers: 可选 smoke 并发覆盖，最多允许 10。
 
     输出:
         int: 传给通用 prediction runner 的 conversation worker 数。
@@ -148,8 +186,12 @@ def resolve_prediction_max_workers(
         raise ConfigurationError(
             "--smoke-max-workers is a smoke-only diagnostic option"
         )
-    if smoke_max_workers not in {1, 2}:
-        raise ConfigurationError("Mem0 smoke_max_workers must be at most 2")
+    if smoke_max_workers < 1:
+        raise ConfigurationError("Mem0 smoke_max_workers must be at least 1")
+    if smoke_max_workers > MAX_SMOKE_WORKERS:
+        raise ConfigurationError(
+            f"Mem0 smoke_max_workers must be at most {MAX_SMOKE_WORKERS}"
+        )
     return smoke_max_workers
 
 
@@ -167,7 +209,11 @@ def run_registered_conversation_qa_prediction(
     smoke_conversation_limit: int = 1,
     smoke_max_workers: int | None = None,
     max_new_conversations: int | None = None,
-    enable_efficiency_observability: bool = False,
+    retry_failed_conversations: bool = False,
+    question_limit_per_conversation: int | None = None,
+    enable_efficiency_observability: bool = True,
+    answer_prompt_file: str | Path | None = None,
+    answer_prompt_profile: str = "default",
     progress_enabled: bool = True,
 ) -> PredictionBatchResult:
     """通过 benchmark/method registration 运行 conversation-QA prediction。
@@ -184,10 +230,16 @@ def run_registered_conversation_qa_prediction(
         confirm_full: 是否额外允许全量实验。
         smoke_turn_limit: smoke 最多写入的历史 turn 数。
         smoke_conversation_limit: smoke 选择 1 或 2 个 conversation。
-        smoke_max_workers: smoke runner 的可选并发覆盖，最多为 2。
+        smoke_max_workers: smoke runner 的可选并发覆盖，最多为 10。
         max_new_conversations: 本次命令最多推进多少个未完成 conversation；它只属于
             当前命令预算，不属于实验 identity。
+        retry_failed_conversations: 是否重试 checkpoint 中已标记 failed 的 conversation；
+            默认 False，避免失败项在 resume 时反复触发付费调用。
+        question_limit_per_conversation: 本次命令每个 conversation 最多回答的问题数；
+            为空时 smoke 默认 1 题，full 默认全部题。
         enable_efficiency_observability: 是否写入效率观测原始 artifact。
+        answer_prompt_file: retrieve-first framework reader 的可选自定义 prompt 文件。
+        answer_prompt_profile: retrieve-first framework reader 的 prompt profile 名称。
         progress_enabled: 是否在终端渲染 Rich 进度条；并行校准模式下应关闭。
 
     输出:
@@ -249,6 +301,29 @@ def run_registered_conversation_qa_prediction(
         configured_max_workers=max_workers,
         allow_override=method_registration.allow_smoke_worker_override,
     )
+    use_framework_answer_reader = (
+        MethodCapability.MEMORY_RETRIEVAL
+        in method_registration.provided_capabilities
+    )
+    answer_llm_settings = (
+        resolve_answer_llm_settings(
+            method_name=method_registration.name,
+            benchmark_name=benchmark_registration.name,
+            model=DEFAULT_OPENAI_MODEL,
+        )
+        if use_framework_answer_reader
+        else None
+    )
+    answer_reader_manifest = (
+        _build_answer_reader_manifest(
+            project_root=path_settings.project_root,
+            prompt_file=answer_prompt_file,
+            profile_name=answer_prompt_profile,
+            answer_settings=answer_llm_settings,
+        )
+        if use_framework_answer_reader
+        else None
+    )
     children: list[_PreparedPredictionChild] = []
     for concrete_variant, selected_run_id in zip(
         selected_variants,
@@ -273,12 +348,17 @@ def run_registered_conversation_qa_prediction(
             config_manifest=config.to_manifest(),
             source_identity=source_identity,
             workload_estimate=workload_estimate,
+            answer_reader_manifest=answer_reader_manifest,
         )
         policy = PredictionRunPolicy(
             max_workers=max_workers,
-            question_limit_per_conversation=_question_limit_for_scope(run_scope),
+            question_limit_per_conversation=_question_limit_for_scope(
+                run_scope,
+                explicit_limit=question_limit_per_conversation,
+            ),
             resume=resume,
             max_new_conversations=max_new_conversations,
+            retry_failed_conversations=retry_failed_conversations,
             progress_enabled=progress_enabled,
         )
         run_context = RunContext.create(
@@ -303,6 +383,11 @@ def run_registered_conversation_qa_prediction(
             source_identity=source_identity,
             run_id=selected_run_id,
         )
+        if use_framework_answer_reader and enable_efficiency_observability:
+            model_inventory = _append_framework_answer_model_inventory(
+                model_inventory,
+                answer_settings=answer_llm_settings,
+            )
         children.append(
             _PreparedPredictionChild(
                 variant=prepared.variant,
@@ -338,11 +423,38 @@ def run_registered_conversation_qa_prediction(
             retrieval_observation_contract=child.retrieval_observation_contract,
         )
 
+    requires_openai_settings = (
+        method_registration.requires_api or use_framework_answer_reader
+    )
     openai_settings = (
         load_openai_settings(project_root=path_settings.project_root)
-        if method_registration.requires_api
+        if requires_openai_settings
         else None
     )
+    answer_reader = None
+    if use_framework_answer_reader:
+        if openai_settings is None:
+            raise ConfigurationError(
+                "Framework answer reader requires OpenAI-compatible settings"
+            )
+        if openai_settings.model != DEFAULT_OPENAI_MODEL:
+            raise ConfigurationError(
+                "Framework answer reader currently requires model "
+                f"{DEFAULT_OPENAI_MODEL}; got {openai_settings.model}"
+            )
+        if answer_llm_settings is None:
+            raise ConfigurationError("Framework answer reader settings are missing")
+        answer_reader = FrameworkAnswerReader(
+            client=OpenAICompatibleAnswerLLMClient(
+                settings=openai_settings,
+                answer_settings=answer_llm_settings,
+            ),
+            prompt_template=load_answer_prompt_template(
+                project_root=path_settings.project_root,
+                prompt_file=answer_prompt_file,
+                profile_name=answer_prompt_profile,
+            ),
+        )
     results: list[PredictionVariantResult] = []
     for child in children:
         child.run_context.ensure_directories()
@@ -367,7 +479,20 @@ def run_registered_conversation_qa_prediction(
             completed_conversations=completed_conversations,
             efficiency_collector=child.efficiency_collector,
         )
-        system = method_registration.system_factory(build_context)
+        supports_shared_instance_parallelism = getattr(
+            method_registration,
+            "supports_shared_instance_parallelism",
+            False,
+        )
+        use_isolated_worker_instances = (
+            child.policy.max_workers > 1
+            and not supports_shared_instance_parallelism
+        )
+        system: BaseMemorySystem = (
+            _UnusedRootSystem()
+            if use_isolated_worker_instances
+            else method_registration.system_factory(build_context)
+        )
         summary = run_predictions(
             dataset=child.dataset,
             system=system,
@@ -383,13 +508,8 @@ def run_registered_conversation_qa_prediction(
             retrieval_observation_contract=child.retrieval_observation_contract,
             system_factory=method_registration.system_factory,
             build_context_template=build_context,
-            supports_shared_instance_parallelism=(
-                getattr(
-                    method_registration,
-                    "supports_shared_instance_parallelism",
-                    False,
-                )
-            ),
+            supports_shared_instance_parallelism=supports_shared_instance_parallelism,
+            answer_reader=answer_reader,
         )
         results.append(
             PredictionVariantResult(
@@ -452,6 +572,31 @@ def _build_efficiency_observability_dependencies(
     )
 
 
+def _append_framework_answer_model_inventory(
+    model_inventory: tuple[ModelDescriptor, ...],
+    *,
+    answer_settings: AnswerLLMSettings | None,
+) -> tuple[ModelDescriptor, ...]:
+    """为 retrieve-first framework reader 追加 answer LLM 模型身份。"""
+
+    if answer_settings is None:
+        raise ConfigurationError("answer_settings is required for answer model inventory")
+    if any(
+        descriptor.model_id == answer_settings.model for descriptor in model_inventory
+    ):
+        return model_inventory
+    return (
+        *model_inventory,
+        ModelDescriptor(
+            model_id=answer_settings.model,
+            model_name=answer_settings.model,
+            model_role="answer_llm",
+            execution_mode="api",
+            tokenizer_name=answer_settings.model,
+        ),
+    )
+
+
 def _resolve_profile_run_scope(profile_name: str) -> RunScope:
     """把 method profile 名映射为统一的 benchmark run scope。"""
 
@@ -460,9 +605,19 @@ def _resolve_profile_run_scope(profile_name: str) -> RunScope:
     return RunScope.FULL
 
 
-def _question_limit_for_scope(run_scope: RunScope) -> int | None:
-    """根据 run scope 生成通用 runner 的每 conversation 问题上限。"""
+def _question_limit_for_scope(
+    run_scope: RunScope,
+    *,
+    explicit_limit: int | None = None,
+) -> int | None:
+    """根据 run scope 和用户覆盖生成每 conversation 问题预算。"""
 
+    if explicit_limit is not None:
+        if explicit_limit < 1:
+            raise ConfigurationError(
+                "question_limit_per_conversation must be at least 1"
+            )
+        return explicit_limit
     if run_scope is RunScope.SMOKE:
         return 1
     return None
@@ -651,8 +806,12 @@ def _resolve_smoke_max_workers(
         raise ConfigurationError(
             f"{method_display_name} does not support --smoke-max-workers override"
         )
-    if smoke_max_workers not in {1, 2}:
-        raise ConfigurationError("smoke_max_workers must be at most 2")
+    if smoke_max_workers < 1:
+        raise ConfigurationError("smoke_max_workers must be at least 1")
+    if smoke_max_workers > MAX_SMOKE_WORKERS:
+        raise ConfigurationError(
+            f"smoke_max_workers must be at most {MAX_SMOKE_WORKERS}"
+        )
     return smoke_max_workers
 
 
@@ -685,6 +844,7 @@ def _build_method_manifest(
     config_manifest: dict[str, object],
     source_identity: dict[str, object],
     workload_estimate: dict[str, object] | None,
+    answer_reader_manifest: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """构造不含 secret 的 method manifest。"""
 
@@ -692,9 +852,41 @@ def _build_method_manifest(
         "config": config_manifest,
         "source": source_identity,
     }
+    if answer_reader_manifest is not None:
+        manifest["answer_reader"] = answer_reader_manifest
     if workload_estimate is not None:
         manifest["workload_estimate"] = workload_estimate
     return manifest
+
+
+def _build_answer_reader_manifest(
+    *,
+    project_root: Path,
+    prompt_file: str | Path | None,
+    profile_name: str,
+    answer_settings: AnswerLLMSettings | None,
+) -> dict[str, object]:
+    """构造 retrieve-first reader 的公开身份信息。
+
+    该 manifest 只包含可公开复现实验身份的信息，不包含 API key、base URL 或 prompt 原文。
+    """
+
+    prompt_file_sha256 = None
+    if prompt_file is not None:
+        prompt_path = Path(prompt_file).expanduser()
+        if not prompt_path.is_absolute():
+            prompt_path = project_root / prompt_path
+        prompt_file_sha256 = hashlib.sha256(prompt_path.read_bytes()).hexdigest()
+
+    return {
+        "answer_protocol": "retrieve_first_v1",
+        "answer_prompt_profile": profile_name,
+        "answer_prompt_file_sha256": prompt_file_sha256,
+        "answer_model": None if answer_settings is None else answer_settings.model,
+        "answer_parameters": (
+            None if answer_settings is None else answer_settings.to_manifest_dict()
+        ),
+    }
 
 
 def run_mem0_locomo_prediction(
@@ -708,6 +900,7 @@ def run_mem0_locomo_prediction(
     smoke_conversation_limit: int = 1,
     smoke_max_workers: int | None = None,
     max_new_conversations: int | None = None,
+    question_limit_per_conversation: int | None = None,
 ) -> PredictionRunSummary:
     """兼容旧调用路径，转发到统一 registered prediction service。"""
 
@@ -724,6 +917,7 @@ def run_mem0_locomo_prediction(
         smoke_conversation_limit=smoke_conversation_limit,
         smoke_max_workers=smoke_max_workers,
         max_new_conversations=max_new_conversations,
+        question_limit_per_conversation=question_limit_per_conversation,
     )
     return batch_result.runs[0].summary
 
@@ -762,7 +956,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--smoke-conversation-limit",
         type=int,
-        choices=[1, 2],
         default=1,
     )
     parser.add_argument(
@@ -777,7 +970,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--smoke-max-workers",
         type=int,
-        choices=[1, 2],
         default=None,
     )
     args = parser.parse_args(argv)

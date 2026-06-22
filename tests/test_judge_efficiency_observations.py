@@ -50,7 +50,7 @@ def test_actual_llm_judge_records_model_inventory_and_token_usage(
         mode="compact",
         model="gpt-4o-mini",
         client=_FakeResponsesClient(
-            text="true",
+            text='{"label": "CORRECT"}',
             input_tokens=41,
             output_tokens=1,
         ),
@@ -101,13 +101,16 @@ def test_actual_llm_judge_records_model_inventory_and_token_usage(
 
 
 class _FakeResponsesClient:
-    """模拟 OpenAI Responses API client。"""
+    """模拟 OpenAI Responses API 和 Chat Completions client。"""
 
     def __init__(self, *, text: str, input_tokens: int, output_tokens: int) -> None:
         """保存 fake 输出文本和 usage。"""
 
         self.calls: list[dict[str, object]] = []
         self.responses = SimpleNamespace(create=self._create)
+        self.chat = SimpleNamespace(
+            completions=SimpleNamespace(create=self._create_chat_completion)
+        )
         self._text = text
         self._input_tokens = input_tokens
         self._output_tokens = output_tokens
@@ -121,6 +124,22 @@ class _FakeResponsesClient:
             usage=SimpleNamespace(
                 input_tokens=self._input_tokens,
                 output_tokens=self._output_tokens,
+            ),
+        )
+
+    def _create_chat_completion(self, **kwargs: object) -> object:
+        """记录 Chat Completions 请求，并返回带 usage 的 fake response。"""
+
+        self.calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=self._text),
+                )
+            ],
+            usage=SimpleNamespace(
+                prompt_tokens=self._input_tokens,
+                completion_tokens=self._output_tokens,
             ),
         )
 
