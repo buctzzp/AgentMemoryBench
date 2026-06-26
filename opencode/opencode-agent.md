@@ -1,2 +1,1 @@
-你的执行轨迹、所有的代码改动都需要详细记录在/Users/wz/Desktop/memoryBenchmark/opencode目录下的日期文件中。每次完成一个阶段的工作后，都要更新对应时间的文件，并同步更新 `opencode_result.md` 中的“最新结果”指向该文件。
-不要修改opencode目录下的其他文档！
+你不能修改/Users/wz/Desktop/memoryBenchmark/opencode目录下的任何文档以及进行git提交操作，而且你需要按照/Users/wz/Desktop/memoryBenchmark/opencode/opencode_result.md里面的要求去记录你的详细的执行轨迹，你去在opencode目录下创建一个文档，然后把文档的链接放在/Users/wz/Desktop/memoryBenchmark/opencode/opencode_result.md

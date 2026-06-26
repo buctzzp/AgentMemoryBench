@@ -14,6 +14,21 @@
 6. 如果你无法修复，写清楚卡点、复现步骤和下一步建议。
 ## 最新结果
 
+`opencode_result-6.22-longmemeval-costpilot-comparison.md` — 四 Method × LongMemEval-S 1-conv Cost Pilot 横向对比
+
+| Method | Judge | $/conv | 500=$ | Time |
+|---|---|---|---|---|
+| LightMem | 1/1 | $0.011 | $6 | 5min |
+| Mem0 | 1/1 | $0.454 | $227 | 48min |
+| MemoryOS | 1/1 | $0.188 | $94 | 72min |
+| A-Mem | 1/1 | $0.460 | $230 | 87min |
+
+**四 method × 500 conv 总估算: $557 (GPT-4o-mini)**
+
+`opencode_result-6.22-codex-session-full.md` — 2026-06-22 完整会话记录（efficiency/progress/evaluate 修复，包含下方 bugfix 全部内容）
+
+`opencode_result-6.22-codex-efficiency-byquestion-progress-bugfix.md` — efficiency_by_question LLM token 全 0 + progress 显示修复（已被 session-full supersede）
+## 历史结果
 `opencode_result-6.20-02h-mem0-reference-date-gap.md` — Mem0 reference_date 传递缺口审计
 - Mem0 官方 prompt 依赖 reference_date 做时间推理，adapter 从未传入正确值
 - fallback 链全部失效：Conversation.metadata 无此字段，DB created_at 是写入时间而非对话时间
@@ -31,8 +46,6 @@
 - Mem0 conversation-level observation 修复验证通过
 - LightMem memory-build LLM observation 修复验证通过
 - 四 method 完整 observation 覆盖矩阵
-
-## 历史结果
 - `opencode_result-6.19-codex-session.md` (Codex — A-Mem temporal fix + judge 并行 + judge 对齐)
 - `opencode_result-6.19-amem-session-time.md` (Codex)
 - `opencode_result-6.19.md`
