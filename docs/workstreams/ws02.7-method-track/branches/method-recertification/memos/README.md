@@ -70,26 +70,26 @@ sync variant 绕过完成门。
 
 首轮
 [MemOS v2.0.25 async lifecycle 完成门 R2](cards/actor-prompt-memos-v2-0-25-async-lifecycle-r2.md)
-产出 `d1a0178`，但架构师强验收复现出 reader 内部 LLM/parser/embedding 吞错、
-`merged_from` archive 吞错、handler-only trace 冒充完整 async trace，以及 patch commit
-未过 whitespace 门，因此首轮 `READY` 判词撤回、commit 暂不合流。完整证据见
-[R2 架构师强验收](notes/memos-v2.0.25-async-lifecycle-r2-architect-review.md)。
+产出 `d1a0178`，架构师强验收随后复现出 reader 内部 LLM/parser/embedding 吞错、
+`merged_from` archive 吞错、handler-only trace 冒充完整 async trace，以及 patch whitespace
+问题；首轮 `READY` 因而撤回。R2-R1 follow-up `2830c32` 关闭这些缺口，架构师另补 Factory
+作用域隔离和两条最低叶子强反例后，以
+[R2 最终验收](notes/memos-v2.0.25-async-lifecycle-r2-architect-acceptance.md)
+接收并在 `14ece4c` 合流。
 
 **当前唯一施工入口**：
-[MemOS v2.0.25 async lifecycle R2-R1](cards/actor-prompt-memos-v2-0-25-async-lifecycle-r2-r1.md)。
-它把 failure injection 下沉到真实 production leaf，补完整
-fast write → local queue/dispatcher → fine → terminal tracker 链，并锁严格 tracker
-状态机；不写 adapter、不重做 benchmark census。R2-R1 通过后才进入一张 adapter +
-五格强反例卡。
+[MemOS v2.0.25 product v3 adapter M4](cards/actor-prompt-memos-v2-0-25-product-adapter-m4.md)。
+它只复用五个 benchmark 稳定事实，实现 typed-handler adapter、MiniLM config 暴露、search
+失败可见、generic provider cleanup、namespace-safe clean retry 与五格强反例；不重开 raw
+census、不启动真实 API/DB/模型。
 
-## R2 尚未闭合的 MemOS 专属问题
+## M4 保持 pending 的边界
 
-- initial fast reader/parser/embedding、fine transfer/write/archive、delete/refresh 与
-  scheduler submit 的多层吞错；
-- local queue 下按 business `task_id` 精确等待 `MEM_READ`，而非全局队列或坏掉的
-  `/scheduler/wait`；
-- patch 的 source identity、幂等重放与 success-path 守恒；
-- task-scoped fine output 是否足以支持 HaluMem extraction 的纯观测 sidecar。
+- 真实 Neo4j/Qdrant 跨 namespace 隔离与 MMR/rerank stable-ranking；
+- window-generated memory 的 semantic provenance 与 Recall/NDCG 资格；
+- async `MEM_READ` 未公开 task-scoped fine output，因此 HaluMem extraction 先诚实 N/A；
+- HaluMem update current-state 与 QA 的真实服务 smoke；
+- MemOS async worker 的精确 per-call token/cost 观测；
+- official LoCoMo 双 namespace reproduction harness；主 profile 仍是一 conversation 一 cube。
 
-search provenance/stable ranking、真实 graph/vector 隔离与 HaluMem update 继续保持
-`pending`，由后续 adapter/M3/真实 smoke 分层关闭，不回头重造 M1 证据。
+这些由 M4 后的 M5 preflight/真实 smoke 分层关闭，不回头重造 M1/R2 证据。

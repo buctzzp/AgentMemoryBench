@@ -101,6 +101,12 @@
 - 完成门更容易实现，不足以把另一条算法路径升为主 profile。先把候选按
   `CONFIG_EQUIVALENT / ALGORITHM_VARIANT` 分类；若候选省略成功态阶段，优先给原路径补
   success-neutral completion/观测，不能用“更同步、更好等”偷换 estimand。
+- 后台型 provider 的完成门不止是 `ingest()` 等到 terminal：runner 还必须拥有 runtime
+  生命周期。成功路径先 `cleanup()` 再写 completed summary，异常路径也恰好 cleanup 一次；
+  否则“结果已落盘”仍可能伴随 consumer/dispatcher 泄漏，cleanup 失败还会被伪装成成功。
+- method 官方 benchmark harness 若通过双写、双 namespace、检索融合等改变 build topology，
+  它就是 reproduction implementation variant，不是可暗抄进统一 product adapter 的普通
+  输入格式。主 profile 只复用通用产品接口；作者 harness 另立显式校准身份。
 
 重构的验收标准是行为守恒与未来修改面缩小，不是文件数或行数减少。
 

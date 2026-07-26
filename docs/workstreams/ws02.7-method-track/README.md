@@ -42,7 +42,10 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   [架构师最终验收](branches/method-recertification/memos/notes/memos-v2.0.25-async-lifecycle-r2-architect-acceptance.md)：
   product reader/storage failure 可达精确 terminal、local tracker 拒绝终态污染、
   full async product chain 与 patch identity 均已实证；架构师另补 Factory 作用域隔离与
-  两条最低叶子强反例。下一步是一张 **MemOS v3 adapter 实现卡 + 五格强反例**；
+  两条最低叶子强反例。下一步执行
+  [MemOS product v3 adapter M4](branches/method-recertification/memos/cards/actor-prompt-memos-v2-0-25-product-adapter-m4.md)：
+  typed handler、MiniLM config、search 失败可见、generic cleanup、namespace-safe clean
+  retry 与五格强反例；
   复用五个 benchmark 稳定事实，不重开 raw census，也不把真实 DB/image/HaluMem
   fine-output 等 pending 能力提前写成 valid。
 - **不可顺手重开**：benchmark raw/canonical/gold 调查、已冻结 25 格、旧
