@@ -54,8 +54,8 @@ LightMem 已关闭的异常样本。只有三类触发器允许重开 benchmark 
 
 ## 当前状态
 
-LightMem current-v7 已冻结为 `method-frozen-v3`；Mem0 current-v3 冻结为 `method-frozen-v2`；
-MemoryOS current product build 的 8 个真实 run、全部适用 metric/judge、worker state、page lineage
-与 artifact 开箱均已关闭，冻结为 `method-frozen-v1`。**A-Mem 现为唯一 active method**：继续复用
-前三家已压实的 benchmark 稳定层，只审 method-specific 接口/算法差量，不重做 dataset census。
-权威实时动作仍看父级 `../../README.md` 恢复胶囊与最新断点。
+LightMem、Mem0、MemoryOS、A-Mem、SimpleMem 均已冻结；首批五家状态与证据从父级
+`../../README.md` 恢复胶囊进入。**MemOS 现为唯一 active method**：source lock 已升级为
+官方稳定版 `v2.0.25@e820406`，从 [`memos/README.md`](memos/README.md) 进入，只审
+method-specific 接口/算法差量，不重做 dataset census。权威实时动作仍看父级恢复胶囊与
+最新断点。

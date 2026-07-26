@@ -35,7 +35,7 @@ apply_method_patch() {
   printf 'applied %s patch: %s\n' "${dir_name}" "${patch_path}"
 }
 
-fetch_method "MemOS" "https://github.com/MemTensor/MemOS.git" "b051e6384d8c667ae7d521baa679f542f4488d19"
+fetch_method "MemOS" "https://github.com/MemTensor/MemOS.git" "e820406269537b97d270687e3e40eea2f015f81a"
 fetch_method "SimpleMem" "https://github.com/aiming-lab/SimpleMem.git" "60a48e83a7fef10d386e1f438589047d3a4257bc"
 apply_method_patch "SimpleMem" "${ROOT_DIR}/scripts/patches/simplemem-product-compat.patch"
 fetch_method "cognee" "https://github.com/topoteretes/cognee.git" "f7e2267cf02f5df15c4b60bf196b30ac2c06b32d"
