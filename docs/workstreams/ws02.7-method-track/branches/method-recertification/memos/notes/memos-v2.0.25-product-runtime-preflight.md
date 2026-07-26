@@ -11,6 +11,13 @@
 >
 > 未闭合的 §5.6 search/ranking、§5.7 isolation/clean-retry、§5.8 HaluMem 四格、
 > §5.9 服务观测表，以及 §6 要求的完整 B1-B11 矩阵，全部留待 R1。
+>
+> **架构师强验收勘误（2026-07-26）**：停工判词与三条 active-reader/time/lineage
+> 反证成立；§4.2 的最终风险也成立，但首轮把 scheduler 内部 tracker 与 router 独立
+> 构造的 tracker 混成了一个对象。current router 无论 Redis 是否启用都会构造
+> `TaskStatusTracker(redis_client)`；默认 `redis_client=None` 时，该对象的查询返回空集合，
+> 随后 `/scheduler/wait` fail-open 为 idle。下文已按真实对象关系订正。后续裁决见
+> [`memos-v2.0.25-m1-r1-ruling.md`](memos-v2.0.25-m1-r1-ruling.md)。
 
 ---
 
@@ -220,17 +227,20 @@ def handle_scheduler_wait(user_name: str, status_tracker, ...):
 
 ### 4.2 无 Redis 时 `/scheduler/wait` 静默 fail-open
 
-`status_tracker` 只在 `use_redis_queue` 为真时惰性创建
-（`src/memos/mem_scheduler/base_scheduler.py:305-317`）：
+这里有两个不同对象，不能混写：
 
-```python
-if self._status_tracker is None and self.use_redis_queue:
-    self._status_tracker = TaskStatusTracker(self.redis)
-```
+1. scheduler 内部的 `mem_scheduler.status_tracker` 只在 `use_redis_queue` 为真时
+   惰性创建（`src/memos/mem_scheduler/base_scheduler.py:305-317`）；
+2. HTTP router 不复用该属性，而是在 import 时无条件执行
+   `TaskStatusTracker(redis_client=components["redis_client"])`
+   （`src/memos/api/routers/server_router.py:99-103`）。
 
-而 `component_init.py:134` 的 `MEMSCHEDULER_USE_REDIS_QUEUE` **默认 `"False"`**。
-此时 tracker 为 `None` → `handle_scheduler_status` 返回空 `data` →
-`handle_scheduler_wait`（`scheduler_handler.py:408-421`）：
+`MEMSCHEDULER_USE_REDIS_QUEUE` 默认 `"False"`（`component_init.py:134`），因此
+`components["redis_client"]` 为 `None`，但 router 传给 wait 的仍是一个
+`TaskStatusTracker(redis=None)` 对象，而不是 Python `None`。该对象的
+`get_all_tasks_for_user()` 明确返回 `{}`（`status_tracker.py:133-138`），于是
+`handle_scheduler_status()` 返回空 `data`，再进入 `handle_scheduler_wait()`
+（`scheduler_handler.py:408-421`）：
 
 ```python
 is_idle = not status_response.data or all(

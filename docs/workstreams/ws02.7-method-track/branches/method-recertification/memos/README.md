@@ -60,23 +60,26 @@ M1 未裁定前不写 adapter、不启动服务、不调用真实 API，也不�
 调查卡。后续任务卡放 `cards/`，一手审计、裁决与施工记录放 `notes/`；权威当前动作仍只
 更新父 ws02.7 README。
 
-当前 M1 施工入口：
-[MemOS v2.0.25 进程内产品运行时契约卡](cards/actor-prompt-memos-v2-0-25-product-runtime-preflight.md)。
-已裁定不启动 HTTP host；首选候选是在 framework worker 内构造官方 product components 并
-直接调用 typed `AddHandler` / `SearchHandler`，但必须先证明与 `/product` handler/view/
-scheduler 语义等价。不得把手写 `MemReader → TreeTextMemory` 近似链冒充 product parity。
-该卡一次性闭合产品身份、scheduler 完成门、缺失时间、source lineage、search/ranking、
-隔离/clean retry、HaluMem 能力与服务观测；不重做五家 benchmark census。
+首轮 M1 在 `13edb3a` 正确停工：current default reader 推翻旧卡的 SimpleStruct active-chain
+假设，并证明显式 `chat_time=None` 与 reader-level `message_id` 传输成立。停工证据见
+[首轮 preflight note](notes/memos-v2.0.25-product-runtime-preflight.md)，架构改判见
+[M1 R1 ruling](notes/memos-v2.0.25-m1-r1-ruling.md)。
 
-## 尚未裁定的 MemOS 专属问题
+**当前唯一 M1 施工入口**：
+[MemOS v2.0.25 产品运行时契约 M1 R1](cards/actor-prompt-memos-v2-0-25-product-runtime-preflight-r1.md)。
+已裁定不启动 HTTP host；主候选是在 framework worker 内构造官方 product components 并
+直接调用 typed `AddHandler` / `SearchHandler`，产品身份锁定
+`tree_text + MultiModalStructMemReader`。R1 只闭合 sync/fine/serial completion、
+single-namespace isolation、lineage/search、HaluMem 资格和服务观测；不重做已闭合探针或
+五家 benchmark census。
 
-- 当前代表性产品面究竟是 self-host product API 还是库内 `MOS`；
-- `general_text` 与 `tree_text` 是不同算法路径，哪条进入 Phase 1 主配置；
-- official LoCoMo/LongMemEval harness 实际使用的产品面、mode、top-k 与配置；
-- add 返回时 memory 是否已稳定可检索，scheduler/reorganizer 应如何 drain；
-- cube/user/session 是逻辑隔离还是还需物理 storage 隔离；
+## R1 尚未闭合的 MemOS 专属问题
+
+- sync/fine/serial dispatch 是否完整保留产品算法并严格传播失败；
+- official async/fast harness 与主候选是配置差异还是算法 variant；
+- single namespace 的 cleanup、retry 与 worker shutdown 是否闭合；
 - search 返回是否保留有资格的 source lineage、排序和 score；
 - HaluMem 单 session 新记忆能否无扭曲地读出，以及 update probe 是否有诚实语义；
 - Qdrant、Neo4j、embedding、LLM 与后台服务的运行/成本身份。
 
-这些问题只做一次并形成 M1 ruling；后续五格直接引用，不再各自重新摸索。
+这些问题只在 R1 做一次；后续 adapter 与五格直接引用，不再重新摸索。

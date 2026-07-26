@@ -38,6 +38,7 @@ RAG 和 skill routing 同理。
 | manifest/resume/identity | `preflight|strict identity|resume|字段缺席|null` | 原则 12/29/32、§14.8 |
 | smoke/成本/真实 API | `开箱验货|成本 pilot|tee|调用发生|actual observation` | 原则 13/19/22/33 |
 | Git/目录/第三方仓库 | `显式路径|worktree|source identity|独立 upstream` | 原则 8/18、§14.10/14.11 |
+| 第三方换锁与 active call graph | `source hypothesis|承重事实|父类覆写|source lock` | [`source-hypothesis-weight`](cases/2026-07-26-source-hypothesis-weight.md) |
 | 文档/压缩/经验检索 | `热层|冷层|消费者|触发器|退出条件|结构治理` | 原则 30、§14.12/14.13 |
 
 ## 新 case card 规范

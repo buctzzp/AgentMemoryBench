@@ -1,5 +1,12 @@
 # Actor 卡：MemOS v2.0.25 进程内产品运行时契约 M1
 
+> **状态：已停工并被 R1 supersede，禁止再次派发。**首轮证据见
+> [`../notes/memos-v2.0.25-product-runtime-preflight.md`](../notes/memos-v2.0.25-product-runtime-preflight.md)，
+> 架构裁决见
+> [`../notes/memos-v2.0.25-m1-r1-ruling.md`](../notes/memos-v2.0.25-m1-r1-ruling.md)，
+> 当前唯一施工入口是
+> [`actor-prompt-memos-v2-0-25-product-runtime-preflight-r1.md`](actor-prompt-memos-v2-0-25-product-runtime-preflight-r1.md)。
+
 **本卡被发送到当前 actor 会话即代表用户已完成选择与授权；直接执行，不要再选择、派发或
 等待另一个 actor。**本批只审计 source-locked MemOS `v2.0.25` 当前 self-host 产品路径的
 运行时契约，并把一手证据写成自包含 note；不调用真实 API，不启动服务，不修改生产代码。
