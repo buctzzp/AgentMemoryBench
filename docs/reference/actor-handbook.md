@@ -180,6 +180,12 @@
   输出全覆盖各一次、调用后 buffer/计数归零或按协议保留。2026-07-19 LightMem × HaluMem 旧
   preflight 因 fake 跳过 sensory/STM，漏掉 forced flush 残留旧 session 与 automatic prefix 被
   tail 覆盖两处确定性错误；2-turn smoke 恰好不撞分支也不能代替完整契约。
+- **证明失败传播时，异常必须注入到 current 实现真正会吞错的最深边界。**在
+  `text_mem.add()` 外层让 fake 直接 raise，只能证明调用者会传播“外层已经抛出的异常”；
+  不能证明真实 `MemoryManager`、thread future、graph/vector batch 或 cleanup 内部没有
+  log-and-success。2026-07-26 MemOS R1 的外层 P2a 虽全绿，架构师继续亲读后发现真实
+  batch graph write、vector write、fine transfer、delete/refresh 仍有多层吞错，B6 因而
+  不得关闭。承重强反例应逐个命中首个 catch，并证明失败状态穿过完整生产链。
 - **并行卡在各自 worktree 绿后，actor 不得声称跨卡集成已绿。**最终合流是架构师责任；若卡
   内消费了另一条正在演进的 manifest/private schema，fixture 应显式声明当前版本，避免靠
   legacy 缺字段偶然通过。

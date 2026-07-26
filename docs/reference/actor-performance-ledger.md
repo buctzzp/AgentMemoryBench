@@ -45,6 +45,7 @@
 | 2026-07-19 | Claude Code / Sonnet 5；reasoning=exhigh；时长未提供；无 subagent | LightMem × MemBench 异常覆盖预检 | `a91db0b` → `6ba4060`（结论须 R1 supersede） | actor 203；架构师重算同意核心 `turn` 错配，但抓停工漏报、id 隔离误述、39 处倒序漏项与错误 API blocker | **7.4** | evidence accepted; verdict reworked |
 | 2026-07-19 | Codex subagent；`gpt-5.6-sol`/medium；无 subagent | LightMem × MemBench pair/manifest R1-R3 | `8825a1f` + `51e630c` + `143e929` → `cdbf570` + `fbf84af` + `44e2968` | actor 412/R3 454；架构师 412、42；首次 full 9 fail/1570 pass 抓 fixture 漂移，R3 后全量 1579、compileall exit 0 | **9.6** | accepted after whitespace/full-suite fixture R2-R3 |
 | 2026-07-19 | Claude Code / Opus 4.8；reasoning=high；时长未提供；无 subagent | LongMemEval source-locked 异常账 R1 | `6591db1` → `42c1275` + `298ae0c` architect R1 | actor docs 5；架构师复算双 hash、500 qid set 与逐题字段，抓 124 题 answer-session ids 仅顺序不同；定向 74、全量 1591 | **8.8** | accepted after architect wording correction；重复 census 由过重任务卡造成，不扣 actor |
+| 2026-07-26 | Claude Code / Opus 5；reasoning=extra；时长未提供；无 subagent | MemOS v2.0.25 product runtime M1 R1 | `2ea7a39` → `2ea7a39` | actor/架构师 docs 5；actor 正确证成 sync/fine 为 algorithm variant、时间/lineage/cleanup 风险；架构师 full source 继续抓真实 MemoryManager/Neo4j/MEM_READ 多层吞错 | **8.5** | evidence accepted；“B6 已闭合/直接进 adapter”判词 reworked |
 
 ### 未评分发现记录
 

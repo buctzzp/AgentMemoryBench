@@ -61,25 +61,25 @@ M1 未裁定前不写 adapter、不启动服务、不调用真实 API，也不�
 更新父 ws02.7 README。
 
 首轮 M1 在 `13edb3a` 正确停工：current default reader 推翻旧卡的 SimpleStruct active-chain
-假设，并证明显式 `chat_time=None` 与 reader-level `message_id` 传输成立。停工证据见
-[首轮 preflight note](notes/memos-v2.0.25-product-runtime-preflight.md)，架构改判见
-[M1 R1 ruling](notes/memos-v2.0.25-m1-r1-ruling.md)。
+假设，并证明显式 `chat_time=None` 与 reader-level `message_id` 传输成立。R1 机制证据在
+`2ea7a39` 闭合，但也证明 `sync+fine` 是省略 default async lifecycle 的
+`ALGORITHM_VARIANT`。架构师因此
+[最终裁定](notes/memos-v2.0.25-m1-final-ruling.md)：主 profile 保留
+`async+fast → MEM_READ`，先补成功路径零变化的失败传播与 task-scoped completion，不能以
+sync variant 绕过完成门。
 
-**当前唯一 M1 施工入口**：
-[MemOS v2.0.25 产品运行时契约 M1 R1](cards/actor-prompt-memos-v2-0-25-product-runtime-preflight-r1.md)。
-已裁定不启动 HTTP host；主候选是在 framework worker 内构造官方 product components 并
-直接调用 typed `AddHandler` / `SearchHandler`，产品身份锁定
-`tree_text + MultiModalStructMemReader`。R1 只闭合 sync/fine/serial completion、
-single-namespace isolation、lineage/search、HaluMem 资格和服务观测；不重做已闭合探针或
-五家 benchmark census。
+**当前唯一施工入口**：
+[MemOS v2.0.25 async lifecycle 完成门 R2](cards/actor-prompt-memos-v2-0-25-async-lifecycle-r2.md)。
+它只补可复现 patch、local in-memory task tracker 与 strict waiter；不写 adapter、不重做
+benchmark census。R2 通过后才进入一张 adapter + 五格强反例卡。
 
-## R1 尚未闭合的 MemOS 专属问题
+## R2 尚未闭合的 MemOS 专属问题
 
-- sync/fine/serial dispatch 是否完整保留产品算法并严格传播失败；
-- official async/fast harness 与主候选是配置差异还是算法 variant；
-- single namespace 的 cleanup、retry 与 worker shutdown 是否闭合；
-- search 返回是否保留有资格的 source lineage、排序和 score；
-- HaluMem 单 session 新记忆能否无扭曲地读出，以及 update probe 是否有诚实语义；
-- Qdrant、Neo4j、embedding、LLM 与后台服务的运行/成本身份。
+- initial fast write、fine transfer/write、delete/refresh 与 scheduler submit 的多层吞错；
+- local queue 下按 business `task_id` 精确等待 `MEM_READ`，而非全局队列或坏掉的
+  `/scheduler/wait`；
+- patch 的 source identity、幂等重放与 success-path 守恒；
+- task-scoped fine output 是否足以支持 HaluMem extraction 的纯观测 sidecar。
 
-这些问题只在 R1 做一次；后续 adapter 与五格直接引用，不再重新摸索。
+search provenance/stable ranking、真实 graph/vector 隔离与 HaluMem update 继续保持
+`pending`，由后续 adapter/M3/真实 smoke 分层关闭，不回头重造 M1 证据。

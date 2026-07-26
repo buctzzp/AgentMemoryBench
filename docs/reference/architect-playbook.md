@@ -96,6 +96,9 @@
 - benchmark/method 差异为显式 policy；
 - I/O、注册、运行编排为边界层；
 - 配置保存值和实现选择，不掩盖算法分叉。
+- 完成门更容易实现，不足以把另一条算法路径升为主 profile。先把候选按
+  `CONFIG_EQUIVALENT / ALGORITHM_VARIANT` 分类；若候选省略成功态阶段，优先给原路径补
+  success-neutral completion/观测，不能用“更同步、更好等”偷换 estimand。
 
 重构的验收标准是行为守恒与未来修改面缩小，不是文件数或行数减少。
 
