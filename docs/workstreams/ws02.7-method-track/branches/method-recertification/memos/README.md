@@ -68,14 +68,24 @@ M1 未裁定前不写 adapter、不启动服务、不调用真实 API，也不�
 `async+fast → MEM_READ`，先补成功路径零变化的失败传播与 task-scoped completion，不能以
 sync variant 绕过完成门。
 
+首轮
+[MemOS v2.0.25 async lifecycle 完成门 R2](cards/actor-prompt-memos-v2-0-25-async-lifecycle-r2.md)
+产出 `d1a0178`，但架构师强验收复现出 reader 内部 LLM/parser/embedding 吞错、
+`merged_from` archive 吞错、handler-only trace 冒充完整 async trace，以及 patch commit
+未过 whitespace 门，因此首轮 `READY` 判词撤回、commit 暂不合流。完整证据见
+[R2 架构师强验收](notes/memos-v2.0.25-async-lifecycle-r2-architect-review.md)。
+
 **当前唯一施工入口**：
-[MemOS v2.0.25 async lifecycle 完成门 R2](cards/actor-prompt-memos-v2-0-25-async-lifecycle-r2.md)。
-它只补可复现 patch、local in-memory task tracker 与 strict waiter；不写 adapter、不重做
-benchmark census。R2 通过后才进入一张 adapter + 五格强反例卡。
+[MemOS v2.0.25 async lifecycle R2-R1](cards/actor-prompt-memos-v2-0-25-async-lifecycle-r2-r1.md)。
+它把 failure injection 下沉到真实 production leaf，补完整
+fast write → local queue/dispatcher → fine → terminal tracker 链，并锁严格 tracker
+状态机；不写 adapter、不重做 benchmark census。R2-R1 通过后才进入一张 adapter +
+五格强反例卡。
 
 ## R2 尚未闭合的 MemOS 专属问题
 
-- initial fast write、fine transfer/write、delete/refresh 与 scheduler submit 的多层吞错；
+- initial fast reader/parser/embedding、fine transfer/write/archive、delete/refresh 与
+  scheduler submit 的多层吞错；
 - local queue 下按 business `task_id` 精确等待 `MEM_READ`，而非全局队列或坏掉的
   `/scheduler/wait`；
 - patch 的 source identity、幂等重放与 success-path 守恒；

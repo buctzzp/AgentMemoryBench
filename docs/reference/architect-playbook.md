@@ -70,6 +70,8 @@
 
 - 旧入口和新入口最终送进 backend/LLM 的字节是否一致？
 - fake 是否绕开了本次生产代码？
+- 验证异常传播时，异常是否注入在**最低 production leaf**，还是让高层 fake 直接
+  `raise`、从而绕过了真正会吞错的内部 catch？
 - metadata 已保存是否等于算法实际消费？
 - 当前题有 gold 是否被误当成 provider 整体能力？
 - 字段缺席与显式 null 是否被验货器混为一谈？
