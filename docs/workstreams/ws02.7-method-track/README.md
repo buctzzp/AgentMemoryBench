@@ -34,19 +34,17 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   `1685 passed, 3 deselected, 1 warning, 29 subtests passed in 128.11s`；
   compileall exit 0。唯一 warning 是既有 vendored LightMem Pydantic deprecation。
 - **当前动作**：按新结构接入 **MemOS**；source lock 为官方稳定版
-  `v2.0.25@e820406`。R1 证据 `2ea7a39` 已验收，但它同时证明
-  `sync+fine` 是省略 default async lifecycle 的 `ALGORITHM_VARIANT`。架构师
+  `v2.0.25@e820406`。架构师
   [最终裁定](branches/method-recertification/memos/notes/memos-v2.0.25-m1-final-ruling.md)
-  主 profile 保留 `tree_text + MultiModalStruct + typed handlers +
-  async/fast→MEM_READ`；不能为了完成门切换算法。首轮 R2 `d1a0178` 未通过架构师
-  强验收：reader 内部仍会吞 LLM/parser/embedding failure，handler 仍会吞
-  `merged_from` archive failure，且所谓“完整 trace”未经过 fast write、submit 与
-  terminal tracker；patch commit 本体也未过 whitespace 门。当前唯一入口改为
-  [架构师强验收](branches/method-recertification/memos/notes/memos-v2.0.25-async-lifecycle-r2-architect-review.md)
-  所生成的
-  [async lifecycle R2-R1 返工卡](branches/method-recertification/memos/cards/actor-prompt-memos-v2-0-25-async-lifecycle-r2-r1.md)。
-  只补 success-neutral 失败传播、完整 product-chain 反例与 tracker anti-corruption；
-  R2-R1 通过后才写 adapter。复用五个 benchmark 稳定事实，不重开 raw census。
+  锁定的 `tree_text + MultiModalStruct + typed handlers +
+  async/fast→MEM_READ` 主 profile 不变。R2 首轮 `d1a0178` 的缺口已由 follow-up
+  `2830c32` 关闭，并通过
+  [架构师最终验收](branches/method-recertification/memos/notes/memos-v2.0.25-async-lifecycle-r2-architect-acceptance.md)：
+  product reader/storage failure 可达精确 terminal、local tracker 拒绝终态污染、
+  full async product chain 与 patch identity 均已实证；架构师另补 Factory 作用域隔离与
+  两条最低叶子强反例。下一步是一张 **MemOS v3 adapter 实现卡 + 五格强反例**；
+  复用五个 benchmark 稳定事实，不重开 raw census，也不把真实 DB/image/HaluMem
+  fine-output 等 pending 能力提前写成 valid。
 - **不可顺手重开**：benchmark raw/canonical/gold 调查、已冻结 25 格、旧
   `config_track` 兼容、legacy bridge/resume、BLEU/ROUGE/Precision 新公式。
 - **恢复当前结构任务只读**：上方 M0 ruling；需要追溯某家 method 才读下表对应 frozen note。

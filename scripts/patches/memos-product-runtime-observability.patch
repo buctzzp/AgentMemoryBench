@@ -1,0 +1,251 @@
+diff --git a/src/memos/graph_dbs/neo4j_community.py b/src/memos/graph_dbs/neo4j_community.py
+index b5c92f40..2d58c73f 100644
+--- a/src/memos/graph_dbs/neo4j_community.py
++++ b/src/memos/graph_dbs/neo4j_community.py
+@@ -198,0 +199,4 @@ class Neo4jCommunityGraphDB(Neo4jGraphDB):
++            # [memory-benchmark observability patch] A failed vector write makes the memory
++            # unretrievable by fast search; marking vector_sync=failed and continuing the
++            # graph write reports success for a half-written memory.
++            raise
+diff --git a/src/memos/mem_reader/multi_modal_struct.py b/src/memos/mem_reader/multi_modal_struct.py
+index c46331f1..ef44da5f 100644
+--- a/src/memos/mem_reader/multi_modal_struct.py
++++ b/src/memos/mem_reader/multi_modal_struct.py
+@@ -95,2 +95,7 @@ class MultiModalStructMemReader(SimpleStructMemReader):
+-        batch fails.  Errors are logged but never raised so callers always
+-        continue normally.
++        batch fails.
++
++        [memory-benchmark observability patch] The batch->per-item fallback is kept
++        exactly as-is, but if any per-item fallback also fails the remaining items are
++        still attempted and the first error is then raised: an item silently left with
++        ``embedding=None`` is unretrievable by vector search, which must not look like a
++        successful add.
+@@ -108,0 +114 @@ class MultiModalStructMemReader(SimpleStructMemReader):
++            fallback_errors: list[Exception] = []
+@@ -113,0 +120,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
++                    fallback_errors.append(e2)
++            if fallback_errors:
++                raise fallback_errors[0]
+@@ -507,11 +516,6 @@ class MultiModalStructMemReader(SimpleStructMemReader):
+-            response_json = {
+-                "memory list": [
+-                    {
+-                        "key": mem_str[:10],
+-                        "memory_type": "UserMemory",
+-                        "value": mem_str,
+-                        "tags": [],
+-                    }
+-                ],
+-                "summary": mem_str,
+-            }
++            # [memory-benchmark observability patch] Do not fabricate a "raw text as
++            # UserMemory" result out of a failed LLM call or unparsable response: that
++            # turns a transport/parse failure into a successful extraction of unextracted
++            # text. A successful call that legitimately yields an empty memory list still
++            # returns normally below.
++            raise
+@@ -700 +704,5 @@ class MultiModalStructMemReader(SimpleStructMemReader):
+-                return fine_items
++                # [memory-benchmark observability patch] Returning an empty item list here
++                # turns a failed extraction into an indistinguishable "legal zero
++                # extraction"; only a successful call that yields an empty memory list may
++                # complete.
++                raise
+@@ -739,0 +748,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
++                        # [memory-benchmark observability patch] A failed memory-item
++                        # construction/embedding must not silently shrink the result.
++                        raise
+@@ -770,0 +782,2 @@ class MultiModalStructMemReader(SimpleStructMemReader):
++                    # [memory-benchmark observability patch] See above.
++                    raise
+@@ -814,0 +828,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
++            # [memory-benchmark observability patch] Let every fine worker settle, then
++            # aggregate-raise; a dropped worker would silently shrink the extraction.
++            fine_worker_errors: list[Exception] = []
+@@ -821,0 +838,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
++                    fine_worker_errors.append(e)
++            if fine_worker_errors:
++                raise fine_worker_errors[0]
+@@ -980,0 +1000,4 @@ class MultiModalStructMemReader(SimpleStructMemReader):
++                # [memory-benchmark observability patch] Let every parser future settle,
++                # then aggregate-raise. Dropping a failed message here would silently write
++                # a partial fast memory for only some of the turns in the batch.
++                parse_errors: list[Exception] = []
+@@ -998,0 +1022,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
++                            parse_errors.append(e)
++                if parse_errors:
++                    raise parse_errors[0]
+@@ -1290,0 +1317,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
++            # [memory-benchmark observability patch] Let every scene future settle, then
++            # aggregate-raise instead of returning a partially-read memory list.
++            scene_errors: list[Exception] = []
+@@ -1298,0 +1328,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
++                    scene_errors.append(e)
++        if scene_errors:
++            raise scene_errors[0]
+diff --git a/src/memos/mem_scheduler/task_schedule_modules/handlers/mem_read_handler.py b/src/memos/mem_scheduler/task_schedule_modules/handlers/mem_read_handler.py
+index 90ace633..b78dd34f 100644
+--- a/src/memos/mem_scheduler/task_schedule_modules/handlers/mem_read_handler.py
++++ b/src/memos/mem_scheduler/task_schedule_modules/handlers/mem_read_handler.py
+@@ -22 +22,4 @@ from memos.mem_scheduler.utils.filter_utils import transform_name_to_key
+-from memos.mem_scheduler.utils.misc_utils import is_playground_api
++from memos.mem_scheduler.utils.misc_utils import (
++    group_messages_by_user_and_mem_cube,
++    is_playground_api,
++)
+@@ -31,0 +35,13 @@ if TYPE_CHECKING:
++class MemReadBatchError(RuntimeError):
++    """[memory-benchmark observability patch] Aggregated MEM_READ batch failure.
++
++    Raised after every item in the batch has settled so a partially failing batch is
++    still reported as a failed scheduler task instead of a silent success.
++    """
++
++    def __init__(self, failures: list[Exception]):
++        self.failures = list(failures)
++        detail = "; ".join(f"{type(e).__name__}: {e}" for e in self.failures)
++        super().__init__(f"MEM_READ batch had {len(self.failures)} failed item(s): {detail}")
++
++
+@@ -36,0 +53,25 @@ class MemReadMessageHandler(BaseSchedulerHandler):
++    def process_grouped_messages(self, messages, message_handler) -> None:
++        """[memory-benchmark observability patch] Non-swallowing grouping for MEM_READ.
++
++        ``BaseSchedulerHandler.process_grouped_messages`` catches every per-group exception
++        and only logs it, which would hide the failures this patch propagates. This override
++        keeps the exact same grouping and call order, lets every group run, then
++        aggregate-raises so the dispatcher marks the task failed. Only MEM_READ is affected;
++        other handlers keep the upstream behaviour.
++        """
++        grouped_messages = group_messages_by_user_and_mem_cube(messages=messages)
++        group_failures: list[Exception] = []
++        for user_id, user_batches in grouped_messages.items():
++            for mem_cube_id, batch in user_batches.items():
++                if not batch:
++                    continue
++                try:
++                    message_handler(user_id, mem_cube_id, batch)
++                except Exception as e:
++                    self.handle_exception(
++                        e, f"Error processing batch for user {user_id}, mem_cube {mem_cube_id}"
++                    )
++                    group_failures.append(e)
++        if group_failures:
++            raise MemReadBatchError(group_failures)
++
+@@ -43,0 +85,3 @@ class MemReadMessageHandler(BaseSchedulerHandler):
++        # [memory-benchmark observability patch] Collect per-item failures, let every already
++        # started item finish, then aggregate-raise so the dispatcher marks the task failed.
++        failures: list[Exception] = []
+@@ -50,0 +95,3 @@ class MemReadMessageHandler(BaseSchedulerHandler):
++                    failures.append(e)
++        if failures:
++            raise MemReadBatchError(failures)
+@@ -64 +111,4 @@ class MemReadMessageHandler(BaseSchedulerHandler):
+-                return
++                # [memory-benchmark observability patch] No cube means no fine stage at all.
++                raise RuntimeError(
++                    f"mem_cube is None for user_id={user_id}, mem_cube_id={mem_cube_id}"
++                )
+@@ -86 +136,4 @@ class MemReadMessageHandler(BaseSchedulerHandler):
+-                return
++                # [memory-benchmark observability patch] Wrong memory backend is a hard error.
++                raise TypeError(
++                    f"Expected TreeTextMemory but got {type(text_mem).__name__}"
++                )
+@@ -108,0 +162,3 @@ class MemReadMessageHandler(BaseSchedulerHandler):
++            # [memory-benchmark observability patch] Propagate so batch_handler can aggregate
++            # and the dispatcher marks this task failed.
++            raise
+@@ -137 +193,3 @@ class MemReadMessageHandler(BaseSchedulerHandler):
+-                return
++                # [memory-benchmark observability patch] Without a reader the fine stage
++                # silently never happens; that must not look like success.
++                raise RuntimeError("mem_reader not available in scheduler")
+@@ -149 +207,3 @@ class MemReadMessageHandler(BaseSchedulerHandler):
+-                    continue
++                    # [memory-benchmark observability patch] add already returned this id, so
++                    # not being able to read it back is a real inconsistency, not a skip.
++                    raise
+@@ -153 +213,5 @@ class MemReadMessageHandler(BaseSchedulerHandler):
+-                return
++                # [memory-benchmark observability patch] mem_ids was non-empty (checked in
++                # process_message), so an empty read-back is a failure.
++                raise RuntimeError(
++                    f"No raw memory items could be loaded for mem_ids={mem_ids}"
++                )
+@@ -183 +247,4 @@ class MemReadMessageHandler(BaseSchedulerHandler):
+-                processed_memories = []
++                # [memory-benchmark observability patch] A failed fine transfer must not be
++                # rewritten into "zero extracted memories"; a genuine empty result still
++                # returns normally below and stays completed.
++                raise
+@@ -236,0 +304,4 @@ class MemReadMessageHandler(BaseSchedulerHandler):
++                            # [memory-benchmark observability patch] Try every old id, then
++                            # aggregate-raise: a merged fine memory whose superseded original
++                            # is still 'activated' would be retrieved twice.
++                            archive_errors: list[Exception] = []
+@@ -261,0 +333,3 @@ class MemReadMessageHandler(BaseSchedulerHandler):
++                                            archive_errors.append(e)
++                            if archive_errors:
++                                raise archive_errors[0]
+@@ -269,0 +344,7 @@ class MemReadMessageHandler(BaseSchedulerHandler):
++                                # [memory-benchmark observability patch] Cannot archive the
++                                # superseded originals at all: fail fast rather than leave
++                                # duplicated memories behind.
++                                raise RuntimeError(
++                                    "merged_from provided but mem_reader.graph_db is "
++                                    "unavailable; cannot archive superseded memories"
++                                )
+@@ -436,0 +518,3 @@ class MemReadMessageHandler(BaseSchedulerHandler):
++                    # [memory-benchmark observability patch] Leftover raw memories would be
++                    # retrieved alongside fine ones; that is a corrupted end state.
++                    raise
+@@ -484,0 +569,3 @@ class MemReadMessageHandler(BaseSchedulerHandler):
++            # [memory-benchmark observability patch] Re-raise after the failure web-log has
++            # been emitted, so the dispatcher marks this MEM_READ task failed.
++            raise
+@@ -516,0 +604,3 @@ class MemReadMessageHandler(BaseSchedulerHandler):
++            # [memory-benchmark observability patch] Only reached when reorganize is enabled
++            # (the disabled case returns early above), so a failed submit is a real loss.
++            raise
+diff --git a/src/memos/memories/textual/tree.py b/src/memos/memories/textual/tree.py
+index 426a2359..a9489f7f 100644
+--- a/src/memos/memories/textual/tree.py
++++ b/src/memos/memories/textual/tree.py
+@@ -405,0 +406,3 @@ class TreeTextMemory(BaseTextMemory):
++        # [memory-benchmark observability patch] Attempt every id, then raise if any failed:
++        # a partially deleted raw batch leaves stale memories that search would return.
++        delete_errors: list[Exception] = []
+@@ -410,0 +414,3 @@ class TreeTextMemory(BaseTextMemory):
++                delete_errors.append(e)
++        if delete_errors:
++            raise delete_errors[0]
+diff --git a/src/memos/memories/textual/tree_text_memory/organize/manager.py b/src/memos/memories/textual/tree_text_memory/organize/manager.py
+index 1fe6a481..cb919a60 100644
+--- a/src/memos/memories/textual/tree_text_memory/organize/manager.py
++++ b/src/memos/memories/textual/tree_text_memory/organize/manager.py
+@@ -229,0 +230,3 @@ class MemoryManager:
++                # [memory-benchmark observability patch] Let every batch settle, then raise:
++                # returning pre-generated ids after a failed graph write is a phantom success.
++                batch_errors: list[Exception] = []
+@@ -237,0 +241,3 @@ class MemoryManager:
++                        batch_errors.append(e)
++                if batch_errors:
++                    raise batch_errors[0]
+@@ -261,0 +268,3 @@ class MemoryManager:
++            # [memory-benchmark observability patch] Capacity cleanup failures leave the
++            # cube over its configured size; surface them instead of swallowing.
++            raise
+@@ -547,0 +557,2 @@ class MemoryManager:
++                    # [memory-benchmark observability patch] See _cleanup_working_memory.
++                    raise
+diff --git a/src/memos/multi_mem_cube/single_cube.py b/src/memos/multi_mem_cube/single_cube.py
+index 27399259..9a35035c 100644
+--- a/src/memos/multi_mem_cube/single_cube.py
++++ b/src/memos/multi_mem_cube/single_cube.py
+@@ -548,0 +549,3 @@ class SingleCubeView(MemCubeView):
++                # [memory-benchmark observability patch] A failed MEM_READ submit means the
++                # fine-extraction stage will never run, so the add must not report success.
++                raise
