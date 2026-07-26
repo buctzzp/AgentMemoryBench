@@ -47,6 +47,15 @@ from .lightmem_adapter import (
     clean_lightmem_conversation_state,
 )
 from .mem0_adapter import Mem0, Mem0Config, build_mem0_source_identity
+from .memos_adapter import (
+    MEMOS_EMBEDDING_MODEL_ID,
+    MEMOS_LLM_MODEL_ID,
+    MEMOS_RERANKER_MODEL_ID,
+    MemOS,
+    MemOSConfig,
+    build_memos_source_identity,
+    clean_memos_conversation_state,
+)
 from .memoryos_adapter import (
     MemoryOS,
     MemoryOSPaperConfig,
@@ -251,6 +260,166 @@ def _build_mem0_system(context: MethodBuildContext) -> BaseMemorySystem:
         consume_granularity=_mem0_consume_granularity(context.benchmark_name),
         session_memory_report=context.benchmark_name == "halumem",
         benchmark_name=context.benchmark_name,
+    )
+
+
+def _session_consume_granularity(_benchmark_name: str | None) -> ConsumeGranularity:
+    """返回固定 session 消费粒度。"""
+
+    return "session"
+
+
+def _build_memos_system(context: MethodBuildContext) -> BaseMemorySystem:
+    """根据统一 build context 构造 MemOS product typed-handler adapter。"""
+
+    if not isinstance(context.config, MemOSConfig):
+        raise ConfigurationError("MemOS factory requires MemOSConfig")
+    if context.openai_settings is None:
+        raise ConfigurationError("MemOS factory requires OpenAI settings")
+    return MemOS(
+        config=context.config,
+        path_settings=context.path_settings,
+        storage_root=context.storage_root,
+        openai_settings=context.openai_settings,
+        efficiency_collector=context.efficiency_collector,
+        benchmark_name=context.benchmark_name,
+    )
+
+
+def _memos_model_name(config: Any) -> str:
+    """从 MemOS 强类型配置读取 memory build LLM 名称。"""
+
+    if not isinstance(config, MemOSConfig):
+        raise ConfigurationError("MemOS model getter requires MemOSConfig")
+    return config.llm_model
+
+
+def _memos_max_workers(config: Any) -> int:
+    """从 MemOS 强类型配置读取 conversation 并发数。"""
+
+    if not isinstance(config, MemOSConfig):
+        raise ConfigurationError("MemOS worker getter requires MemOSConfig")
+    return config.max_workers
+
+
+def _memos_efficiency_model_inventory(config: Any) -> tuple[ModelDescriptor, ...]:
+    """返回 MemOS 观测会引用的模型身份，区分 API LLM / 本地 embedding / 本地 rerank。"""
+
+    if not isinstance(config, MemOSConfig):
+        raise ConfigurationError("MemOS model inventory getter requires MemOSConfig")
+    return (
+        ModelDescriptor(
+            model_id=MEMOS_LLM_MODEL_ID,
+            model_name=config.llm_model,
+            model_role="memory_build_llm",
+            execution_mode="api",
+            tokenizer_name=config.llm_model,
+        ),
+        ModelDescriptor(
+            model_id=MEMOS_EMBEDDING_MODEL_ID,
+            model_name=config.embedding_model_path,
+            model_role="embedding",
+            execution_mode="local",
+            revision_or_path=config.embedding_model_path,
+            embedding_dimension=config.embedding_dimension,
+            tokenizer_name=config.embedding_model_path,
+        ),
+        ModelDescriptor(
+            # cosine_local reranker 是本地纯算法打分，不是 LLM，也不产生 API 调用。
+            model_id=MEMOS_RERANKER_MODEL_ID,
+            model_name=config.reranker_backend,
+            model_role="reranker",
+            execution_mode="local",
+        ),
+    )
+
+
+def _memos_efficiency_instrumentation_identity(
+    path_settings: PathSettings,
+    config: Any,
+    source_identity: dict[str, Any],
+) -> dict[str, object]:
+    """返回 MemOS 观测 wrapper 身份，不包含 secret。"""
+
+    if not isinstance(config, MemOSConfig):
+        raise ConfigurationError(
+            "MemOS instrumentation identity getter requires MemOSConfig"
+        )
+    wrapper_relative_path = Path("src/memory_benchmark/methods/memos_adapter.py")
+    return {
+        "collector_schema": 1,
+        "wrapper_path": wrapper_relative_path.as_posix(),
+        "wrapper_sha256": _sha256_file(path_settings.project_root / wrapper_relative_path),
+        "llm_tokenizer": config.llm_model,
+        "embedding_tokenizer": config.embedding_model_path,
+        "method_source_sha256": source_identity.get("source_sha256"),
+        # MemOS current OpenAILLM.generate() 只返回纯文本并丢掉 response usage，
+        # async worker 又脱离 framework question context；精确 per-call
+        # token/cost 因此是 M5 preflight 的公开 pending，不在本卡伪造。
+        "exact_api_usage": "pending_m5_preflight",
+    }
+
+
+def _clean_memos_failed_ingest_state(
+    context: MethodBuildContext,
+    conversation: Conversation,
+    failed_state: dict[str, Any],
+) -> None:
+    """namespace-scoped 清理 MemOS failed_ingest conversation 的算法可见状态。"""
+
+    storage_root = _resolve_clean_retry_storage_root(context, failed_state)
+    clean_context = MethodBuildContext(
+        config=context.config,
+        openai_settings=context.openai_settings,
+        path_settings=context.path_settings,
+        storage_root=storage_root,
+        benchmark_name=context.benchmark_name,
+    )
+    system = _build_memos_system(clean_context)
+    if not isinstance(system, MemOS):
+        raise ConfigurationError("MemOS clean hook failed to build MemOS adapter")
+    run_id = context.storage_root.parent.name
+    isolation_key = f"{run_id}_{conversation.conversation_id}"
+    clean_memos_conversation_state(provider=system, isolation_key=isolation_key)
+
+
+def _memos_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityDeclaration:
+    """解析 MemOS controlled MiniLM + Qdrant cosine build。"""
+
+    provider = _manifest_text(config_manifest, "embedding_provider")
+    model = _manifest_text(config_manifest, "embedding_model_path")
+    dimension = _manifest_dimension(config_manifest, "embedding_dimension")
+    model_key = "" if model is None else model.strip().split("/")[-1].lower()
+    if (
+        provider == "sentence-transformers-local"
+        and model_key == "all-minilm-l6-v2"
+        and dimension == 384
+    ):
+        return BuildIdentityDeclaration(
+            implementation_variant="product",
+            embedding_profile="controlled_embedding_v1",
+            # MemOS 是本支线首次接入，没有可对表的历史受控 build。
+            historical_controlled_build_equivalent_to_current_main=False,
+            embedding=EmbeddingIdentity(
+                provider=provider,
+                model=model,
+                dimension=dimension,
+                revision=None,
+                revision_status="local_unpinned",
+                # current `SenTranEmbedder.embed()` 调 `model.encode()` 时不传
+                # `normalize_embeddings`，MemOS 自身不做归一化；受控 MiniLM 模型
+                # 目录的 `modules.json` 带 `2_Normalize`，故 L2 由模型 pipeline
+                # 提供。这是 source-proven 值，不是猜的 `internal_l2`。
+                normalization="model_pipeline_l2",
+                instruction=None,
+                distance="qdrant-cosine",
+                identity_status="declared",
+            ),
+        )
+    return _pending_build_identity(
+        provider=provider,
+        model=model,
+        dimension=dimension,
     )
 
 
@@ -1156,6 +1325,44 @@ _REGISTRATIONS = {
         retrieval_observation_contract_getter=_separable_retrieval_contract,
         clean_failed_ingest_state=_clean_memoryos_failed_ingest_state,
         build_identity_resolver=_memoryos_build_identity,
+    ),
+    "memos": MethodRegistration(
+        name="memos",
+        task_families=frozenset({TaskFamily.CONVERSATION_QA}),
+        provided_capabilities=frozenset(
+            {
+                MethodCapability.CONVERSATION_ADD,
+                MethodCapability.MEMORY_RETRIEVAL,
+            }
+        ),
+        profile_sections=(
+            ("smoke", "smoke"),
+            ("official-full", "official_full"),
+        ),
+        profile_relative_path=Path("configs/methods/memos.toml"),
+        config_type=MemOSConfig,
+        requires_api=True,
+        system_factory=_build_memos_system,
+        source_identity_factory=build_memos_source_identity,
+        model_name_getter=_memos_model_name,
+        max_workers_getter=_memos_max_workers,
+        display_name="MemOS",
+        protocol_version="v3",
+        consume_granularity_resolver=_session_consume_granularity,
+        provenance_granularity="none",
+        retrieval_evidence_contract_version="v1",
+        # MemOS factory 按 config 缓存单例、reader 持有构造期 graph DB；真实跨
+        # namespace interleaving 未验前既不共享实例并行，也不允许 smoke 覆盖
+        # worker 数。
+        allow_smoke_worker_override=False,
+        efficiency_model_inventory_getter=_memos_efficiency_model_inventory,
+        efficiency_instrumentation_identity_getter=(
+            _memos_efficiency_instrumentation_identity
+        ),
+        retrieval_observation_contract_getter=_separable_retrieval_contract,
+        supports_shared_instance_parallelism=False,
+        clean_failed_ingest_state=_clean_memos_failed_ingest_state,
+        build_identity_resolver=_memos_build_identity,
     ),
     "simplemem": MethodRegistration(
         name="simplemem",

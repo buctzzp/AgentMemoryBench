@@ -7,7 +7,7 @@
 | LightMem | https://github.com/zjunlp/LightMem | 以本仓库提交历史为准 | git-tracked（随本仓库提交） |
 | MemoryOS-main | https://github.com/BAI-LAB/MemoryOS | 以本仓库提交历史为准 | git-tracked（随本仓库提交） |
 | mem0-main | https://github.com/mem0ai/mem0 | 以本仓库提交历史为准 | git-tracked（随本仓库提交） |
-| MemOS | https://github.com/MemTensor/MemOS.git | v2.0.25 / e820406269537b97d270687e3e40eea2f015f81a + 本项目 failure-observability patch | local-only；按 fetch 脚本恢复（脚本会幂等应用 `scripts/patches/memos-product-runtime-observability.patch`） |
+| MemOS | https://github.com/MemTensor/MemOS.git | v2.0.25 / e820406269537b97d270687e3e40eea2f015f81a + 本项目 failure-observability / benchmark-adaptation patch | local-only；按 fetch 脚本恢复（脚本会幂等应用 `scripts/patches/memos-product-runtime-observability.patch`，该 patch 同时含 M4 新增的 `sentence_transformer` embedder 分支与 `_search_text` 失败可见性两处适配） |
 | SimpleMem | https://github.com/aiming-lab/SimpleMem.git | 60a48e83a7fef10d386e1f438589047d3a4257bc | local-only；按 fetch 脚本恢复 |
 | cognee | https://github.com/topoteretes/cognee.git | f7e2267cf02f5df15c4b60bf196b30ac2c06b32d | local-only；按 fetch 脚本恢复 |
 | langmem | https://github.com/langchain-ai/langmem.git | c01e273b94aa4c06e41d0ed1ccce0db17de2bc11 | local-only；按 fetch 脚本恢复 |

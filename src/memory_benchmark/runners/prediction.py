@@ -539,77 +539,90 @@ def run_predictions(
         ) as progress:
             progress.start_conversations(_conversation_progress_total)
             progress.start_questions(_question_progress_total)
-            if use_isolated:
-                _run_isolated_worker_pipeline(
-                    work_plan=work_plan,
-                    system_factory=system_factory,
-                    build_context_template=build_context_template,
-                    run_id=run_context.run_id,
-                    policy=policy,
-                    paths=paths,
-                    progress=progress,
-                    logger=logger,
-                    efficiency_collector=efficiency_collector,
-                    efficiency_store=efficiency_store,
-                    retrieval_observation_contract=retrieval_observation_contract,
-                    prediction_records=prediction_records,
-                    conversation_status=conversation_status,
-                    question_status=question_status,
-                    question_order=question_order,
-                    answer_reader=answer_reader,
-                    unified_prompt_builder=unified_prompt_builder,
-                    prediction_transform=prediction_transform,
-                    protocol_version=protocol_version,
-                    consume_granularity=_manifest_consume_granularity(
-                        method_manifest
-                    ),
-                )
-            else:
-                _validate_protocol_version(protocol_version, system)
-                ingest_conversations = [
-                    item.conversation for item in work_plan.items if item.needs_ingest
-                ]
-                answer_conversations = [
-                    item.conversation
-                    for item in work_plan.items
-                    if item.pending_questions
-                ]
-                pending_selected_questions = {
-                    item.conversation.conversation_id: list(item.pending_questions)
-                    for item in work_plan.items
-                    if item.pending_questions
-                }
-                _ingest_pending_conversations(
-                    conversations=ingest_conversations,
-                    system=system,
-                    run_id=run_context.run_id,
-                    policy=policy,
-                    conversation_status=conversation_status,
-                    paths=paths,
-                    progress=progress,
-                    logger=logger,
-                    efficiency_collector=efficiency_collector,
-                    efficiency_store=efficiency_store,
-                )
-                _answer_pending_questions(
-                    conversations=answer_conversations,
-                    selected_questions=pending_selected_questions,
-                    system=system,
-                    run_id=run_context.run_id,
-                    policy=policy,
-                    prediction_records=prediction_records,
-                    question_status=question_status,
-                    question_order=question_order,
-                    paths=paths,
-                    progress=progress,
-                    logger=logger,
-                    efficiency_collector=efficiency_collector,
-                    efficiency_store=efficiency_store,
-                    retrieval_observation_contract=retrieval_observation_contract,
-                    answer_reader=answer_reader,
-                    unified_prompt_builder=unified_prompt_builder,
-                    prediction_transform=prediction_transform,
-                )
+            try:
+                if use_isolated:
+                    _run_isolated_worker_pipeline(
+                        work_plan=work_plan,
+                        system_factory=system_factory,
+                        build_context_template=build_context_template,
+                        run_id=run_context.run_id,
+                        policy=policy,
+                        paths=paths,
+                        progress=progress,
+                        logger=logger,
+                        efficiency_collector=efficiency_collector,
+                        efficiency_store=efficiency_store,
+                        retrieval_observation_contract=retrieval_observation_contract,
+                        prediction_records=prediction_records,
+                        conversation_status=conversation_status,
+                        question_status=question_status,
+                        question_order=question_order,
+                        answer_reader=answer_reader,
+                        unified_prompt_builder=unified_prompt_builder,
+                        prediction_transform=prediction_transform,
+                        protocol_version=protocol_version,
+                        consume_granularity=_manifest_consume_granularity(
+                            method_manifest
+                        ),
+                    )
+                else:
+                    _validate_protocol_version(protocol_version, system)
+                    ingest_conversations = [
+                        item.conversation
+                        for item in work_plan.items
+                        if item.needs_ingest
+                    ]
+                    answer_conversations = [
+                        item.conversation
+                        for item in work_plan.items
+                        if item.pending_questions
+                    ]
+                    pending_selected_questions = {
+                        item.conversation.conversation_id: list(item.pending_questions)
+                        for item in work_plan.items
+                        if item.pending_questions
+                    }
+                    _ingest_pending_conversations(
+                        conversations=ingest_conversations,
+                        system=system,
+                        run_id=run_context.run_id,
+                        policy=policy,
+                        conversation_status=conversation_status,
+                        paths=paths,
+                        progress=progress,
+                        logger=logger,
+                        efficiency_collector=efficiency_collector,
+                        efficiency_store=efficiency_store,
+                    )
+                    _answer_pending_questions(
+                        conversations=answer_conversations,
+                        selected_questions=pending_selected_questions,
+                        system=system,
+                        run_id=run_context.run_id,
+                        policy=policy,
+                        prediction_records=prediction_records,
+                        question_status=question_status,
+                        question_order=question_order,
+                        paths=paths,
+                        progress=progress,
+                        logger=logger,
+                        efficiency_collector=efficiency_collector,
+                        efficiency_store=efficiency_store,
+                        retrieval_observation_contract=(
+                            retrieval_observation_contract
+                        ),
+                        answer_reader=answer_reader,
+                        unified_prompt_builder=unified_prompt_builder,
+                        prediction_transform=prediction_transform,
+                    )
+            finally:
+                # shared/non-isolated v3 provider 的生命周期归本 runner 所有：
+                # 成功路径必须在写 Completed stage/summary/run_completed 之前收敛，
+                # 异常路径也必须在退出前收敛，否则 MemOS 这类带后台线程的 provider
+                # 会泄漏 consumer/monitor/dispatcher。isolated 路径的 provider 由
+                # 各 worker 自行创建与清理，根 system 不参与。
+                if not use_isolated:
+                    _cleanup_memory_provider(system)
             progress.set_stage("Completed", step_index=3, step_count=3)
             completed_conversation_count = sum(
                 1
@@ -1298,6 +1311,21 @@ def _validate_run_scope(run_scope: RunScope) -> RunScope:
     return run_scope
 
 
+def _cleanup_memory_provider(system: BaseMemorySystem | MemoryProvider) -> None:
+    """对 v3 provider 调用一次 `cleanup()`，legacy system 保持原有语义不变。
+
+    只有 `MemoryProvider` 声明了 `cleanup()` 钩子；旧 `BaseMemorySystem`
+    （含 `_UnusedRootSystem`）没有该协议，必须原样跳过。调用点自身保证"恰好一次"，
+    因此这里不吞异常：cleanup 失败必须可见，不能让 run 被写成成功。
+
+    输入:
+        system: 已规范化的被测系统。
+    """
+
+    if isinstance(system, MemoryProvider):
+        system.cleanup()
+
+
 def _normalize_memory_system(system: _PredictionSystem) -> BaseMemorySystem | MemoryProvider:
     """把旧 retrieve-first provider 规范化为 v3 MemoryProvider。"""
 
@@ -1879,30 +1907,43 @@ def _isolated_worker(
     """
 
     system = _normalize_memory_system(system_factory(build_context))
-    _validate_protocol_version(protocol_version, system)
-    _validate_consume_granularity(consume_granularity, system)
-    results: list[_ConversationAnswerBatch | _ConversationFailureBatch] = []
-    consecutive_failures = 0
-    for work_item in work_items:
-        if cancellation_event is not None and cancellation_event.is_set():
-            break
-        conversation = work_item.conversation
-        conv_predictions: list[dict[str, Any]] = []
-        conv_retrievals: list[dict[str, Any]] = []
-        conv_session_reports: list[dict[str, Any]] = []
-        conv_observations: list[EfficiencyObservation] = []
-        ingested = not work_item.needs_ingest
-        try:
-            public_conversation = _make_public_conversation(conversation)
-            if work_item.needs_ingest:
-                if (
-                    efficiency_collector is not None
-                    and efficiency_collector.enabled
-                ):
-                    started_ns = perf_counter_ns()
-                    with efficiency_collector.conversation_scope(
-                        conversation.conversation_id,
-                    ) as conv_scope:
+    try:
+        _validate_protocol_version(protocol_version, system)
+        _validate_consume_granularity(consume_granularity, system)
+        results: list[_ConversationAnswerBatch | _ConversationFailureBatch] = []
+        consecutive_failures = 0
+        for work_item in work_items:
+            if cancellation_event is not None and cancellation_event.is_set():
+                break
+            conversation = work_item.conversation
+            conv_predictions: list[dict[str, Any]] = []
+            conv_retrievals: list[dict[str, Any]] = []
+            conv_session_reports: list[dict[str, Any]] = []
+            conv_observations: list[EfficiencyObservation] = []
+            ingested = not work_item.needs_ingest
+            try:
+                public_conversation = _make_public_conversation(conversation)
+                if work_item.needs_ingest:
+                    if (
+                        efficiency_collector is not None
+                        and efficiency_collector.enabled
+                    ):
+                        started_ns = perf_counter_ns()
+                        with efficiency_collector.conversation_scope(
+                            conversation.conversation_id,
+                        ) as conv_scope:
+                            conv_session_reports.extend(
+                                _add_public_conversation_coarse(
+                                    system=system,
+                                    run_id=run_id,
+                                    public_conversation=public_conversation,
+                                )
+                            )
+                            efficiency_collector.record_memory_build_total_latency(
+                                latency_ms=_elapsed_ms(started_ns),
+                            )
+                        conv_observations.extend(conv_scope.records)
+                    else:
                         conv_session_reports.extend(
                             _add_public_conversation_coarse(
                                 system=system,
@@ -1910,30 +1951,51 @@ def _isolated_worker(
                                 public_conversation=public_conversation,
                             )
                         )
-                        efficiency_collector.record_memory_build_total_latency(
-                            latency_ms=_elapsed_ms(started_ns),
-                        )
-                    conv_observations.extend(conv_scope.records)
-                else:
-                    conv_session_reports.extend(
-                        _add_public_conversation_coarse(
-                            system=system,
-                            run_id=run_id,
-                            public_conversation=public_conversation,
-                        )
-                    )
-                ingested = True
-            for source_question in work_item.pending_questions:
-                question = _make_public_question(source_question)
-                validate_no_private_keys(question.to_dict())
-                if (
-                    efficiency_collector is not None
-                    and efficiency_collector.enabled
-                ):
-                    with efficiency_collector.question_scope(
-                        conversation.conversation_id,
-                        question.question_id,
-                    ) as scope:
+                    ingested = True
+                for source_question in work_item.pending_questions:
+                    question = _make_public_question(source_question)
+                    validate_no_private_keys(question.to_dict())
+                    if (
+                        efficiency_collector is not None
+                        and efficiency_collector.enabled
+                    ):
+                        with efficiency_collector.question_scope(
+                            conversation.conversation_id,
+                            question.question_id,
+                        ) as scope:
+                            if _is_memory_provider(system):
+                                prediction, retrieval_record = (
+                                    _answer_question_retrieve_first_or_reuse(
+                                        provider=system,
+                                        question=question,
+                                        run_id=run_id,
+                                        answer_reader=answer_reader,
+                                        efficiency_collector=efficiency_collector,
+                                        unified_prompt_builder=unified_prompt_builder,
+                                        existing_retrieval_records=existing_retrieval_records,
+                                    )
+                                )
+                                if retrieval_record is not None:
+                                    conv_retrievals.append(retrieval_record)
+                            else:
+                                if not isinstance(
+                                    retrieval_observation_contract,
+                                    RetrievalObservationContract,
+                                ):
+                                    raise ConfigurationError(
+                                        "Enabled efficiency observability requires an "
+                                        "explicit retrieval observation contract"
+                                    )
+                                prediction = system.get_answer(question)
+                                if (
+                                    not retrieval_observation_contract.supported_by_method
+                                ):
+                                    efficiency_collector.record_retrieval_unsupported_if_missing(
+                                        retrieval_observation_contract.unsupported_reason
+                                        or ""
+                                    )
+                        conv_observations.extend(scope.records)
+                    else:
                         if _is_memory_provider(system):
                             prediction, retrieval_record = (
                                 _answer_question_retrieve_first_or_reuse(
@@ -1941,7 +2003,7 @@ def _isolated_worker(
                                     question=question,
                                     run_id=run_id,
                                     answer_reader=answer_reader,
-                                    efficiency_collector=efficiency_collector,
+                                    efficiency_collector=None,
                                     unified_prompt_builder=unified_prompt_builder,
                                     existing_retrieval_records=existing_retrieval_records,
                                 )
@@ -1949,96 +2011,68 @@ def _isolated_worker(
                             if retrieval_record is not None:
                                 conv_retrievals.append(retrieval_record)
                         else:
-                            if not isinstance(
-                                retrieval_observation_contract,
-                                RetrievalObservationContract,
-                            ):
-                                raise ConfigurationError(
-                                    "Enabled efficiency observability requires an "
-                                    "explicit retrieval observation contract"
-                                )
                             prediction = system.get_answer(question)
-                            if (
-                                not retrieval_observation_contract.supported_by_method
-                            ):
-                                efficiency_collector.record_retrieval_unsupported_if_missing(
-                                    retrieval_observation_contract.unsupported_reason
-                                    or ""
-                                )
-                    conv_observations.extend(scope.records)
-                else:
-                    if _is_memory_provider(system):
-                        prediction, retrieval_record = (
-                            _answer_question_retrieve_first_or_reuse(
-                                provider=system,
-                                question=question,
-                                run_id=run_id,
-                                answer_reader=answer_reader,
-                                efficiency_collector=None,
-                                unified_prompt_builder=unified_prompt_builder,
-                                existing_retrieval_records=existing_retrieval_records,
-                            )
-                        )
-                        if retrieval_record is not None:
-                            conv_retrievals.append(retrieval_record)
-                    else:
-                        prediction = system.get_answer(question)
-                prediction = _transform_prediction_if_needed(
-                    prediction,
-                    prediction_transform,
+                    prediction = _transform_prediction_if_needed(
+                        prediction,
+                        prediction_transform,
+                    )
+                    _validate_prediction(prediction, question)
+                    validate_no_private_keys(prediction.metadata)
+                    conv_predictions.append(
+                        {
+                            "question_id": question.question_id,
+                            "conversation_id": conversation.conversation_id,
+                            "question_text": question.text,
+                            "answer": prediction.answer,
+                            "metadata": prediction.metadata,
+                        }
+                    )
+            except Exception as exc:
+                results.append(
+                    _ConversationFailureBatch(
+                        conversation_id=conversation.conversation_id,
+                        stage="isolated_worker",
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                        traceback_text="".join(
+                            traceback.format_exception(type(exc), exc, exc.__traceback__)
+                        ),
+                        observations=tuple(conv_observations),
+                        predictions=tuple(conv_predictions),
+                        retrievals=tuple(
+                            conv_retrievals
+                            + list(getattr(exc, "retrievals", ()))
+                        ),
+                        session_reports=tuple(conv_session_reports),
+                        ingested=ingested,
+                    )
                 )
-                _validate_prediction(prediction, question)
-                validate_no_private_keys(prediction.metadata)
-                conv_predictions.append(
-                    {
-                        "question_id": question.question_id,
-                        "conversation_id": conversation.conversation_id,
-                        "question_text": question.text,
-                        "answer": prediction.answer,
-                        "metadata": prediction.metadata,
-                    }
-                )
-        except Exception as exc:
+                consecutive_failures += 1
+                if (
+                    max_consecutive_failures is not None
+                    and consecutive_failures >= max_consecutive_failures
+                ):
+                    if cancellation_event is not None:
+                        cancellation_event.set()
+                    break
+                continue
             results.append(
-                _ConversationFailureBatch(
+                _ConversationAnswerBatch(
                     conversation_id=conversation.conversation_id,
-                    stage="isolated_worker",
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                    traceback_text="".join(
-                        traceback.format_exception(type(exc), exc, exc.__traceback__)
-                    ),
-                    observations=tuple(conv_observations),
                     predictions=tuple(conv_predictions),
-                    retrievals=tuple(
-                        conv_retrievals
-                        + list(getattr(exc, "retrievals", ()))
-                    ),
+                    retrievals=tuple(conv_retrievals),
                     session_reports=tuple(conv_session_reports),
-                    ingested=ingested,
+                    observations=tuple(conv_observations),
+                    ingested=work_item.needs_ingest,
                 )
             )
-            consecutive_failures += 1
-            if (
-                max_consecutive_failures is not None
-                and consecutive_failures >= max_consecutive_failures
-            ):
-                if cancellation_event is not None:
-                    cancellation_event.set()
-                break
-            continue
-        results.append(
-            _ConversationAnswerBatch(
-                conversation_id=conversation.conversation_id,
-                predictions=tuple(conv_predictions),
-                retrievals=tuple(conv_retrievals),
-                session_reports=tuple(conv_session_reports),
-                observations=tuple(conv_observations),
-                ingested=work_item.needs_ingest,
-            )
-        )
-        consecutive_failures = 0
-    return tuple(results)
+            consecutive_failures = 0
+        return tuple(results)
+    finally:
+        # worker 自建的 v3 provider 生命周期归 worker 所有：成功 batch 交回协调
+        # 线程之前、以及异常退出之前，都必须收敛恰好一次，避免后台线程随进程
+        # 池复用而泄漏。
+        _cleanup_memory_provider(system)
 
 
 def _add_public_conversation_coarse(

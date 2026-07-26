@@ -16,6 +16,7 @@ from memory_benchmark.core import (
 from memory_benchmark.methods.lightmem_adapter import LightMemConfig
 from memory_benchmark.methods.mem0_adapter import Mem0Config
 from memory_benchmark.methods.memoryos_adapter import MemoryOSPaperConfig
+from memory_benchmark.methods.memos_adapter import MemOSConfig
 from memory_benchmark.methods.simplemem_adapter import SimpleMemConfig
 from memory_benchmark.methods.registry import (
     MethodBuildContext,
@@ -31,7 +32,14 @@ pytestmark = pytest.mark.unit
 def test_registry_lists_conversation_qa_methods() -> None:
     """统一入口应暴露当前已接入的 conversation-QA method。"""
 
-    assert list_methods() == ["amem", "lightmem", "mem0", "memoryos", "simplemem"]
+    assert list_methods() == [
+        "amem",
+        "lightmem",
+        "mem0",
+        "memoryos",
+        "memos",
+        "simplemem",
+    ]
 
 
 def test_mem0_registration_declares_capabilities_factory_and_api_boundary() -> None:
@@ -170,7 +178,7 @@ def test_lightmem_registration_model_inventory_excludes_unused_answer_llm() -> N
 def test_built_in_methods_advertise_memory_retrieval_capability() -> None:
     """retrieve-first prediction 要求内置 method 声明 memory_retrieval。"""
 
-    for method_name in ("mem0", "memoryos", "amem", "lightmem", "simplemem"):
+    for method_name in ("mem0", "memoryos", "amem", "lightmem", "simplemem", "memos"):
         registration = get_method_registration(method_name)
 
         assert MethodCapability.CONVERSATION_ADD in registration.provided_capabilities
@@ -197,6 +205,11 @@ def test_built_in_methods_advertise_memory_retrieval_capability() -> None:
         ("lightmem", "halumem", "session"),
         ("memoryos", "longmemeval", "pair"),
         ("memoryos", "membench", "session"),
+        ("memos", "locomo", "session"),
+        ("memos", "longmemeval", "session"),
+        ("memos", "membench", "session"),
+        ("memos", "beam", "session"),
+        ("memos", "halumem", "session"),
     ],
 )
 def test_registration_resolves_concrete_consume_granularity(
@@ -227,6 +240,7 @@ def test_clean_retry_support_is_only_declared_by_methods_with_safe_state_cleanup
     assert get_method_registration("memoryos").clean_failed_ingest_state is not None
     assert get_method_registration("mem0").clean_failed_ingest_state is not None
     assert get_method_registration("simplemem").clean_failed_ingest_state is not None
+    assert get_method_registration("memos").clean_failed_ingest_state is not None
 
 
 def test_clean_retry_hook_uses_failed_worker_state_for_isolated_runs(
@@ -430,3 +444,153 @@ def test_unknown_profile_is_rejected_by_registry() -> None:
             profile_name="cheap-ish",
             project_root=".",
         )
+
+
+def _memos_registry_config(**overrides) -> MemOSConfig:
+    """构造与主 profile 同口径的 MemOSConfig，供 registry 断言使用。"""
+
+    base = {
+        "llm_model": "gpt-4o-mini",
+        "embedding_backend": "sentence_transformer",
+        "embedding_model_path": "models/all-MiniLM-L6-v2",
+        "embedding_dimension": 384,
+        "embedding_max_tokens": 8192,
+        "embedding_trust_remote": False,
+        "memory_backend": "tree_text",
+        "reader_backend": "multimodal_struct",
+        "add_async_mode": "async",
+        "add_mode": None,
+        "use_redis_queue": False,
+        "parallel_dispatch": True,
+        "reorganize": False,
+        "reranker_backend": "cosine_local",
+        "search_mode": "fast",
+        "search_relativity": 0.45,
+        "search_dedup": "mmr",
+        "search_rerank": True,
+        "include_preference": False,
+        "search_tool_memory": False,
+        "include_skill_memory": False,
+        "neighbor_discovery": False,
+        "internet_search": False,
+        "task_timeout_seconds": 600.0,
+        "max_workers": 1,
+        "graph_db_backend": "neo4j-community",
+        "graph_db_uri": "bolt://localhost:7687",
+        "graph_db_user": "neo4j",
+        "graph_db_name": "neo4j",
+        "graph_db_credential_env": "MEMOS_NEO4J_PASSWORD",
+        "vector_db_host": "localhost",
+        "vector_db_port": 6333,
+        "vector_db_credential_env": "MEMOS_QDRANT_API_KEY",
+    }
+    base.update(overrides)
+    return MemOSConfig(**base)
+
+
+def test_memos_registration_declares_product_typed_handler_contract() -> None:
+    """MemOS registration 应锁定 v3 session product typed-handler 契约。"""
+
+    registration = get_method_registration("memos")
+
+    assert registration.config_type is MemOSConfig
+    assert registration.profile_names == frozenset({"smoke", "official-full"})
+    assert registration.protocol_version == "v3"
+    assert registration.profile_relative_path == Path("configs/methods/memos.toml")
+    assert registration.requires_api is True
+    assert registration.provenance_granularity == "none"
+    assert registration.retrieval_evidence_contract_version == "v1"
+    # 首版不声明跨 conversation 并行资格，也不允许 smoke 覆盖 worker 数。
+    assert registration.allow_smoke_worker_override is False
+    assert registration.supports_shared_instance_parallelism is False
+    assert registration.max_workers_getter(_memos_registry_config()) == 1
+
+
+def test_memos_model_inventory_separates_llm_embedding_and_local_reranker() -> None:
+    """model inventory 必须区分 API build LLM / 本地 embedding / 本地 reranker。"""
+
+    registration = get_method_registration("memos")
+    inventory = registration.efficiency_model_inventory_getter(_memos_registry_config())
+
+    assert [model.model_id for model in inventory] == [
+        "memos-build-llm",
+        "memos-embedding",
+        "memos-reranker",
+    ]
+    by_id = {model.model_id: model for model in inventory}
+    assert by_id["memos-build-llm"].execution_mode == "api"
+    assert by_id["memos-build-llm"].model_name == "gpt-4o-mini"
+    assert by_id["memos-embedding"].execution_mode == "local"
+    assert by_id["memos-embedding"].embedding_dimension == 384
+    # cosine_local reranker 是本地算法，不得伪装成 LLM。
+    assert by_id["memos-reranker"].execution_mode == "local"
+    assert by_id["memos-reranker"].model_role == "reranker"
+
+
+def test_memos_build_identity_declares_source_proven_normalization() -> None:
+    """build identity 必须声明 product/controlled embedding 与 source-proven 归一化。"""
+
+    registration = get_method_registration("memos")
+    declaration = registration.build_identity_resolver(
+        _memos_registry_config().to_manifest()
+    )
+
+    assert declaration.implementation_variant == "product"
+    assert declaration.embedding_profile == "controlled_embedding_v1"
+    assert declaration.historical_controlled_build_equivalent_to_current_main is False
+    assert declaration.embedding.dimension == 384
+    assert declaration.embedding.revision_status == "local_unpinned"
+    assert declaration.embedding.normalization == "model_pipeline_l2"
+    assert declaration.embedding.distance == "qdrant-cosine"
+
+
+def test_memos_profiles_differ_in_nothing_but_are_both_serial() -> None:
+    """smoke 与 official_full 的 build/search 参数必须完全相同，且都为单 worker。"""
+
+    import dataclasses
+
+    smoke = load_method_profile("memos", "smoke")
+    official = load_method_profile("memos", "official-full")
+
+    # `profile_name` 是 section 身份，本来就应不同；其余 build/search 参数必须全等。
+    smoke_fields = dataclasses.asdict(smoke)
+    official_fields = dataclasses.asdict(official)
+    assert smoke_fields.pop("profile_name") == "smoke"
+    assert official_fields.pop("profile_name") == "official_full"
+    assert smoke_fields == official_fields
+    assert smoke.max_workers == 1
+    assert official.max_workers == 1
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"llm_model": "gpt-4o"},
+        {"embedding_model_path": "models/other"},
+        {"embedding_dimension": 768},
+        {"search_relativity": 0.9},
+        {"search_dedup": "sim"},
+        {"search_rerank": False},
+        {"task_timeout_seconds": 30.0},
+    ],
+)
+def test_memos_manifest_changes_break_resume_identity(overrides) -> None:
+    """embedding/model/search/lifecycle 任一参数变化都必须改变 resume 身份。"""
+
+    baseline = _memos_registry_config().to_manifest()
+    mutated = _memos_registry_config(**overrides).to_manifest()
+
+    assert baseline != mutated
+
+
+def test_memos_manifest_carries_adapter_version_and_no_absolute_paths() -> None:
+    """manifest 必须带 adapter version，且零 secret / 零绝对路径。"""
+
+    manifest = _memos_registry_config().to_manifest()
+
+    assert manifest["adapter_version"] == "memos-v2.0.25-product-v1"
+    assert manifest["implementation_identity"] == "typed-product-handler"
+    assert manifest["reference_time_effect"] == "declared_but_unwired_v2.0.25"
+    for key, value in manifest.items():
+        assert "password" not in key or key.endswith("_env")
+        assert not (isinstance(value, str) and value.startswith("/"))

@@ -1,0 +1,1528 @@
+"""MemOS v2.0.25 product v3 adapter 强反例。
+
+覆盖四层，全部零真实 API / DB / 模型 / 网络：
+
+1. **新增 patch hunk 的 current MemOS 真实行为**：
+   `APIConfig.get_embedder_config()` 的 `sentence_transformer` 分支与 unknown
+   backend fail-fast；`SingleCubeView._search_text()` 的失败可见性与非法 mode
+   fail-fast——直接调用 patched 生产函数，不 stub 掉被测的 catch 边界；
+2. **五个 benchmark 的生产输入形状**：复用生产
+   `build_turn_events` + `GranularityAggregator("session")`，断言最终
+   `APIADDRequest`（真实 product model）的 role/content/chat_time/message_id；
+3. **retrieve / metric 资格 / clean retry**：真实 `APISearchRequest`、真实
+   readout 映射与真实 evidence 断言；
+4. **namespace / runtime owner / source identity**。
+
+只 fake 外部 I/O 叶子（typed handler 的调用出口），不 fake adapter 自身、
+event stream 聚合器或 product 请求模型。
+"""
+
+from __future__ import annotations
+
+import sys
+import threading
+import types
+from pathlib import Path
+
+import pytest
+
+from memory_benchmark.core import ConfigurationError, ImageRef, Session, Turn
+from memory_benchmark.core.entities import Conversation
+from memory_benchmark.core.provider_protocol import (
+    RetrievalQuery,
+    SessionBatch,
+    TurnEvent,
+)
+from memory_benchmark.methods.memos_adapter import (
+    MEMOS_EMPTY_MEMORY_SENTINEL,
+    MEMOS_REFERENCE_TIME_EFFECT,
+    MemOS,
+    MemOSConfig,
+    _MemosRuntimeOwner,
+    build_memos_namespace,
+    build_memos_source_identity,
+    clean_memos_conversation_state,
+)
+from memory_benchmark.methods.memos_lifecycle import MemosLocalTaskTracker
+from memory_benchmark.runners.event_stream import (
+    GranularityAggregator,
+    build_turn_events,
+)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from test_memos_lifecycle import MEMOS_ROOT, _bootstrap_memos  # noqa: E402
+
+
+# --------------------------------------------------------------------------------------
+# 公共夹具
+# --------------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def memos_product_models(tmp_path_factory):
+    """导入 patched current MemOS 的真实 product 请求模型与被测函数。"""
+
+    if not MEMOS_ROOT.exists():
+        pytest.skip("third_party/methods/MemOS 未就位（local-only）")
+    _bootstrap_memos(tmp_path_factory.mktemp("memos_adapter_home"))
+    # 先经 api 包导入，避免 multi_mem_cube 的部分初始化循环导入。
+    from memos.api.handlers.add_handler import AddHandler  # noqa: F401
+    from memos.api.config import APIConfig
+    from memos.api.product_models import APIADDRequest, APISearchRequest
+    from memos.multi_mem_cube.single_cube import SingleCubeView
+
+    return types.SimpleNamespace(
+        api_config=APIConfig,
+        add_request=APIADDRequest,
+        search_request=APISearchRequest,
+        single_cube_view=SingleCubeView,
+    )
+
+
+def _make_config(**overrides) -> MemOSConfig:
+    """构造与 configs/methods/memos.toml 主 profile 同口径的强类型配置。"""
+
+    base = {
+        "llm_model": "gpt-4o-mini",
+        "embedding_backend": "sentence_transformer",
+        "embedding_model_path": "models/all-MiniLM-L6-v2",
+        "embedding_dimension": 384,
+        "embedding_max_tokens": 8192,
+        "embedding_trust_remote": False,
+        "memory_backend": "tree_text",
+        "reader_backend": "multimodal_struct",
+        "add_async_mode": "async",
+        "add_mode": None,
+        "use_redis_queue": False,
+        "parallel_dispatch": True,
+        "reorganize": False,
+        "reranker_backend": "cosine_local",
+        "search_mode": "fast",
+        "search_relativity": 0.45,
+        "search_dedup": "mmr",
+        "search_rerank": True,
+        "include_preference": False,
+        "search_tool_memory": False,
+        "include_skill_memory": False,
+        "neighbor_discovery": False,
+        "internet_search": False,
+        "task_timeout_seconds": 600.0,
+        "max_workers": 1,
+        "graph_db_backend": "neo4j-community",
+        "graph_db_uri": "bolt://localhost:7687",
+        "graph_db_user": "neo4j",
+        "graph_db_name": "neo4j",
+        "graph_db_credential_env": "MEMOS_NEO4J_PASSWORD",
+        "vector_db_host": "localhost",
+        "vector_db_port": 6333,
+        "vector_db_credential_env": "MEMOS_QDRANT_API_KEY",
+    }
+    base.update(overrides)
+    return MemOSConfig(**base)
+
+
+class _FakeAddHandler:
+    """捕获 adapter 真正发出的 `APIADDRequest`，并驱动 tracker 到终态。"""
+
+    def __init__(self, tracker: MemosLocalTaskTracker, mem_read_label: str):
+        """记录 tracker 与 MEM_READ label。"""
+        self.tracker = tracker
+        self.mem_read_label = mem_read_label
+        self.requests: list = []
+        self.terminal = "completed"
+        self.emit_task_count = 1
+
+    def handle_add_memories(self, add_req):
+        """记录请求，并按配置产生 MEM_READ 终态。"""
+        self.requests.append(add_req)
+        for index in range(self.emit_task_count):
+            item_id = f"{add_req.task_id}-item{index}"
+            self.tracker.task_submitted(
+                task_id=item_id,
+                user_id=add_req.user_id,
+                task_type=self.mem_read_label,
+                business_task_id=add_req.task_id,
+                mem_cube_id=add_req.user_id,
+            )
+            self.tracker.task_started(task_id=item_id, user_id=add_req.user_id)
+            if self.terminal == "completed":
+                self.tracker.task_completed(item_id, add_req.user_id)
+            elif self.terminal == "failed":
+                self.tracker.task_failed(item_id, add_req.user_id, "reader exploded")
+        return types.SimpleNamespace(message="ok")
+
+
+class _FakeSearchHandler:
+    """捕获 adapter 发出的 `APISearchRequest` 并返回产品形状 response。"""
+
+    def __init__(self, response_data):
+        """保存待返回的 product response data。"""
+        self.response_data = response_data
+        self.requests: list = []
+
+    def handle_search_memories(self, search_req):
+        """记录请求并返回预置 response。"""
+        self.requests.append(search_req)
+        return types.SimpleNamespace(data=self.response_data)
+
+
+class _FakeRuntime:
+    """替身 runtime：只替换 typed handler 出口，tracker 与语义仍是真实实现。"""
+
+    def __init__(self, *, config, openai_settings, path_settings, mem_read_label="mem_read"):
+        """构造带真实 tracker 的替身 runtime。"""
+        self.config = config
+        self.identity = config.runtime_identity()
+        self.tracker = MemosLocalTaskTracker()
+        self.add_handler = _FakeAddHandler(self.tracker, mem_read_label)
+        self.search_handler = _FakeSearchHandler({"text_mem": []})
+        self.naive_mem_cube = object()
+        self.scheduler = types.SimpleNamespace(stop_calls=0)
+        self.stop_calls = 0
+        self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        """返回是否已关闭。"""
+        return self._closed
+
+    def close(self) -> None:
+        """模拟真实 close：先拒绝 pending，再 stop 恰好一次。"""
+        if self._closed:
+            return
+        self.tracker.assert_no_pending_tasks()
+        self._closed = True
+        self.stop_calls += 1
+
+
+def _make_provider(tmp_path, *, benchmark_name=None, config=None, runtime_factory=None):
+    """构造挂在独立 runtime owner 上的 MemOS provider。"""
+
+    from memory_benchmark.config import OpenAISettings, load_path_settings
+
+    path_settings = load_path_settings()
+    storage_root = path_settings.project_root / "outputs" / "unit-test-run" / "method_state"
+    provider = MemOS(
+        config=config or _make_config(),
+        path_settings=path_settings,
+        storage_root=storage_root,
+        openai_settings=OpenAISettings(api_key="unit-test-key", base_url=None),
+        benchmark_name=benchmark_name,
+        runtime_owner=_MemosRuntimeOwner(),
+        runtime_factory=runtime_factory or _FakeRuntime,
+    )
+    return provider
+
+
+def _session_batches(conversation: Conversation, isolation_key: str):
+    """用生产事件流 + session 聚合器产出 SessionBatch，不手造漂亮输入。"""
+
+    aggregator = GranularityAggregator("session")
+    events = build_turn_events(conversation, isolation_key)
+    return [
+        signal
+        for signal in aggregator.aggregate(events, isolation_key)
+        if isinstance(signal, SessionBatch)
+    ]
+
+
+def _ingest_all(provider: MemOS, conversation: Conversation, isolation_key: str):
+    """按生产聚合顺序 ingest 全部 session，返回捕获的 APIADDRequest 列表。"""
+
+    for batch in _session_batches(conversation, isolation_key):
+        provider.ingest(batch)
+    return provider._require_runtime().add_handler.requests
+
+
+# --------------------------------------------------------------------------------------
+# 1. 新增 patch hunk：embedder config
+# --------------------------------------------------------------------------------------
+
+
+def test_sentence_transformer_branch_returns_exact_controlled_fields(
+    memos_product_models, monkeypatch
+):
+    """`sentence_transformer` 分支必须精确暴露 factory 原生支持的四个字段。"""
+
+    monkeypatch.setenv("MOS_EMBEDDER_BACKEND", "sentence_transformer")
+    monkeypatch.setenv("MOS_EMBEDDER_MODEL", "models/all-MiniLM-L6-v2")
+    monkeypatch.setenv("MOS_EMBEDDER_DIMS", "384")
+    monkeypatch.setenv("MOS_EMBEDDER_MAX_TOKENS", "8192")
+    monkeypatch.setenv("MOS_EMBEDDER_TRUST_REMOTE_CODE", "false")
+
+    config = memos_product_models.api_config.get_embedder_config()
+
+    assert config == {
+        "backend": "sentence_transformer",
+        "config": {
+            "model_name_or_path": "models/all-MiniLM-L6-v2",
+            "embedding_dims": 384,
+            "max_tokens": 8192,
+            "trust_remote_code": False,
+        },
+    }
+
+
+def test_sentence_transformer_config_is_accepted_by_real_factory_schema(
+    memos_product_models, monkeypatch
+):
+    """新分支产出的 config 必须能通过 current EmbedderConfigFactory 校验。"""
+
+    monkeypatch.setenv("MOS_EMBEDDER_BACKEND", "sentence_transformer")
+    monkeypatch.setenv("MOS_EMBEDDER_MODEL", "models/all-MiniLM-L6-v2")
+    monkeypatch.setenv("MOS_EMBEDDER_DIMS", "384")
+    monkeypatch.setenv("MOS_EMBEDDER_MAX_TOKENS", "8192")
+
+    from memos.configs.embedder import EmbedderConfigFactory
+
+    validated = EmbedderConfigFactory.model_validate(
+        memos_product_models.api_config.get_embedder_config()
+    )
+
+    assert validated.backend == "sentence_transformer"
+    assert validated.config.model_name_or_path == "models/all-MiniLM-L6-v2"
+    assert validated.config.embedding_dims == 384
+
+
+def test_unknown_embedder_backend_fails_fast(memos_product_models, monkeypatch):
+    """未知 backend 不得继续静默落入 Ollama。"""
+
+    monkeypatch.setenv("MOS_EMBEDDER_BACKEND", "totally-unknown-backend")
+
+    with pytest.raises(ValueError, match="Unsupported MOS_EMBEDDER_BACKEND"):
+        memos_product_models.api_config.get_embedder_config()
+
+
+def test_existing_ollama_and_universal_branches_are_preserved(
+    memos_product_models, monkeypatch
+):
+    """既有 ollama（含 env 未设的默认）与 universal_api 分支必须对象守恒。"""
+
+    monkeypatch.delenv("MOS_EMBEDDER_BACKEND", raising=False)
+    monkeypatch.delenv("MOS_EMBEDDER_MODEL", raising=False)
+    monkeypatch.delenv("OLLAMA_API_BASE", raising=False)
+    default_config = memos_product_models.api_config.get_embedder_config()
+    assert default_config == {
+        "backend": "ollama",
+        "config": {
+            "model_name_or_path": "nomic-embed-text:latest",
+            "api_base": "http://localhost:11434",
+        },
+    }
+
+    monkeypatch.setenv("MOS_EMBEDDER_BACKEND", "ollama")
+    assert memos_product_models.api_config.get_embedder_config() == default_config
+
+    monkeypatch.setenv("MOS_EMBEDDER_BACKEND", "universal_api")
+    universal = memos_product_models.api_config.get_embedder_config()
+    assert universal["backend"] == "universal_api"
+    assert universal["config"]["provider"] == "openai"
+    assert universal["config"]["model_name_or_path"] == "text-embedding-3-large"
+
+
+# --------------------------------------------------------------------------------------
+# 2. 新增 patch hunk：search 失败可见性
+# --------------------------------------------------------------------------------------
+
+
+def _search_text_probe(memos_product_models, *, mode, fast_search):
+    """用最小替身对象直接驱动 patched `_search_text`，不绕开被测 catch。"""
+
+    view = object.__new__(memos_product_models.single_cube_view)
+    view.logger = types.SimpleNamespace(error=lambda *a, **kw: None)
+    view._fast_search = fast_search
+    return memos_product_models.single_cube_view._search_text(
+        view,
+        search_req=types.SimpleNamespace(),
+        user_context=types.SimpleNamespace(),
+        search_mode=mode,
+    )
+
+
+def test_search_backend_failure_propagates_instead_of_zero_hit(memos_product_models):
+    """真实 graph/vector 失败必须上抛，不得被伪装成合法 zero-hit。"""
+
+    def _boom(search_req, user_context):
+        """模拟 backend 抛错。"""
+        raise RuntimeError("qdrant unavailable")
+
+    with pytest.raises(RuntimeError, match="qdrant unavailable"):
+        _search_text_probe(memos_product_models, mode="fast", fast_search=_boom)
+
+
+def test_legal_empty_search_result_is_still_zero_hit(memos_product_models):
+    """合法的 backend 空结果仍是 zero-hit，不受失败可见性 patch 影响。"""
+
+    result = _search_text_probe(
+        memos_product_models,
+        mode="fast",
+        fast_search=lambda search_req, user_context: [],
+    )
+
+    assert result == []
+
+
+def test_unsupported_search_mode_fails_fast(memos_product_models):
+    """非法 search mode 不得返回 []。"""
+
+    with pytest.raises(ValueError, match="Unsupported search mode"):
+        _search_text_probe(
+            memos_product_models,
+            mode="not-a-mode",
+            fast_search=lambda search_req, user_context: [],
+        )
+
+
+# --------------------------------------------------------------------------------------
+# 3. lazy import 与 runtime 单例
+# --------------------------------------------------------------------------------------
+
+
+def test_importing_adapter_does_not_import_server_router():
+    """adapter import 不得触发 `memos.api.routers.server_router`。"""
+
+    import sys
+
+    assert "memos.api.routers.server_router" not in sys.modules
+
+
+def test_runtime_owner_reuses_same_config_and_rejects_conflict(tmp_path):
+    """同 config 复用同一 runtime；冲突 config fail-fast。"""
+
+    from memory_benchmark.config import OpenAISettings, load_path_settings
+
+    owner = _MemosRuntimeOwner()
+    settings = load_path_settings()
+    openai = OpenAISettings(api_key="k", base_url=None)
+    config = _make_config()
+
+    first = owner.acquire(
+        config=config,
+        openai_settings=openai,
+        path_settings=settings,
+        runtime_factory=_FakeRuntime,
+    )
+    second = owner.acquire(
+        config=_make_config(),
+        openai_settings=openai,
+        path_settings=settings,
+        runtime_factory=_FakeRuntime,
+    )
+    assert first is second
+
+    with pytest.raises(ConfigurationError, match="different config identity"):
+        owner.acquire(
+            config=_make_config(search_relativity=0.9),
+            openai_settings=openai,
+            path_settings=settings,
+            runtime_factory=_FakeRuntime,
+        )
+
+
+def test_runtime_owner_refuses_to_reuse_closed_runtime():
+    """已关闭 runtime 不得跨 run 复用。"""
+
+    from memory_benchmark.config import OpenAISettings, load_path_settings
+
+    owner = _MemosRuntimeOwner()
+    settings = load_path_settings()
+    openai = OpenAISettings(api_key="k", base_url=None)
+    config = _make_config()
+
+    runtime = owner.acquire(
+        config=config,
+        openai_settings=openai,
+        path_settings=settings,
+        runtime_factory=_FakeRuntime,
+    )
+    runtime.close()
+    owner._runtime = runtime  # 模拟 close 后仍被持有的边界
+
+    with pytest.raises(ConfigurationError, match="already been closed"):
+        owner.acquire(
+            config=config,
+            openai_settings=openai,
+            path_settings=settings,
+            runtime_factory=_FakeRuntime,
+        )
+
+
+def test_runtime_owner_is_thread_safe():
+    """并发 acquire 只能产生一个 runtime。"""
+
+    from memory_benchmark.config import OpenAISettings, load_path_settings
+
+    owner = _MemosRuntimeOwner()
+    settings = load_path_settings()
+    openai = OpenAISettings(api_key="k", base_url=None)
+    config = _make_config()
+    seen: list = []
+    barrier = threading.Barrier(8)
+
+    def _acquire():
+        """并发获取 runtime。"""
+        barrier.wait()
+        seen.append(
+            owner.acquire(
+                config=config,
+                openai_settings=openai,
+                path_settings=settings,
+                runtime_factory=_FakeRuntime,
+            )
+        )
+
+    threads = [threading.Thread(target=_acquire) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len({id(runtime) for runtime in seen}) == 1
+
+
+def test_provider_builds_one_runtime_shared_by_add_and_search(tmp_path):
+    """一个 provider 只构造一个 runtime，Add/Search 共用同一 tracker。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    conversation = _longmemeval_conversation()
+    _ingest_all(provider, conversation, "run1_conv1")
+    runtime_after_add = provider._require_runtime()
+
+    provider._require_runtime().search_handler.response_data = {"text_mem": []}
+    provider.retrieve(
+        RetrievalQuery(
+            query_text="q",
+            isolation_key="run1_conv1",
+            question_time=None,
+            top_k=5,
+            purpose="qa",
+        )
+    )
+
+    assert provider._require_runtime() is runtime_after_add
+    assert runtime_after_add.add_handler.tracker is runtime_after_add.tracker
+
+
+# --------------------------------------------------------------------------------------
+# 4. lifecycle：完成门与 cleanup
+# --------------------------------------------------------------------------------------
+
+
+def test_one_session_batch_emits_one_add_request_and_one_terminal(tmp_path):
+    """一个 SessionBatch 只发一个 APIADDRequest / 一个 business task / 一条终态。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    conversation = _longmemeval_conversation()
+    batches = _session_batches(conversation, "run1_conv1")
+    result = provider.ingest(batches[0])
+
+    runtime = provider._require_runtime()
+    assert len(runtime.add_handler.requests) == 1
+    assert result.metadata["terminal_task_count"] == 1
+    assert runtime.add_handler.requests[0].task_id == result.metadata["business_task_id"]
+
+
+def test_failed_background_task_propagates(tmp_path):
+    """后台 MEM_READ 失败必须原样 fail-fast。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    batches = _session_batches(_longmemeval_conversation(), "run1_conv1")
+    provider._require_runtime().add_handler.terminal = "failed"
+
+    with pytest.raises(ConfigurationError, match="失败"):
+        provider.ingest(batches[0])
+
+
+def test_missing_background_task_times_out(tmp_path):
+    """add 未提交后台任务时必须超时 fail-fast，不得静默成功。"""
+
+    provider = _make_provider(
+        tmp_path,
+        benchmark_name="longmemeval",
+        config=_make_config(task_timeout_seconds=0.05),
+    )
+    batches = _session_batches(_longmemeval_conversation(), "run1_conv1")
+    provider._require_runtime().add_handler.emit_task_count = 0
+
+    with pytest.raises(ConfigurationError, match="从未登记任何 task"):
+        provider.ingest(batches[0])
+
+
+def test_multiple_terminals_for_one_business_task_fails_fast(tmp_path):
+    """一个 business task 出现多条 MEM_READ 终态必须 fail-fast。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    batches = _session_batches(_longmemeval_conversation(), "run1_conv1")
+    provider._require_runtime().add_handler.emit_task_count = 2
+
+    with pytest.raises(ConfigurationError, match="数量超出预期"):
+        provider.ingest(batches[0])
+
+
+def test_cleanup_stops_scheduler_exactly_once_and_is_idempotent(tmp_path):
+    """cleanup 恰好 stop 一次；重复 cleanup 不二次 stop。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    _ingest_all(provider, _longmemeval_conversation(), "run1_conv1")
+    runtime = provider._require_runtime()
+
+    provider.cleanup()
+    provider.cleanup()
+    provider.cleanup()
+
+    assert runtime.stop_calls == 1
+
+
+def test_cleanup_refuses_to_close_with_pending_tasks(tmp_path):
+    """仍有未完成 task 时 cleanup 必须拒绝静默关闭。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    runtime = provider._require_runtime()
+    runtime.tracker.task_submitted(
+        task_id="dangling",
+        user_id=provider._namespace("run1_conv1"),
+        task_type="mem_read",
+        business_task_id="biz",
+        mem_cube_id=provider._namespace("run1_conv1"),
+    )
+
+    with pytest.raises(ConfigurationError, match="拒绝静默关闭"):
+        provider.cleanup()
+
+
+# --------------------------------------------------------------------------------------
+# 5. 五个 benchmark 的生产输入形状
+# --------------------------------------------------------------------------------------
+
+
+def _locomo_conversation() -> Conversation:
+    """LoCoMo：speaker_b 首发，覆盖正文+caption / caption-only / 多 caption。"""
+
+    return Conversation(
+        conversation_id="locomo1",
+        metadata={"speaker_a": "Caroline", "speaker_b": "Melanie"},
+        sessions=[
+            Session(
+                session_id="s1",
+                session_time="2023-05-01 10:00:00",
+                turns=[
+                    Turn(turn_id="t1", speaker="Melanie", content="Hi there"),
+                    Turn(
+                        turn_id="t2",
+                        speaker="Caroline",
+                        content="Look at this",
+                        images=[ImageRef(image_id="i1", path="/x/a.jpg?q=1", caption="a red bike")],
+                    ),
+                    Turn(
+                        turn_id="t3",
+                        speaker="Melanie",
+                        content="",
+                        images=[ImageRef(image_id="i2", path="/x/b.jpg", caption="a blue car")],
+                    ),
+                    Turn(
+                        turn_id="t4",
+                        speaker="Caroline",
+                        content="Two of them",
+                        images=[
+                            ImageRef(image_id="i3", path="/x/c.jpg", caption="first"),
+                            ImageRef(image_id="i4", path="/x/d.jpg", caption="second"),
+                        ],
+                    ),
+                ],
+            )
+        ],
+    )
+
+
+def _longmemeval_conversation() -> Conversation:
+    """LongMemEval：assistant 开头、连续同 role、奇数尾、singleton session。"""
+
+    return Conversation(
+        conversation_id="lme1",
+        sessions=[
+            Session(
+                session_id="s1",
+                session_time="2023-01-01T00:00:00",
+                turns=[
+                    Turn(turn_id="t1", speaker="assistant", normalized_role="assistant", content="A1"),
+                    Turn(turn_id="t2", speaker="user", normalized_role="user", content="U1"),
+                    Turn(turn_id="t3", speaker="user", normalized_role="user", content="U2"),
+                    Turn(
+                        turn_id="t4",
+                        speaker="assistant",
+                        normalized_role="assistant",
+                        content="A2",
+                        turn_time="2023-01-01T00:05:00",
+                    ),
+                    Turn(turn_id="t5", speaker="user", normalized_role="user", content="U3"),
+                ],
+            ),
+            Session(
+                session_id="s2",
+                turns=[
+                    Turn(turn_id="t6", speaker="user", normalized_role="user", content="solo"),
+                ],
+            ),
+        ],
+    )
+
+
+def _membench_conversation() -> Conversation:
+    """MemBench：尾部 place/time 原文 + 100k noise 无时间。"""
+
+    return Conversation(
+        conversation_id="mb1",
+        sessions=[
+            Session(
+                session_id="s1",
+                turns=[
+                    Turn(
+                        turn_id="t1",
+                        speaker="user",
+                        normalized_role="user",
+                        content="I went hiking. (Place: Alps, Time: 2023-06-01)",
+                        turn_time="2023-06-01",
+                    ),
+                    Turn(
+                        turn_id="t2",
+                        speaker="assistant",
+                        normalized_role="assistant",
+                        content="Nice!",
+                        turn_time="2023-06-01",
+                    ),
+                    Turn(turn_id="t3", speaker="user", normalized_role="user", content="noise turn"),
+                ],
+            )
+        ],
+    )
+
+
+def _beam_conversation() -> Conversation:
+    """BEAM：正常 pair + 已知 dangling 尾部。"""
+
+    return Conversation(
+        conversation_id="beam1",
+        sessions=[
+            Session(
+                session_id="s1",
+                session_time="2024-02-02",
+                turns=[
+                    Turn(turn_id="raw_9", speaker="user", normalized_role="user", content="B-U1"),
+                    Turn(turn_id="raw_3", speaker="assistant", normalized_role="assistant", content="B-A1"),
+                    Turn(turn_id="raw_7", speaker="assistant", normalized_role="assistant", content="B-dangling"),
+                ],
+            )
+        ],
+    )
+
+
+def _halumem_conversation() -> Conversation:
+    """HaluMem：整 session 一批。"""
+
+    return Conversation(
+        conversation_id="hm1",
+        sessions=[
+            Session(
+                session_id="s1",
+                session_time="2024-03-03",
+                turns=[
+                    Turn(turn_id="t1", speaker="user", normalized_role="user", content="H-U1"),
+                    Turn(turn_id="t2", speaker="assistant", normalized_role="assistant", content="H-A1"),
+                ],
+            ),
+            Session(
+                session_id="s2",
+                session_time="2024-03-04",
+                turns=[
+                    Turn(turn_id="t3", speaker="user", normalized_role="user", content="H-U2"),
+                ],
+            ),
+        ],
+    )
+
+
+def test_locomo_payload_uses_declared_roles_real_names_and_shared_caption(tmp_path):
+    """LoCoMo：固定 A/B role 不随首发漂移，真实 speaker 前缀 + 共享 caption 契约。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="locomo")
+    requests = _ingest_all(provider, _locomo_conversation(), "run1_locomo1")
+
+    assert len(requests) == 1
+    messages = requests[0].messages
+    assert [m["role"] for m in messages] == ["assistant", "user", "assistant", "user"]
+    assert messages[0]["content"] == "Melanie: Hi there"
+    assert messages[1]["content"] == (
+        "Caroline: Look at this [Sharing image that shows: a red bike]"
+    )
+    # caption-only turn 仍非空，且不带 path/query。
+    assert messages[2]["content"] == "Melanie: [Sharing image that shows: a blue car]"
+    assert "a.jpg" not in messages[1]["content"]
+    assert "?q=1" not in messages[1]["content"]
+    # 多 caption 按顺序全部保留，且没有事件流的 `(image description: ...)` 双拼。
+    assert messages[3]["content"] == (
+        "Caroline: Two of them [Sharing image that shows: first] "
+        "[Sharing image that shows: second]"
+    )
+    assert "(image description:" not in " ".join(m["content"] for m in messages)
+    assert all(m["chat_time"] == "2023-05-01 10:00:00" for m in messages)
+    assert [m["message_id"] for m in messages] == ["t1", "t2", "t3", "t4"]
+
+
+def test_locomo_role_mapping_is_independent_of_who_speaks_first(tmp_path):
+    """speaker_a 首发与 speaker_b 首发必须得到同一份 speaker→role 映射。"""
+
+    conversation = _locomo_conversation()
+    conversation.sessions[0].turns = list(reversed(conversation.sessions[0].turns))
+    provider = _make_provider(tmp_path, benchmark_name="locomo")
+    requests = _ingest_all(provider, conversation, "run1_locomo1")
+
+    roles = {m["message_id"]: m["role"] for m in requests[0].messages}
+    assert roles["t1"] == "assistant"  # Melanie == speaker_b
+    assert roles["t2"] == "user"  # Caroline == speaker_a
+
+
+def test_locomo_undeclared_third_speaker_fails_fast(tmp_path):
+    """未声明的第三 speaker 一律 fail-fast。"""
+
+    conversation = _locomo_conversation()
+    conversation.sessions[0].turns.append(
+        Turn(turn_id="t5", speaker="Stranger", content="who am I")
+    )
+    provider = _make_provider(tmp_path, benchmark_name="locomo")
+
+    with pytest.raises(ConfigurationError, match="not declared in speaker_a/speaker_b"):
+        _ingest_all(provider, conversation, "run1_locomo1")
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"speaker_a": "", "speaker_b": "B"},
+        {"speaker_a": "A"},
+        {"speaker_a": "Same", "speaker_b": "Same"},
+    ],
+)
+def test_locomo_missing_or_identical_speaker_declaration_fails_fast(tmp_path, metadata):
+    """缺声明或两者相同必须 fail-fast。"""
+
+    conversation = _locomo_conversation()
+    conversation.metadata = metadata
+    provider = _make_provider(tmp_path, benchmark_name="locomo")
+
+    with pytest.raises(ConfigurationError):
+        _ingest_all(provider, conversation, "run1_locomo1")
+
+
+def test_longmemeval_preserves_original_order_without_repairing_pairs(tmp_path):
+    """assistant 开头 / 连续同 role / 奇数尾 / singleton 全部原样保留。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    requests = _ingest_all(provider, _longmemeval_conversation(), "run1_lme1")
+
+    assert len(requests) == 2  # 同 session 一个 batch，跨 session 不合并
+    first = requests[0].messages
+    assert [m["role"] for m in first] == [
+        "assistant",
+        "user",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert [m["message_id"] for m in first] == ["t1", "t2", "t3", "t4", "t5"]
+    # 逐 turn time 优先，其余回落 session time。
+    assert first[3]["chat_time"] == "2023-01-01T00:05:00"
+    assert first[0]["chat_time"] == "2023-01-01T00:00:00"
+    # 无 turn time 也无 session time 时写显式 None，key 仍在。
+    second = requests[1].messages
+    assert len(second) == 1
+    assert "chat_time" in second[0]
+    assert second[0]["chat_time"] is None
+
+
+def test_membench_keeps_place_time_suffix_and_extracts_chat_time(tmp_path):
+    """MemBench 尾注原文保留，同时 canonical 时间进入 chat_time；无时间写 None。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="membench")
+    requests = _ingest_all(provider, _membench_conversation(), "run1_mb1")
+
+    messages = requests[0].messages
+    assert messages[0]["content"] == "I went hiking. (Place: Alps, Time: 2023-06-01)"
+    assert messages[0]["chat_time"] == "2023-06-01"
+    # 没有二次拼接的时间 header。
+    assert not messages[0]["content"].startswith("[Turn time]")
+    assert messages[2]["chat_time"] is None
+
+
+def test_beam_keeps_canonical_turn_ids_and_dangling_tail(tmp_path):
+    """BEAM：canonical turn id 进 message_id，dangling 尾部不被重排或配对。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="beam")
+    requests = _ingest_all(provider, _beam_conversation(), "run1_beam1")
+
+    messages = requests[0].messages
+    assert [m["message_id"] for m in messages] == ["raw_9", "raw_3", "raw_7"]
+    assert [m["role"] for m in messages] == ["user", "assistant", "assistant"]
+
+
+def test_halumem_sends_one_batch_per_session_with_session_local_task(tmp_path):
+    """HaluMem：整 session 一批、task 与 session 一一对应，且不上报 session report。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="halumem")
+    requests = _ingest_all(provider, _halumem_conversation(), "run1_hm1")
+
+    assert len(requests) == 2
+    assert [r.session_id for r in requests] == ["s1", "s2"]
+    assert len({r.task_id for r in requests}) == 2
+    assert provider.session_memory_report is False
+    assert provider.end_session(
+        __import__("memory_benchmark.core.provider_protocol", fromlist=["SessionRef"]).SessionRef(
+            isolation_key="run1_hm1", session_id="s1"
+        )
+    ) is None
+
+
+@pytest.mark.parametrize(
+    "conversation_factory,benchmark_name,isolation_key",
+    [
+        (_locomo_conversation, "locomo", "run1_locomo1"),
+        (_longmemeval_conversation, "longmemeval", "run1_lme1"),
+        (_membench_conversation, "membench", "run1_mb1"),
+        (_beam_conversation, "beam", "run1_beam1"),
+        (_halumem_conversation, "halumem", "run1_hm1"),
+    ],
+)
+def test_every_canonical_event_is_sent_exactly_once_without_leakage(
+    tmp_path, conversation_factory, benchmark_name, isolation_key
+):
+    """五格共同契约：每个非空 canonical event 恰好一次、无跨 session、无私有 key。"""
+
+    conversation = conversation_factory()
+    provider = _make_provider(tmp_path, benchmark_name=benchmark_name)
+    requests = _ingest_all(provider, conversation, isolation_key)
+
+    expected_ids = [
+        turn.turn_id for session in conversation.sessions for turn in session.turns
+    ]
+    sent_ids = [m["message_id"] for request in requests for m in request.messages]
+    assert sent_ids == expected_ids
+
+    # 每个 request 只携带自己 session 的 turn。
+    for request, session in zip(requests, conversation.sessions, strict=True):
+        assert [m["message_id"] for m in request.messages] == [
+            turn.turn_id for turn in session.turns
+        ]
+        assert request.session_id == session.session_id
+        # chat_time key 始终存在。
+        assert all("chat_time" in m for m in request.messages)
+
+    forbidden = {"gold_answers", "evidence", "answer", "answer_session_ids"}
+    for request in requests:
+        payload = request.model_dump()
+        assert forbidden.isdisjoint(payload)
+        assert not (request.info or {})
+
+
+def test_empty_content_event_fails_fast_instead_of_placeholder(tmp_path):
+    """空 content event 必须 fail-fast，不制造 placeholder，也不走上游丢字段分支。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    batch = SessionBatch(
+        isolation_key="run1_conv1",
+        session_id="s1",
+        events=(
+            TurnEvent(
+                role="user",
+                speaker_name="user",
+                content="placeholder",
+                timestamp=None,
+                isolation_key="run1_conv1",
+                session_id="s1",
+                turn_id="t1",
+                metadata={"original_content": "   ", "turn_images": []},
+            ),
+        ),
+    )
+
+    with pytest.raises(ConfigurationError, match="empty turn content"):
+        provider.ingest(batch)
+
+
+def test_non_locomo_rejects_non_canonical_role(tmp_path):
+    """非 LoCoMo 只接受 canonical user/assistant role。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    batch = SessionBatch(
+        isolation_key="run1_conv1",
+        session_id="s1",
+        events=(
+            TurnEvent(
+                role="Melanie",
+                speaker_name="Melanie",
+                content="hello",
+                timestamp=None,
+                isolation_key="run1_conv1",
+                session_id="s1",
+                turn_id="t1",
+                metadata={},
+            ),
+        ),
+    )
+
+    with pytest.raises(ConfigurationError, match="canonical user/assistant roles"):
+        provider.ingest(batch)
+
+
+def test_provider_rejects_non_session_units(tmp_path):
+    """provider 只接受 SessionBatch。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    event = TurnEvent(
+        role="user",
+        speaker_name="user",
+        content="hi",
+        timestamp=None,
+        isolation_key="run1_conv1",
+        session_id="s1",
+        turn_id="t1",
+    )
+
+    with pytest.raises(ConfigurationError, match="only accepts SessionBatch"):
+        provider.ingest(event)
+
+
+def test_add_request_locks_product_async_lifecycle_fields(tmp_path):
+    """APIADDRequest 必须锁死 namespace / cube / async 生命周期字段。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    requests = _ingest_all(provider, _longmemeval_conversation(), "run1_lme1")
+    namespace = provider._namespace("run1_lme1")
+
+    request = requests[0]
+    assert request.user_id == namespace
+    assert request.writable_cube_ids == [namespace]
+    assert request.async_mode == "async"
+    assert request.mode is None
+
+
+# --------------------------------------------------------------------------------------
+# 6. retrieve / readout / metric 资格
+# --------------------------------------------------------------------------------------
+
+
+def _product_search_data():
+    """构造两个 bucket、多条 memory 的产品形状 response data。"""
+
+    return {
+        "text_mem": [
+            {
+                "cube_id": "cube-a",
+                "total_nodes": 2,
+                "memories": [
+                    {
+                        "id": "m1",
+                        "memory": "Alice likes hiking",
+                        "metadata": {
+                            "relativity": 0.91,
+                            "memory_type": "LongTermMemory",
+                            "created_at": "2024-01-01T00:00:00",
+                            "embedding": [0.1] * 384,
+                            "sources": [
+                                {"message_id": "t1", "role": "user"},
+                                {"message_id": "t1", "role": "user"},
+                                {"message_id": "t2", "role": "assistant"},
+                            ],
+                        },
+                    },
+                    {
+                        "id": "m2",
+                        "memory": "Alice lives in Berlin",
+                        "metadata": {
+                            "relativity": 0.42,
+                            "memory_type": "UserMemory",
+                            "embedding": [],
+                            "sources": [],
+                        },
+                    },
+                ],
+            },
+            {
+                "cube_id": "cube-b",
+                "total_nodes": 1,
+                "memories": [
+                    {
+                        "id": "m3",
+                        "memory": "Alice works nights",
+                        "metadata": {"relativity": None, "memory_type": "WorkingMemory"},
+                    }
+                ],
+            },
+        ]
+    }
+
+
+def test_search_request_locks_all_product_switches(tmp_path):
+    """APISearchRequest 的 namespace/top_k/六个开关/空 chat_history/reference_time 精确。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    runtime = provider._require_runtime()
+    runtime.search_handler.response_data = {"text_mem": []}
+
+    provider.retrieve(
+        RetrievalQuery(
+            query_text="where does Alice live",
+            isolation_key="run1_conv1",
+            question_time="2024-05-05T00:00:00",
+            top_k=7,
+            purpose="qa",
+        )
+    )
+
+    request = runtime.search_handler.requests[0]
+    namespace = provider._namespace("run1_conv1")
+    assert request.query == "where does Alice live"
+    assert request.user_id == namespace
+    assert request.readable_cube_ids == [namespace]
+    assert request.mode == "fast"
+    assert request.top_k == 7
+    assert request.relativity == 0.45
+    assert request.dedup == "mmr"
+    assert request.rerank is True
+    assert request.include_preference is False
+    assert request.search_tool_memory is False
+    assert request.include_skill_memory is False
+    assert request.neighbor_discovery is False
+    assert request.internet_search is False
+    assert request.chat_history == []
+    assert request.filter is None
+    assert request.session_id is None
+    assert request.reference_time == "2024-05-05T00:00:00"
+
+
+def test_retrieve_flattens_buckets_in_product_order_without_resorting(tmp_path):
+    """两个 bucket 按产品返回顺序扁平化，不二次排序、不截断。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    provider._require_runtime().search_handler.response_data = _product_search_data()
+
+    result = provider.retrieve(
+        RetrievalQuery(
+            query_text="q",
+            isolation_key="run1_conv1",
+            question_time=None,
+            top_k=2,
+            purpose="qa",
+        )
+    )
+
+    assert [item.item_id for item in result.items] == ["m1", "m2", "m3"]
+    assert [item.score for item in result.items] == [0.91, 0.42, None]
+    assert result.items[0].timestamp == "2024-01-01T00:00:00"
+    assert result.items[1].timestamp is None
+    assert result.formatted_memory == (
+        "Alice likes hiking\n\nAlice lives in Berlin\n\nAlice works nights"
+    )
+    assert result.metadata["reference_time_effect"] == MEMOS_REFERENCE_TIME_EFFECT
+
+
+def test_retrieve_dedups_source_message_ids_stably(tmp_path):
+    """sources 中重复 message_id 稳定去重并保持产品顺序。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    provider._require_runtime().search_handler.response_data = _product_search_data()
+
+    result = provider.retrieve(
+        RetrievalQuery(
+            query_text="q",
+            isolation_key="run1_conv1",
+            question_time=None,
+            top_k=5,
+            purpose="qa",
+        )
+    )
+
+    assert result.items[0].source_turn_ids == ("t1", "t2")
+
+
+def test_retrieve_strips_embeddings_from_artifact_metadata(tmp_path):
+    """embedding 与不可序列化对象不得进入 artifact。"""
+
+    data = _product_search_data()
+    data["text_mem"][0]["memories"][0]["metadata"]["opaque"] = object()
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    provider._require_runtime().search_handler.response_data = data
+
+    result = provider.retrieve(
+        RetrievalQuery(
+            query_text="q",
+            isolation_key="run1_conv1",
+            question_time=None,
+            top_k=5,
+            purpose="qa",
+        )
+    )
+
+    assert "embedding" not in result.items[0].metadata
+    assert "opaque" not in result.items[0].metadata
+    assert result.items[0].metadata["memory_type"] == "LongTermMemory"
+
+
+def test_zero_hit_returns_sentinel_and_empty_items(tmp_path):
+    """零命中返回非空 sentinel + 空 items。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    provider._require_runtime().search_handler.response_data = {
+        "text_mem": [{"cube_id": "c", "memories": [], "total_nodes": 0}]
+    }
+
+    result = provider.retrieve(
+        RetrievalQuery(
+            query_text="q",
+            isolation_key="run1_conv1",
+            question_time=None,
+            top_k=5,
+            purpose="qa",
+        )
+    )
+
+    assert result.items == ()
+    assert result.formatted_memory == MEMOS_EMPTY_MEMORY_SENTINEL
+
+
+def test_backend_failure_does_not_become_zero_hit(tmp_path):
+    """search handler 抛错必须传播，不得退化成 zero-hit。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+
+    def _boom(search_req):
+        """模拟 backend 失败。"""
+        raise RuntimeError("neo4j down")
+
+    provider._require_runtime().search_handler.handle_search_memories = _boom
+
+    with pytest.raises(RuntimeError, match="neo4j down"):
+        provider.retrieve(
+            RetrievalQuery(
+                query_text="q",
+                isolation_key="run1_conv1",
+                question_time=None,
+                top_k=5,
+                purpose="qa",
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "mutate,expected",
+    [
+        (lambda d: d["text_mem"][0]["memories"][0].pop("id"), "missing a non-empty id"),
+        (
+            lambda d: d["text_mem"][0]["memories"][0].update({"memory": "  "}),
+            "missing non-empty memory text",
+        ),
+        (
+            lambda d: d["text_mem"][0]["memories"][0]["metadata"].update(
+                {"relativity": "high"}
+            ),
+            "non-numeric relativity",
+        ),
+        (lambda d: d.update({"text_mem": {"not": "a list"}}), "must be a list"),
+        (lambda d: d.update({"text_mem": ["not-a-mapping"]}), "must be a mapping"),
+    ],
+)
+def test_malformed_search_payload_fails_fast(tmp_path, mutate, expected):
+    """id/content 缺失、非数值 score、非法 bucket shape 一律 fail-fast。"""
+
+    data = _product_search_data()
+    mutate(data)
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    provider._require_runtime().search_handler.response_data = data
+
+    with pytest.raises(ConfigurationError, match=expected):
+        provider.retrieve(
+            RetrievalQuery(
+                query_text="q",
+                isolation_key="run1_conv1",
+                question_time=None,
+                top_k=5,
+                purpose="qa",
+            )
+        )
+
+
+@pytest.mark.parametrize("response_data", [_product_search_data(), {"text_mem": []}])
+def test_retrieval_evidence_is_pending_regardless_of_hits(tmp_path, response_data):
+    """无论命中与否，两项 evidence 都是 pending / provenance none。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    provider._require_runtime().search_handler.response_data = response_data
+
+    result = provider.retrieve(
+        RetrievalQuery(
+            query_text="q",
+            isolation_key="run1_conv1",
+            question_time=None,
+            top_k=5,
+            purpose="qa",
+        )
+    )
+
+    evidence = result.evidence
+    assert evidence.semantic_provenance.status == "pending"
+    assert (
+        evidence.semantic_provenance.reason_code
+        == "memos_generated_memory_semantic_lineage_unverified"
+    )
+    assert evidence.provenance_granularity == "none"
+    assert evidence.stable_ranking.status == "pending"
+    assert (
+        evidence.stable_ranking.reason_code
+        == "memos_product_rerank_stability_unverified"
+    )
+
+
+def test_memory_update_probe_uses_declared_top_k(tmp_path):
+    """HaluMem update probe 忠实使用 query.top_k，不在 adapter 写 benchmark 特判。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="halumem")
+    runtime = provider._require_runtime()
+    runtime.search_handler.response_data = {"text_mem": []}
+
+    provider.retrieve(
+        RetrievalQuery(
+            query_text="probe",
+            isolation_key="run1_hm1",
+            question_time=None,
+            top_k=13,
+            purpose="memory_update_probe",
+        )
+    )
+
+    assert runtime.search_handler.requests[0].top_k == 13
+
+
+# --------------------------------------------------------------------------------------
+# 7. clean retry
+# --------------------------------------------------------------------------------------
+
+
+class _CleanProbe:
+    """记录 delete/get 调用的 namespace-scoped clean 替身。"""
+
+    def __init__(self, *, delete_status="success", remaining=0):
+        """配置 delete 结果与 readback 剩余条数。"""
+        self.delete_status = delete_status
+        self.remaining = remaining
+        self.delete_requests: list = []
+        self.get_requests: list = []
+
+    def delete(self, request, mem_cube):
+        """模拟 handle_delete_memories。"""
+        self.delete_requests.append(request)
+        return types.SimpleNamespace(data={"status": self.delete_status})
+
+    def get(self, request, mem_cube):
+        """模拟 handle_get_memories。"""
+        self.get_requests.append(request)
+        memories = [{"id": f"m{i}"} for i in range(self.remaining)]
+        return types.SimpleNamespace(
+            data={
+                "text_mem": [
+                    {
+                        "cube_id": request.mem_cube_id,
+                        "memories": memories,
+                        "total_nodes": self.remaining,
+                    }
+                ]
+            }
+        )
+
+
+def _install_clean_probe(monkeypatch, probe: _CleanProbe) -> None:
+    """把 clean probe 装到真实 memory_handler 模块入口上。"""
+
+    import memos.api.handlers.memory_handler as memory_handler
+
+    monkeypatch.setattr(memory_handler, "handle_delete_memories", probe.delete)
+    monkeypatch.setattr(memory_handler, "handle_get_memories", probe.get)
+
+
+def test_clean_deletes_only_target_namespace_and_verifies_empty(
+    tmp_path, memos_product_models, monkeypatch
+):
+    """clean 只删目标 namespace，且以 readback 为空作为后置条件。"""
+
+    probe = _CleanProbe()
+    _install_clean_probe(monkeypatch, probe)
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    namespace = provider._namespace("run1_conv1")
+
+    clean_memos_conversation_state(provider=provider, isolation_key="run1_conv1")
+
+    delete_request = probe.delete_requests[0]
+    assert delete_request.writable_cube_ids == [namespace]
+    assert delete_request.user_id == namespace
+    assert delete_request.memory_ids is None  # 绝不走 delete_by_memory_ids
+    get_request = probe.get_requests[0]
+    assert get_request.mem_cube_id == namespace
+    assert get_request.include_preference is False
+    assert get_request.include_tool_memory is False
+    assert get_request.include_skill_memory is False
+
+
+def test_clean_rejects_handler_failure(tmp_path, memos_product_models, monkeypatch):
+    """handler 返回 failure 不得当成功。"""
+
+    _install_clean_probe(monkeypatch, _CleanProbe(delete_status="failure"))
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+
+    with pytest.raises(ConfigurationError, match="delete failed"):
+        clean_memos_conversation_state(provider=provider, isolation_key="run1_conv1")
+
+
+def test_clean_rejects_non_empty_readback(tmp_path, memos_product_models, monkeypatch):
+    """readback 非空必须 fail-fast。"""
+
+    _install_clean_probe(monkeypatch, _CleanProbe(remaining=2))
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+
+    with pytest.raises(ConfigurationError, match="still holds memories"):
+        clean_memos_conversation_state(provider=provider, isolation_key="run1_conv1")
+
+
+def test_clean_refuses_when_namespace_has_pending_tasks(
+    tmp_path, memos_product_models, monkeypatch
+):
+    """该 namespace 仍有 pending task 时拒绝删除。"""
+
+    probe = _CleanProbe()
+    _install_clean_probe(monkeypatch, probe)
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    namespace = provider._namespace("run1_conv1")
+    provider._require_runtime().tracker.task_submitted(
+        task_id="still-running",
+        user_id=namespace,
+        task_type="mem_read",
+        business_task_id="biz",
+        mem_cube_id=namespace,
+    )
+
+    with pytest.raises(ConfigurationError, match="still pending"):
+        clean_memos_conversation_state(provider=provider, isolation_key="run1_conv1")
+
+    assert probe.delete_requests == []
+
+
+# --------------------------------------------------------------------------------------
+# 8. namespace 与 source identity
+# --------------------------------------------------------------------------------------
+
+
+def test_namespace_is_deterministic_isolated_and_path_free():
+    """namespace 稳定、跨 conversation/run 隔离、只含安全字符、不含绝对路径。"""
+
+    first = build_memos_namespace(
+        storage_root_relative="outputs/run-a/method_state", isolation_key="run1_conv1"
+    )
+    same = build_memos_namespace(
+        storage_root_relative="outputs/run-a/method_state", isolation_key="run1_conv1"
+    )
+    other_conversation = build_memos_namespace(
+        storage_root_relative="outputs/run-a/method_state", isolation_key="run1_conv2"
+    )
+    other_run = build_memos_namespace(
+        storage_root_relative="outputs/run-b/method_state", isolation_key="run1_conv1"
+    )
+    other_worker = build_memos_namespace(
+        storage_root_relative="outputs/run-a/method_state/worker_1",
+        isolation_key="run1_conv1",
+    )
+
+    assert first == same
+    assert len({first, other_conversation, other_run, other_worker}) == 4
+    assert first.isalnum() and first.islower() or first.isalnum()
+    assert "/" not in first and "\\" not in first
+
+
+def test_same_conversation_shares_namespace_across_add_search_and_clean(tmp_path):
+    """同一 conversation 的 add/search/clean 必须得到同一 namespace。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    runtime = provider._require_runtime()
+    runtime.search_handler.response_data = {"text_mem": []}
+    _ingest_all(provider, _longmemeval_conversation(), "run1_conv1")
+    provider.retrieve(
+        RetrievalQuery(
+            query_text="q",
+            isolation_key="run1_conv1",
+            question_time=None,
+            top_k=1,
+            purpose="qa",
+        )
+    )
+
+    add_namespace = runtime.add_handler.requests[0].user_id
+    search_namespace = runtime.search_handler.requests[0].user_id
+    assert add_namespace == search_namespace == provider._namespace("run1_conv1")
+
+
+def test_source_identity_declares_upstream_patch_and_implementation():
+    """source identity 必须含 upstream/tag/commit/patch/wrapper/实现身份。"""
+
+    identity = build_memos_source_identity()
+
+    assert identity["upstream_url"] == "https://github.com/MemTensor/MemOS.git"
+    assert identity["release_tag"] == "v2.0.25"
+    assert identity["commit"] == "e820406269537b97d270687e3e40eea2f015f81a"
+    assert identity["patch_path"] == (
+        "scripts/patches/memos-product-runtime-observability.patch"
+    )
+    assert len(identity["patch_sha256"]) == 64
+    assert identity["wrapper_path"] == "src/memory_benchmark/methods/memos_adapter.py"
+    assert len(identity["wrapper_sha256"]) == 64
+    assert identity["implementation_identity"] == "typed-product-handler"
+    # 不得声称 native LoCoMo harness。
+    assert "locomo" not in identity["source_mode"].lower()
+
+
+# --------------------------------------------------------------------------------------
+# 9. config 守门
+# --------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "overrides,expected",
+    [
+        ({"add_async_mode": "sync"}, "async"),
+        ({"add_mode": "fine"}, "add_mode=None"),
+        ({"memory_backend": "general_text"}, "tree_text"),
+        ({"search_mode": "fine"}, "search_mode='fast'"),
+        ({"use_redis_queue": True}, "local scheduler queue"),
+        ({"parallel_dispatch": False}, "parallel dispatcher"),
+        ({"reorganize": True}, "reorganize=false"),
+        ({"include_preference": True}, "include_preference=false"),
+        ({"internet_search": True}, "internet_search=false"),
+        ({"max_workers": 4}, "max_workers 必须为 1"),
+        ({"task_timeout_seconds": 0}, "task_timeout_seconds must be positive"),
+    ],
+)
+def test_config_rejects_profile_drift(overrides, expected):
+    """任何偏离主 profile 身份的配置都必须 fail-fast。"""
+
+    with pytest.raises(ConfigurationError, match=expected):
+        _make_config(**overrides)
+
+
+def test_manifest_never_leaks_secrets_or_absolute_paths():
+    """manifest 只写环境变量名，不写 secret 值或绝对路径。"""
+
+    manifest = _make_config().to_manifest()
+
+    assert manifest["graph_db_credential_env"] == "MEMOS_NEO4J_PASSWORD"
+    assert manifest["vector_db_credential_env"] == "MEMOS_QDRANT_API_KEY"
+    assert "graph_db_password" not in manifest
+    assert "vector_db_api_key" not in manifest
+    for value in manifest.values():
+        assert not (isinstance(value, str) and value.startswith("/"))

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import threading
@@ -4219,3 +4220,273 @@ def test_run_predictions_single_worker_cross_validates_declared_protocol(
             run_scope=RunScope.FULL,
             protocol_version="v3",
         )
+
+
+# --------------------------------------------------------------------------------------
+# generic v3 provider cleanup 恰好一次
+# --------------------------------------------------------------------------------------
+
+
+class _CleanupCountingV3Provider(RecordingV3TurnProvider):
+    """在 RecordingV3TurnProvider 之上记录 cleanup 调用与失败注入点。"""
+
+    def __init__(
+        self,
+        *,
+        shared_events: list[tuple[str, str]] | None = None,
+        fail_on_ingest: bool = False,
+        fail_on_answer: bool = False,
+        fail_on_cleanup: bool = False,
+    ) -> None:
+        """初始化 cleanup 计数与三个失败注入开关。"""
+
+        super().__init__(shared_events=shared_events)
+        self.cleanup_calls = 0
+        self.fail_on_ingest = fail_on_ingest
+        self.fail_on_answer = fail_on_answer
+        self.fail_on_cleanup = fail_on_cleanup
+
+    def ingest(self, unit):
+        """按需在 ingest 阶段注入失败。"""
+
+        if self.fail_on_ingest:
+            raise RuntimeError("ingest exploded")
+        return super().ingest(unit)
+
+    def retrieve(self, query):
+        """按需在答题阶段注入失败。"""
+
+        if self.fail_on_answer:
+            raise RuntimeError("retrieve exploded")
+        return super().retrieve(query)
+
+    def cleanup(self) -> None:
+        """记录 cleanup 调用次数，并按需注入 cleanup 自身失败。"""
+
+        self.cleanup_calls += 1
+        self.shared_events.append(("cleanup", "provider"))
+        if self.fail_on_cleanup:
+            raise RuntimeError("cleanup exploded")
+
+
+def _run_with_cleanup_provider(tmp_path: Path, provider) -> None:
+    """用共享（非 isolated）路径跑一次最小 prediction。"""
+
+    run_predictions(
+        dataset=_build_dataset(),
+        system=provider,
+        run_context=_create_context(tmp_path),
+        policy=PredictionRunPolicy(max_workers=1),
+        answer_reader=FrameworkAnswerReader(
+            client=FakeAnswerLLMClient(answer="cleanup answer")
+        ),
+        method_manifest={"adapter": "cleanup-v3"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+    )
+
+
+def test_shared_v3_provider_is_cleaned_up_once_on_success(tmp_path: Path) -> None:
+    """共享 v3 provider 成功路径必须 cleanup 恰好一次，且早于 summary 落盘。"""
+
+    provider = _CleanupCountingV3Provider()
+    _run_with_cleanup_provider(tmp_path, provider)
+
+    assert provider.cleanup_calls == 1
+    # cleanup 必须在最后一次 retrieve 之后（即答题完成后）才发生。
+    kinds = [kind for kind, _ in provider.shared_events]
+    assert kinds[-1] == "cleanup"
+
+
+def test_shared_v3_provider_is_cleaned_up_once_on_ingest_failure(
+    tmp_path: Path,
+) -> None:
+    """ingest 失败时也必须 cleanup 恰好一次，并保留原始异常。"""
+
+    provider = _CleanupCountingV3Provider(fail_on_ingest=True)
+
+    with pytest.raises(Exception):
+        _run_with_cleanup_provider(tmp_path, provider)
+
+    assert provider.cleanup_calls == 1
+
+
+def test_shared_v3_provider_is_cleaned_up_once_on_answer_failure(
+    tmp_path: Path,
+) -> None:
+    """答题阶段失败时也必须 cleanup 恰好一次。"""
+
+    provider = _CleanupCountingV3Provider(fail_on_answer=True)
+
+    with pytest.raises(Exception):
+        _run_with_cleanup_provider(tmp_path, provider)
+
+    assert provider.cleanup_calls == 1
+
+
+def test_cleanup_failure_is_visible_and_run_is_not_completed(tmp_path: Path) -> None:
+    """cleanup 自身失败必须可见，且不得留下 completed summary。"""
+
+    provider = _CleanupCountingV3Provider(fail_on_cleanup=True)
+    context = _create_context(tmp_path)
+
+    with pytest.raises(RuntimeError, match="cleanup exploded"):
+        run_predictions(
+            dataset=_build_dataset(),
+            system=provider,
+            run_context=context,
+            policy=PredictionRunPolicy(max_workers=1),
+            answer_reader=FrameworkAnswerReader(
+                client=FakeAnswerLLMClient(answer="a")
+            ),
+            method_manifest={"adapter": "cleanup-v3"},
+            benchmark_variant="test_variant",
+            run_scope=RunScope.FULL,
+        )
+
+    assert not (context.artifacts_dir / "summary.json").exists()
+
+
+def test_cleanup_failure_preserves_primary_exception_context(tmp_path: Path) -> None:
+    """主异常与 cleanup 异常同时存在时，主异常因果链必须保留。"""
+
+    provider = _CleanupCountingV3Provider(fail_on_ingest=True, fail_on_cleanup=True)
+
+    with pytest.raises(RuntimeError, match="cleanup exploded") as excinfo:
+        _run_with_cleanup_provider(tmp_path, provider)
+
+    chain = []
+    current = excinfo.value
+    while current is not None:
+        chain.append(str(current))
+        current = current.__context__
+    assert any("ingest exploded" in message for message in chain)
+
+
+def test_isolated_worker_v3_provider_is_cleaned_up_once_per_worker(
+    tmp_path: Path,
+) -> None:
+    """isolated worker 自建的 v3 provider 必须在交回 batch 前 cleanup 恰好一次。"""
+
+    from memory_benchmark.methods.registry import MethodBuildContext
+
+    shared_events: list[tuple[str, str]] = []
+    created: list[_CleanupCountingV3Provider] = []
+    context = _create_context(tmp_path)
+
+    def fake_factory(_context: MethodBuildContext) -> _CleanupCountingV3Provider:
+        """每个 worker 创建独立 v3 provider 并登记，便于断言 cleanup 次数。"""
+
+        provider = _CleanupCountingV3Provider(shared_events=shared_events)
+        created.append(provider)
+        return provider
+
+    run_predictions(
+        dataset=_build_dataset(),
+        system=RecordingV3TurnProvider(shared_events=shared_events),
+        run_context=context,
+        policy=PredictionRunPolicy(max_workers=2),
+        answer_reader=FrameworkAnswerReader(
+            client=FakeAnswerLLMClient(answer="isolated answer")
+        ),
+        method_manifest={"adapter": "cleanup-v3"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+        system_factory=fake_factory,
+        build_context_template=MethodBuildContext(
+            config={},
+            openai_settings=None,
+            path_settings=None,
+            storage_root=context.run_dir / "method_state",
+        ),
+        supports_shared_instance_parallelism=False,
+    )
+
+    assert created, "isolated 路径应至少创建一个 worker provider"
+    assert all(provider.cleanup_calls == 1 for provider in created)
+
+
+def test_isolated_worker_v3_provider_is_cleaned_up_once_on_failure(
+    tmp_path: Path,
+) -> None:
+    """isolated worker 内部失败时，自建 provider 仍必须 cleanup 恰好一次。"""
+
+    from memory_benchmark.methods.registry import MethodBuildContext
+
+    shared_events: list[tuple[str, str]] = []
+    created: list[_CleanupCountingV3Provider] = []
+    context = _create_context(tmp_path)
+
+    def fake_factory(_context: MethodBuildContext) -> _CleanupCountingV3Provider:
+        """创建注入 ingest 失败的 worker provider。"""
+
+        provider = _CleanupCountingV3Provider(
+            shared_events=shared_events,
+            fail_on_ingest=True,
+        )
+        created.append(provider)
+        return provider
+
+    with contextlib.suppress(Exception):
+        run_predictions(
+            dataset=_build_dataset(),
+            system=RecordingV3TurnProvider(shared_events=shared_events),
+            run_context=context,
+            policy=PredictionRunPolicy(max_workers=2),
+            answer_reader=FrameworkAnswerReader(
+                client=FakeAnswerLLMClient(answer="isolated answer")
+            ),
+            method_manifest={"adapter": "cleanup-v3"},
+            benchmark_variant="test_variant",
+            run_scope=RunScope.FULL,
+            system_factory=fake_factory,
+            build_context_template=MethodBuildContext(
+                config={},
+                openai_settings=None,
+                path_settings=None,
+                storage_root=context.run_dir / "method_state",
+            ),
+            supports_shared_instance_parallelism=False,
+        )
+
+    assert created, "isolated 路径应至少创建一个 worker provider"
+    assert all(provider.cleanup_calls == 1 for provider in created)
+
+
+def test_legacy_base_system_gets_no_cleanup_call(tmp_path: Path) -> None:
+    """legacy BaseMemorySystem 没有 cleanup 协议，行为必须零变化。"""
+
+    system = RecordingPredictionSystem()
+
+    run_predictions(
+        dataset=_build_dataset(),
+        system=system,
+        run_context=_create_context(tmp_path),
+        policy=PredictionRunPolicy(max_workers=1),
+        method_manifest={"adapter": "recording-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+    )
+
+    assert not hasattr(system, "cleanup")
+
+
+def test_legacy_bridged_provider_cleanup_is_a_noop(tmp_path: Path) -> None:
+    """LegacyProviderBridge 只继承默认 no-op cleanup，不向旧 provider 传播。"""
+
+    legacy = RecordingMemoryProvider()
+
+    run_predictions(
+        dataset=_build_dataset(),
+        system=legacy,
+        run_context=_create_context(tmp_path),
+        policy=PredictionRunPolicy(max_workers=1),
+        answer_reader=FrameworkAnswerReader(
+            client=FakeAnswerLLMClient(answer="bridged answer")
+        ),
+        method_manifest={"adapter": "recording-v2"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+    )
+
+    assert not hasattr(legacy, "cleanup")

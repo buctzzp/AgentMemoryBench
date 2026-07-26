@@ -1658,3 +1658,85 @@ def test_unsubmitted_transitions_fail_fast(transition):
             tracker.task_failed(task_id="ghost", user_id="ns-A", error_message="x")
     assert tracker.get_task_status("ghost", "ns-A") is None
     assert tracker.pending_tasks() == []
+
+
+# --------------------------------------------------------------------------------------
+# 16. M4 新增 patch hunk 在完整 patch 中的可复现性
+# --------------------------------------------------------------------------------------
+
+
+def test_patch_contains_both_m4_hunks():
+    """M4 的两处新增改动必须进入同一份可复现 patch，且不新增第二个 patch 入口。"""
+    patch_text = PATCH_PATH.read_text(encoding="utf-8")
+
+    assert "src/memos/api/config.py" in patch_text
+    assert "sentence_transformer" in patch_text
+    assert "Unsupported MOS_EMBEDDER_BACKEND" in patch_text
+    assert "src/memos/multi_mem_cube/single_cube.py" in patch_text
+    assert "Unsupported search mode" in patch_text
+    # 仍然只有一份 MemOS patch 文件被 fetch 脚本引用。
+    fetch_text = FETCH_SCRIPT.read_text(encoding="utf-8")
+    assert fetch_text.count("apply_method_patch \"MemOS\"") == 1
+
+
+def test_patch_roundtrip_reproduces_vendored_tree_byte_for_byte(tmp_path):
+    """clean v2.0.25 状态 + patch 必须逐字节重建当前 vendored 树。
+
+    只复制 patch 触及的文件，先 reverse-apply 还原成 clean v2.0.25，再 forward-apply，
+    最后与 vendored 树逐字节比对；不依赖 nested `.git`，因此在 worktree 拷贝中同样有效。
+    """
+    if not MEMOS_ROOT.exists():
+        pytest.skip("third_party/methods/MemOS 未就位（local-only）")
+
+    patch_text = PATCH_PATH.read_text(encoding="utf-8")
+    touched = sorted(
+        {
+            line.split(" b/", 1)[1].strip()
+            for line in patch_text.splitlines()
+            if line.startswith("diff --git ")
+        }
+    )
+    assert touched, "patch 必须至少触及一个文件"
+
+    work = tmp_path / "memos-roundtrip"
+    for relative in touched:
+        source = MEMOS_ROOT / relative
+        target = work / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+
+    reverse = subprocess.run(
+        ["git", "apply", "--unidiff-zero", "--reverse", str(PATCH_PATH)],
+        cwd=work,
+        capture_output=True,
+        text=True,
+    )
+    assert reverse.returncode == 0, f"reverse-apply 失败：{reverse.stderr}"
+
+    # 还原后必须与 vendored 树不同（证明 patch 确实带来改动）。
+    assert any(
+        (work / relative).read_bytes() != (MEMOS_ROOT / relative).read_bytes()
+        for relative in touched
+    )
+
+    forward = subprocess.run(
+        ["git", "apply", "--unidiff-zero", str(PATCH_PATH)],
+        cwd=work,
+        capture_output=True,
+        text=True,
+    )
+    assert forward.returncode == 0, f"forward-apply 失败：{forward.stderr}"
+
+    for relative in touched:
+        assert (work / relative).read_bytes() == (MEMOS_ROOT / relative).read_bytes(), (
+            f"clean+patch 与 vendored 树不一致：{relative}"
+        )
+
+    # 已应用状态下再次 forward-apply 必须被拒绝（幂等守门）。
+    again = subprocess.run(
+        ["git", "apply", "--unidiff-zero", "--check", str(PATCH_PATH)],
+        cwd=work,
+        capture_output=True,
+        text=True,
+    )
+    assert again.returncode != 0, "已应用的 patch 不应可以再次 forward-apply"

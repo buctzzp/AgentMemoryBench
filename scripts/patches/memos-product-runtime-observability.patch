@@ -1,3 +1,37 @@
+diff --git a/src/memos/api/config.py b/src/memos/api/config.py
+index 43ad586d..8f2690fb 100644
+--- a/src/memos/api/config.py
++++ b/src/memos/api/config.py
+@@ -641 +641,20 @@ class APIConfig:
+-        else:  # ollama
++        elif embedder_backend == "sentence_transformer":
++            # benchmark 适配：暴露 EmbedderFactory 已原生支持的本地 sentence_transformer
++            # backend，使受控 MiniLM 可作为主配置 embedding；不改变任何 embedding 算法。
++            embedding_dims_raw = os.getenv("MOS_EMBEDDER_DIMS")
++            max_tokens_raw = os.getenv("MOS_EMBEDDER_MAX_TOKENS")
++            return {
++                "backend": "sentence_transformer",
++                "config": {
++                    "model_name_or_path": os.getenv(
++                        "MOS_EMBEDDER_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
++                    ),
++                    "embedding_dims": int(embedding_dims_raw) if embedding_dims_raw else None,
++                    "max_tokens": int(max_tokens_raw) if max_tokens_raw else None,
++                    "trust_remote_code": os.getenv(
++                        "MOS_EMBEDDER_TRUST_REMOTE_CODE", "false"
++                    ).lower()
++                    == "true",
++                },
++            }
++        elif embedder_backend == "ollama":
+@@ -650,0 +670,7 @@ class APIConfig:
++        else:
++            # benchmark 适配：未知 backend 过去会静默落入 Ollama，导致主配置声明的
++            # embedding 与实际运行不一致；改为显式 fail-fast。
++            raise ValueError(
++                f"Unsupported MOS_EMBEDDER_BACKEND: {embedder_backend!r}. "
++                "Supported backends: universal_api, sentence_transformer, ollama."
++            )
 diff --git a/src/memos/graph_dbs/neo4j_community.py b/src/memos/graph_dbs/neo4j_community.py
 index b5c92f40..2d58c73f 100644
 --- a/src/memos/graph_dbs/neo4j_community.py
@@ -242,10 +276,22 @@ index 1fe6a481..cb919a60 100644
 +                    # [memory-benchmark observability patch] See _cleanup_working_memory.
 +                    raise
 diff --git a/src/memos/multi_mem_cube/single_cube.py b/src/memos/multi_mem_cube/single_cube.py
-index 27399259..9a35035c 100644
+index 27399259..2f9f77ef 100644
 --- a/src/memos/multi_mem_cube/single_cube.py
 +++ b/src/memos/multi_mem_cube/single_cube.py
-@@ -548,0 +549,3 @@ class SingleCubeView(MemCubeView):
+@@ -214,0 +215,2 @@ class SingleCubeView(MemCubeView):
++                # benchmark 适配：非法 search mode 过去返回 []，与合法零命中不可区分；
++                # 改为 fail-fast。
+@@ -216 +218 @@ class SingleCubeView(MemCubeView):
+-                return []
++                raise ValueError(f"Unsupported search mode: {search_mode}")
+@@ -219,0 +222,2 @@ class SingleCubeView(MemCubeView):
++            # benchmark 适配：真实 graph/vector/search 失败过去被吞成 []，会把故障伪装成
++            # 合法 zero-hit；保留原日志后原样上抛，成功路径与返回内容零变化。
+@@ -221 +225 @@ class SingleCubeView(MemCubeView):
+-            return []
++            raise
+@@ -548,0 +553,3 @@ class SingleCubeView(MemCubeView):
 +                # [memory-benchmark observability patch] A failed MEM_READ submit means the
 +                # fine-extraction stage will never run, so the add must not report success.
 +                raise
