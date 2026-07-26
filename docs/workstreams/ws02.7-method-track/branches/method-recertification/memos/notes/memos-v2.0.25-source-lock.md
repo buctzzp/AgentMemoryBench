@@ -61,6 +61,25 @@ tracked `third_party/methods/MANIFEST.md` 和恢复脚本，不能只依赖本�
 
 因此“受控换锁”优于物理删除。
 
+### 本地论文资产不属于 source lock
+
+用户在 nested repo 根目录替换了本地 `MemOS.pdf`。该文件命中官方仓库
+`.gitignore:*.pdf`，不在 `v2.0.25` Git tree 中；替换后 nested repo 仍是 clean detached
+`e820406`，所以不改变代码 source identity。
+
+当前本地资产身份：
+
+```text
+path    third_party/methods/MemOS/MemOS.pdf
+title   MemOS: A Memory OS for AI System
+pages   37
+bytes   4753104
+sha256  9b9b71b61487ce9f01d2de014b80201d9a30c4fd43effa33e84ef7d2db824977
+```
+
+该 PDF 可用于理解论文算法，但它是 local-only research asset，不得反向覆盖 current
+`v2.0.25` 运行时源码；引用论文结论时记录上述 hash，运行时契约仍以锁定代码为准。
+
 ## 4. 旧审计的失效边界
 
 旧锁点是 `v2.0.22@b051e638`。到 `v2.0.25@e820406`：

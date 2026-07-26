@@ -61,7 +61,10 @@ M1 未裁定前不写 adapter、不启动服务、不调用真实 API，也不�
 更新父 ws02.7 README。
 
 当前 M1 施工入口：
-[MemOS v2.0.25 产品运行时契约卡](cards/actor-prompt-memos-v2-0-25-product-runtime-preflight.md)。
+[MemOS v2.0.25 进程内产品运行时契约卡](cards/actor-prompt-memos-v2-0-25-product-runtime-preflight.md)。
+已裁定不启动 HTTP host；首选候选是在 framework worker 内构造官方 product components 并
+直接调用 typed `AddHandler` / `SearchHandler`，但必须先证明与 `/product` handler/view/
+scheduler 语义等价。不得把手写 `MemReader → TreeTextMemory` 近似链冒充 product parity。
 该卡一次性闭合产品身份、scheduler 完成门、缺失时间、source lineage、search/ranking、
 隔离/clean retry、HaluMem 能力与服务观测；不重做五家 benchmark census。
 

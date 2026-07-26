@@ -36,9 +36,10 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 - **当前动作**：按新结构接入 **MemOS**；当前 source lock 已升级为官方稳定版
   `v2.0.25@e820406`。M1 从
   [产品运行时契约卡](branches/method-recertification/memos/cards/actor-prompt-memos-v2-0-25-product-runtime-preflight.md)
-  进入，一次闭合产品身份、scheduler、时间、lineage、search、隔离和 HaluMem 能力；复用
-  五个 benchmark 稳定事实和首批 method 判例，不重开 raw census，不复制旧 `native`
-  prompt/benchmark recall 壳。
+  进入。已裁定不启动 HTTP host；M1 要证明进程内 typed product handler 与
+  `/product` 编排等价，再一次闭合产品身份、scheduler、时间、lineage、search、隔离和
+  HaluMem 能力。复用五个 benchmark 稳定事实和首批 method 判例，不重开 raw census，
+  不复制旧 `native` prompt/benchmark recall 壳。
 - **不可顺手重开**：benchmark raw/canonical/gold 调查、已冻结 25 格、旧
   `config_track` 兼容、legacy bridge/resume、BLEU/ROUGE/Precision 新公式。
 - **恢复当前结构任务只读**：上方 M0 ruling；需要追溯某家 method 才读下表对应 frozen note。

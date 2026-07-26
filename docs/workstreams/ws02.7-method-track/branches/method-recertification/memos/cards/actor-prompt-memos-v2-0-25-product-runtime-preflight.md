@@ -1,4 +1,4 @@
-# Actor 卡：MemOS v2.0.25 产品运行时契约 M1
+# Actor 卡：MemOS v2.0.25 进程内产品运行时契约 M1
 
 **本卡被发送到当前 actor 会话即代表用户已完成选择与授权；直接执行，不要再选择、派发或
 等待另一个 actor。**本批只审计 source-locked MemOS `v2.0.25` 当前 self-host 产品路径的
@@ -9,10 +9,12 @@ actor 可自行组织 subagent，但不得扩大允许范围；主 actor 必须�
 ## 0. 目标、边界与唯一判词
 
 本卡不是再查五个 benchmark，也不是写 adapter。五个 benchmark 的 raw/canonical/gold、
-时间、图片、异常和 evaluator 契约已经冻结，本批直接复用。唯一目标是一次性回答后续五格
-都会依赖的 MemOS 产品问题：
+时间、图片、异常和 evaluator 契约已经冻结，本批直接复用。用户与架构师已经锁定：
+**Phase 1 不启动 HTTP host；目标是在 framework worker 进程内直接调用 MemOS，但必须复用或
+逐项证明等价于 current `/product` 的算法与 lifecycle，不能只“参考”后手写一条近似链。**
+唯一目标是一次性回答后续五格都会依赖的 MemOS 产品问题：
 
-1. Phase 1 主配置应绑定哪个公开产品面与算法路径；
+1. Phase 1 主配置应绑定哪个算法路径，以及哪一层进程内接口能保持 product-equivalent；
 2. add 何时真正完成，scheduler 如何 drain，失败任务能否被误判成完成；
 3. role、缺失时间、`message_id`、source lineage 在当前 active path 上如何流动；
 4. search 返回的 memory、score、排序、source 与 top-k 是否足以支撑各类 metric；
@@ -94,6 +96,13 @@ checkout、fetch、pull、安装依赖、修改或暂存 nested repo。身份不
    fine/fast extraction。
 3. 官方 LoCoMo/LongMemEval 脚本走 `/product/add`、`/product/search`，可作为作者评测姿势，
    但不能覆盖当前产品 schema。
+4. `/product` 的 HTTP router 不是算法边界：router 在 import 时调用 `init_server()`，随后用
+   `HandlerDependencies.from_init_server()` 构造 `AddHandler` / `SearchHandler`。这两类 handler
+   可在进程内接收 typed `APIADDRequest` / `APISearchRequest`，再进入
+   `SingleCubeView` / `CompositeCubeView`。
+5. 手动调用 `mem_reader.get_memory() + text_mem.add/search()` 虽能拿到更底层对象，却会天然
+   绕开 handler 的 request normalization、multi-cube、scheduler submit、threshold/dedup/
+   rerank/post-format 等编排。除非逐项证明并补齐等价性，否则不能称为 current product。
 
 ### 3.2 official harness 已出现的 drift
 
@@ -186,16 +195,65 @@ checkout、fetch、pull、安装依赖、修改或暂存 nested repo。身份不
 
 ### 5.1 产品身份表
 
-画一张三行身份表：
+画一张四行身份表：
 
 | 路径 | 入口 | text algorithm | reader | 可作为 Phase 1 主产品吗 |
 | --- | --- | --- | --- | --- |
-| self-host product API | `/product/add` + `/product/search` | current source | current source | 证据判断 |
+| HTTP product | `/product/add` + `/product/search` | current source | current source | 只作 parity oracle，不启动 host |
+| in-process product orchestration | typed request + handler/view | current source | current source | 首选候选，须证明 |
 | library simple/default | `MOS` / `MOS.simple` | current source | current source | 证据判断 |
-| official eval wrapper | HTTP wrapper | 实际落到哪个服务 | payload/mode | 只作何种参考 |
+| raw memory primitives | `MemReader + TreeTextMemory` | current source | current source | 哪些 product 语义会被绕开 |
 
 必须明确 `general_text` 与 `tree_text` 是算法路径差异还是单纯 storage variant；说明选择
-self-host product 会带来的服务/依赖成本，但不要由 actor 最终裁 profile。
+self-host product algorithm 会带来的服务/依赖成本，但不要把“HTTP transport”与“product
+algorithm”绑定为同一个选择。
+
+另外单列 official eval wrapper：它调用哪个 HTTP path、payload/mode 与 current schema 的
+drift、只能作为哪些 author-profile/input precedent，不能把它混进上表的实现层级。
+
+### 5.1A 进程内 product-equivalent 专查
+
+以 current source 对比四条调用链：
+
+```text
+HTTP router
+→ AddHandler/SearchHandler
+→ SingleCubeView/CompositeCubeView
+→ MemReader/TreeTextMemory/Scheduler
+
+candidate A:
+component_init.init_server()
+→ HandlerDependencies.from_init_server()
+→ typed AddHandler/SearchHandler calls
+
+candidate B:
+显式 factories/config 构造相同 dependencies
+→ typed AddHandler/SearchHandler calls
+
+candidate C:
+MOSCore.add/search
+
+candidate D:
+MemReader.get_memory()
+→ TreeTextMemory.add/search
+```
+
+必须闭合：
+
+1. candidate A 不 import `server_router`、不创建 FastAPI/Uvicorn/HTTP transport 时，是否仍能
+   完整复用 product orchestration；
+2. `init_server()` 目前从环境变量建配置；framework TOML 怎样以强类型、进程级、无全局竞态的
+   方式注入同一套 factories。若只能靠临时改环境变量，要披露 worker/process 边界与恢复风险；
+3. candidate B 需要复制多少 `component_init` 编排；哪些可抽成纯 factory，哪些复制会产生
+   upstream drift；
+4. A/B 与 HTTP router 在 add response、scheduler task、search request normalization、
+   multi-cube merge、threshold/dedup/rerank/formatter 上是否逐项等价；
+5. C/D 分别丢失哪些语义。`MOSCore.add()` 吞 memory IDs、`MOSCore.search()` 不透传部分参数，
+   只是问题之一；还必须检查 scheduler 和 product post-processing；
+6. 给出唯一推荐的**进程内 transport 候选**及最小待改面，但不实施。
+
+本批不得因“HTTP 不灵活”就下沉到最底层，也不得因“handler 是 internal module”就默认放弃
+产品等价；判断依据是语义守恒、配置可控性和维护成本。
 
 ### 5.2 add 完成状态机
 
@@ -353,9 +411,10 @@ API message.message_id
 
 ### 5.9 服务、模型与效率观测
 
-列出最小可运行拓扑和每一项的身份：
+列出最小可运行拓扑和每一项的身份。已裁定不启动 HTTP/FastAPI/Uvicorn host；但不要由此
+推断数据库、scheduler 或模型依赖也能省略：
 
-- MemOS API process；
+- framework worker 内的 MemOS product runtime；
 - graph/vector/storage 服务；
 - scheduler 是否需要 Redis；
 - build LLM、general/process LLM、reranker、embedding；
@@ -377,7 +436,7 @@ docs/workstreams/ws02.7-method-track/branches/method-recertification/memos/notes
 note 必须自包含，至少含：
 
 1. source identity 原始输出；
-2. 三路径产品身份表与 official harness drift 表；
+2. 四路径产品身份表、进程内 parity 表与 official harness drift 表；
 3. add/scheduler 状态机；
 4. role/batch 与 timestamp 探针构造及关键 stdout；
 5. message-id/source/evolution/search 全链；
