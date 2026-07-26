@@ -60,6 +60,11 @@ M1 未裁定前不写 adapter、不启动服务、不调用真实 API，也不�
 调查卡。后续任务卡放 `cards/`，一手审计、裁决与施工记录放 `notes/`；权威当前动作仍只
 更新父 ws02.7 README。
 
+当前 M1 施工入口：
+[MemOS v2.0.25 产品运行时契约卡](cards/actor-prompt-memos-v2-0-25-product-runtime-preflight.md)。
+该卡一次性闭合产品身份、scheduler 完成门、缺失时间、source lineage、search/ranking、
+隔离/clean retry、HaluMem 能力与服务观测；不重做五家 benchmark census。
+
 ## 尚未裁定的 MemOS 专属问题
 
 - 当前代表性产品面究竟是 self-host product API 还是库内 `MOS`；

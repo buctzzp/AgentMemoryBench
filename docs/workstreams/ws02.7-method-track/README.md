@@ -34,9 +34,10 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   `1685 passed, 3 deselected, 1 warning, 29 subtests passed in 128.11s`；
   compileall exit 0。唯一 warning 是既有 vendored LightMem Pydantic deprecation。
 - **当前动作**：按新结构接入 **MemOS**；当前 source lock 已升级为官方稳定版
-  `v2.0.25@e820406`，从
-  [MemOS 活跃支线](branches/method-recertification/memos/README.md)进入。复用五个
-  benchmark 稳定事实和首批 method 判例，不重开 raw census，不复制旧 `native`
+  `v2.0.25@e820406`。M1 从
+  [产品运行时契约卡](branches/method-recertification/memos/cards/actor-prompt-memos-v2-0-25-product-runtime-preflight.md)
+  进入，一次闭合产品身份、scheduler、时间、lineage、search、隔离和 HaluMem 能力；复用
+  五个 benchmark 稳定事实和首批 method 判例，不重开 raw census，不复制旧 `native`
   prompt/benchmark recall 壳。
 - **不可顺手重开**：benchmark raw/canonical/gold 调查、已冻结 25 格、旧
   `config_track` 兼容、legacy bridge/resume、BLEU/ROUGE/Precision 新公式。
