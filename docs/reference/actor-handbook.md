@@ -186,6 +186,11 @@
   log-and-success。2026-07-26 MemOS R1 的外层 P2a 虽全绿，架构师继续亲读后发现真实
   batch graph write、vector write、fine transfer、delete/refresh 仍有多层吞错，B6 因而
   不得关闭。承重强反例应逐个命中首个 catch，并证明失败状态穿过完整生产链。
+- **partial stop/commit 失败不能靠“只尝试一次”推导为下一次成功。**先亲读 upstream 的状态
+  修改顺序：若它在后段抛错前已经写了 `_running=False` 等门，第二次调用可能直接返回而未
+  完成剩余清理。此时应把 runtime 标为 poisoned、保留 owner、稳定 fail-fast，并把未裁取舍
+  明确交回架构师；不能让绿测试把“未证实关闭”写成 closed。2026-07-27 MemOS M4 actor 主动
+  披露 `_stop_attempted` 取舍是对的，最终 follow-up 用永久 close-failed 状态关闭该缺口。
 - **并行卡在各自 worktree 绿后，actor 不得声称跨卡集成已绿。**最终合流是架构师责任；若卡
   内消费了另一条正在演进的 manifest/private schema，fixture 应显式声明当前版本，避免靠
   legacy 缺字段偶然通过。

@@ -77,11 +77,15 @@ sync variant 绕过完成门。
 [R2 最终验收](notes/memos-v2.0.25-async-lifecycle-r2-architect-acceptance.md)
 接收并在 `14ece4c` 合流。
 
-**当前唯一施工入口**：
-[MemOS v2.0.25 product v3 adapter M4](cards/actor-prompt-memos-v2-0-25-product-adapter-m4.md)。
-它只复用五个 benchmark 稳定事实，实现 typed-handler adapter、MiniLM config 暴露、search
-失败可见、generic provider cleanup、namespace-safe clean retry 与五格强反例；不重开 raw
-census、不启动真实 API/DB/模型。
+MemOS v2.0.25 product v3 adapter M4 已由 `a87353a + de29c4c + f6e725e` 完成，并在线性
+主线映射为 `dff8185 + 02ffc9d + 3e1d621`。最终
+[架构师验收](notes/memos-v2.0.25-product-adapter-m4-architect-acceptance.md)
+确认 typed-handler adapter、MiniLM config、search failure、generic lifecycle owner、
+namespace-safe clean retry、stop failure 永久 fail-closed 与五格强反例成立；主树全量
+无 API 门为 `1863 passed, 3 deselected, 11 warnings, 29 subtests passed`。
+
+**当前唯一入口：M5 B11 前置与真实服务 smoke。**先闭合服务依赖、成本边界、run identity
+和开箱门；未经用户确认真实服务环境、预算、规模与 run_id，不启动 Neo4j/Qdrant/API。
 
 ## M4 保持 pending 的边界
 
@@ -92,4 +96,4 @@ census、不启动真实 API/DB/模型。
 - MemOS async worker 的精确 per-call token/cost 观测；
 - official LoCoMo 双 namespace reproduction harness；主 profile 仍是一 conversation 一 cube。
 
-这些由 M4 后的 M5 preflight/真实 smoke 分层关闭，不回头重造 M1/R2 证据。
+这些由 M5 preflight/真实 smoke 分层关闭，不回头重造 M1/R2/M4 证据。

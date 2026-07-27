@@ -46,11 +46,13 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   MiniLM config、search 失败可见、namespace-safe clean retry 与五格实现，但架构师强反例
   证实 cleanup 在 pending refusal 前先丢失 provider/owner runtime 引用，重试会 no-op；
   generic runner 的 cleanup 保护区也尚未覆盖 clean hook/preflight。M4-R1 `de29c4c` 已关闭
-  上述两处及环境恢复/typed-handler 共用 dependencies 漏测；但其 `_stop_attempted` 在首次
-  scheduler stop 抛错后允许第二次 cleanup 不再 stop 却标记 closed，与 upstream
-  “先 `_running=False`、后 shutdown dispatcher/monitor”的非原子 stop 顺序冲突。当前只剩
-  [stop failure 永久 fail-closed follow-up](branches/method-recertification/memos/cards/actor-prompt-memos-v2-0-25-product-adapter-m4-r1-stop-failure.md)：
-  close-failed runtime 必须保留 owner、拒绝复用且不得假成功；`a87353a`/`de29c4c` 暂不合入。
+  上述两处及环境恢复/typed-handler 共用 dependencies 漏测；其 `_stop_attempted` 遗留取舍
+  又由 follow-up `f6e725e` 收敛为 stop failure 永久 fail-closed。三段现已线性合入
+  `dff8185`、`02ffc9d`、`3e1d621`，并通过
+  [M4 架构师最终验收](branches/method-recertification/memos/notes/memos-v2.0.25-product-adapter-m4-architect-acceptance.md)：
+  主树 `1863 passed, 3 deselected, 11 warnings, 29 subtests passed`，compileall 与 patch
+  reverse-check 均通过。当前进入 **M5 B11 前置**；未经用户确认真实服务环境、预算、规模与
+  run_id，不启动 Neo4j/Qdrant/API smoke。
   复用五个 benchmark 稳定事实，不重开 raw census，也不把真实 DB/image/HaluMem
   fine-output 等 pending 能力提前写成 valid。
 - **不可顺手重开**：benchmark raw/canonical/gold 调查、已冻结 25 格、旧

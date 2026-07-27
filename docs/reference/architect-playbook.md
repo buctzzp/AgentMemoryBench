@@ -104,6 +104,11 @@
 - 后台型 provider 的完成门不止是 `ingest()` 等到 terminal：runner 还必须拥有 runtime
   生命周期。成功路径先 `cleanup()` 再写 completed summary，异常路径也恰好 cleanup 一次；
   否则“结果已落盘”仍可能伴随 consumer/dispatcher 泄漏，cleanup 失败还会被伪装成成功。
+- 后台 runtime/事务/队列任务卡必须先写完整状态转移表，至少区分
+  `open / pending-refused / close-failed / closed`；“幂等”只适用于已证实成功后的重复调用。
+  若 upstream stop/commit 会先修改一部分状态再在后段抛错，不能用 `attempted=True` 让下一次
+  调用跳过剩余动作后标成功；应保留 poisoned runtime、稳定 fail-fast 并禁止复用/并行另建。
+  2026-07-27 MemOS M4 两轮返工即因首卡没有把 partial-stop 四态预先锁全。
 - method 官方 benchmark harness 若通过双写、双 namespace、检索融合等改变 build topology，
   它就是 reproduction implementation variant，不是可暗抄进统一 product adapter 的普通
   输入格式。主 profile 只复用通用产品接口；作者 harness 另立显式校准身份。
