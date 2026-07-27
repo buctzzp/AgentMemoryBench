@@ -45,9 +45,12 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   两条最低叶子强反例。MemOS product v3 adapter M4 首轮 `a87353a` 已完成 typed handler、
   MiniLM config、search 失败可见、namespace-safe clean retry 与五格实现，但架构师强反例
   证实 cleanup 在 pending refusal 前先丢失 provider/owner runtime 引用，重试会 no-op；
-  generic runner 的 cleanup 保护区也尚未覆盖 clean hook/preflight。当前必须在原分支执行
-  [M4-R1 生命周期闭环返工](branches/method-recertification/memos/cards/actor-prompt-memos-v2-0-25-product-adapter-m4-r1.md)，
-  同时补齐环境恢复与真实 typed-handler 共用 dependencies 的漏测；`a87353a` 暂不合入。
+  generic runner 的 cleanup 保护区也尚未覆盖 clean hook/preflight。M4-R1 `de29c4c` 已关闭
+  上述两处及环境恢复/typed-handler 共用 dependencies 漏测；但其 `_stop_attempted` 在首次
+  scheduler stop 抛错后允许第二次 cleanup 不再 stop 却标记 closed，与 upstream
+  “先 `_running=False`、后 shutdown dispatcher/monitor”的非原子 stop 顺序冲突。当前只剩
+  [stop failure 永久 fail-closed follow-up](branches/method-recertification/memos/cards/actor-prompt-memos-v2-0-25-product-adapter-m4-r1-stop-failure.md)：
+  close-failed runtime 必须保留 owner、拒绝复用且不得假成功；`a87353a`/`de29c4c` 暂不合入。
   复用五个 benchmark 稳定事实，不重开 raw census，也不把真实 DB/image/HaluMem
   fine-output 等 pending 能力提前写成 valid。
 - **不可顺手重开**：benchmark raw/canonical/gold 调查、已冻结 25 格、旧
