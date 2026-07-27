@@ -4490,3 +4490,207 @@ def test_legacy_bridged_provider_cleanup_is_a_noop(tmp_path: Path) -> None:
     )
 
     assert not hasattr(legacy, "cleanup")
+
+
+# --------------------------------------------------------------------------------------
+# M4-R1：生命周期保护区必须覆盖 clean hook / preflight 等前置阶段
+# --------------------------------------------------------------------------------------
+
+
+def _failed_ingest_run_context(tmp_path: Path, run_id: str, system):
+    """构造一个 `conv-1` 处于 failed_ingest 的 resume run，用于前置阶段反例。
+
+    `run_predictions` 会先用 `_method_manifest_with_protocol()` 给 manifest 盖上
+    协议身份再算 resume 指纹；这里必须用同一口径预先盖章，否则 v3 provider 的
+    manifest 与手写 manifest 不一致，resume 会静默降级成全新 run，
+    conversation_status 被清空，clean hook 根本不会被调用（该现象曾让本组反例
+    误报为"未 cleanup"）。
+    """
+
+    from memory_benchmark.runners import prediction as prediction_module
+
+    dataset = _build_dataset()
+    run_context = RunContext.create(
+        run_id=run_id,
+        benchmark_name="fake",
+        method_name="fake",
+        model_name="fake",
+        output_root=tmp_path,
+        resume=True,
+    )
+    policy = PredictionRunPolicy(resume=True, retry_failed_conversations=True)
+    method_manifest = prediction_module._method_manifest_with_protocol(
+        method_manifest={"method_name": "fake"},
+        protocol_version="",
+        prompt_track="native",
+        system=system,
+    )
+    _write_resume_manifest(
+        dataset=dataset,
+        run_context=run_context,
+        policy=policy,
+        method_manifest=method_manifest,
+    )
+    atomic_write_json(
+        tmp_path / run_id / "checkpoints" / "conversation_status.json",
+        {"conv-1": {"status": "failed_ingest", "ingested": False, "stage": "ingest"}},
+    )
+    return dataset, run_context, policy, method_manifest
+
+
+def test_clean_hook_failure_still_cleans_up_shared_provider_once(
+    tmp_path: Path,
+) -> None:
+    """clean hook 自身抛错时，根 v3 provider 仍必须 cleanup 恰好一次。
+
+    这是 M4-R1 的承重反例：MemOS 的 clean hook 会先 lazy 建好共享 runtime，
+    保护区若仍从 ingest 才开始，此处就会泄漏后台线程。
+    """
+
+    provider = _CleanupCountingV3Provider()
+    dataset, run_context, policy, method_manifest = _failed_ingest_run_context(
+        tmp_path, "clean-hook-failure", provider
+    )
+
+    def _exploding_clean_hook(conversation, failed_state) -> None:
+        """模拟 clean hook 在前置阶段失败。"""
+
+        raise RuntimeError("clean hook exploded")
+
+    with pytest.raises(Exception):
+        run_predictions(
+            dataset=dataset,
+            system=provider,
+            run_context=run_context,
+            policy=policy,
+            method_manifest=method_manifest,
+            benchmark_variant="default",
+            run_scope=RunScope.FULL,
+            answer_reader=FrameworkAnswerReader(client=FakeAnswerLLMClient("a")),
+            clean_failed_ingest_conversation=_exploding_clean_hook,
+        )
+
+    assert provider.cleanup_calls == 1
+
+
+def test_checkpoint_preflight_failure_still_cleans_up_shared_provider_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """checkpoint preflight 抛错时，根 v3 provider 仍必须 cleanup 恰好一次。"""
+
+    from memory_benchmark.runners import prediction as prediction_module
+
+    provider = _CleanupCountingV3Provider()
+    dataset, run_context, policy, method_manifest = _failed_ingest_run_context(
+        tmp_path, "preflight-failure", provider
+    )
+
+    def _exploding_preflight(**kwargs):
+        """模拟 ingest checkpoint preflight 失败。"""
+
+        raise RuntimeError("preflight exploded")
+
+    monkeypatch.setattr(
+        prediction_module,
+        "_preflight_ingest_checkpoints",
+        _exploding_preflight,
+    )
+
+    with pytest.raises(Exception):
+        run_predictions(
+            dataset=dataset,
+            system=provider,
+            run_context=run_context,
+            policy=policy,
+            method_manifest=method_manifest,
+            benchmark_variant="default",
+            run_scope=RunScope.FULL,
+            answer_reader=FrameworkAnswerReader(client=FakeAnswerLLMClient("a")),
+            clean_failed_ingest_conversation=lambda conversation, failed_state: None,
+        )
+
+    assert provider.cleanup_calls == 1
+
+
+def test_work_plan_failure_still_cleans_up_shared_provider_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """work-plan 构造抛错时，根 v3 provider 仍必须 cleanup 恰好一次。"""
+
+    from memory_benchmark.runners import prediction as prediction_module
+
+    provider = _CleanupCountingV3Provider()
+
+    def _exploding_work_plan(**kwargs):
+        """模拟 work-plan 构造失败。"""
+
+        raise RuntimeError("work plan exploded")
+
+    monkeypatch.setattr(
+        prediction_module,
+        "_build_prediction_work_plan",
+        _exploding_work_plan,
+    )
+
+    with pytest.raises(Exception):
+        _run_with_cleanup_provider(tmp_path, provider)
+
+    assert provider.cleanup_calls == 1
+
+
+def test_successful_run_does_not_double_clean_up_via_exit_stack(
+    tmp_path: Path,
+) -> None:
+    """正常路径显式 close 之后，ExitStack 退出不得重复 cleanup。"""
+
+    provider = _CleanupCountingV3Provider()
+    _run_with_cleanup_provider(tmp_path, provider)
+
+    assert provider.cleanup_calls == 1
+    assert [kind for kind, _ in provider.shared_events][-1] == "cleanup"
+
+
+def test_isolated_path_root_system_is_not_cleaned_by_lifecycle_guard(
+    tmp_path: Path,
+) -> None:
+    """isolated 路径下根 system 不参与保护区，只有 worker provider 被 cleanup。"""
+
+    from memory_benchmark.methods.registry import MethodBuildContext
+
+    shared_events: list[tuple[str, str]] = []
+    created: list[_CleanupCountingV3Provider] = []
+    root = _CleanupCountingV3Provider(shared_events=shared_events)
+    context = _create_context(tmp_path)
+
+    def fake_factory(_context: MethodBuildContext) -> _CleanupCountingV3Provider:
+        """每个 worker 创建独立 provider。"""
+
+        worker_provider = _CleanupCountingV3Provider(shared_events=shared_events)
+        created.append(worker_provider)
+        return worker_provider
+
+    run_predictions(
+        dataset=_build_dataset(),
+        system=root,
+        run_context=context,
+        policy=PredictionRunPolicy(max_workers=2),
+        answer_reader=FrameworkAnswerReader(
+            client=FakeAnswerLLMClient(answer="isolated answer")
+        ),
+        method_manifest={"adapter": "cleanup-v3"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+        system_factory=fake_factory,
+        build_context_template=MethodBuildContext(
+            config={},
+            openai_settings=None,
+            path_settings=None,
+            storage_root=context.run_dir / "method_state",
+        ),
+        supports_shared_instance_parallelism=False,
+    )
+
+    assert root.cleanup_calls == 0
+    assert created and all(worker.cleanup_calls == 1 for worker in created)

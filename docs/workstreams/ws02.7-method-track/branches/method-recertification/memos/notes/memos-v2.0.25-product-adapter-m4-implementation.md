@@ -331,3 +331,157 @@ Pydantic serialization warning，与 R2 验收 note 记录的 warning 画像一�
 - 依赖/服务：Neo4j community + Qdrant server + `sentence-transformers` 运行时依赖，
   以及 `MEMOS_NEO4J_PASSWORD` / `MEMOS_QDRANT_API_KEY` 两个环境变量，
   都要在 M5 preflight 前落地。
+
+---
+
+# M4-R1 返工记录（生命周期闭环）
+
+日期：2026-07-27
+follow-up commit 基线：`a87353a`
+
+上文 §1–§13 是首轮 `a87353a` 的原始记录，**保留原样**（含当时的偏差与输出）；
+本节只追加架构师强验收后关闭的两个生命周期缺口与两组漏测。
+
+## R1.0 判词
+
+```text
+READY_FOR_MEMOS_M4_ARCHITECT_RECHECK(
+  cleanup refusal is retryable;
+  early failures cannot leak the shared runtime;
+  environment scope and typed-handler sharing are proven
+)
+```
+
+## R1.1 缺口一：cleanup 状态“先提交后执行”导致孤儿 runtime
+
+`a87353a` 的三处都在**成功之前**就提交了状态：
+
+| 位置 | 首轮写法 | 后果 |
+| --- | --- | --- |
+| `_MemosRuntimeOwner.release()` | 先 `self._runtime = None`，锁外再 `runtime.close()` | close 被拒 → owner 丢引用 |
+| `MemOS.cleanup()` | 先 `_cleaned = True`、`_runtime = None`，再 release | 拒绝后无法重试 |
+| `MemosRuntime.close()` | 先 `_closed = True`，再 `stop()` | stop 抛错仍被标成已关闭 |
+
+修复统一为**成功后才提交**，并把 `close()` 移进 owner 锁内以满足裁决 §2.1.5
+（close 未完成时并发 `acquire()` 不得构造第二个同 config runtime）。
+`MemosRuntime` 另加 `_stop_attempted`：`stop()` 抛错照常上抛（失败可见），
+但重试不会二次调用同一 scheduler 的 `stop()`。
+
+架构师原探针在修复后的输出（同一命令口径）：
+
+```text
+FIRST_CLEANUP_ERROR: ConfigurationError MemOS scheduler 仍有 1 个未完成 task，拒绝静默关闭
+AFTER_FIRST:            {'provider_cleaned': False, 'provider_runtime_is_none': False,
+                         'owner_runtime_is_none': False, 'runtime_closed': False, 'stop_calls': 0}
+AFTER_RETRY:            {'provider_cleaned': True,  'provider_runtime_is_none': True,
+                         'owner_runtime_is_none': True,  'runtime_closed': True,  'stop_calls': 1}
+AFTER_IDEMPOTENT_RETRY: {'provider_cleaned': True,  'provider_runtime_is_none': True,
+                         'owner_runtime_is_none': True,  'runtime_closed': True,  'stop_calls': 1}
+```
+
+即：拒绝前后引用全保留 → task 转终态后重试真正 close → `stop()` 总计恰好一次 →
+再次 cleanup 幂等。
+
+## R1.2 缺口二：clean-hook → 根 provider 的单 runtime 交接
+
+新增窄方法 `_MemosRuntimeOwner.release_current_for_config(config)`：
+
+```text
+owner 为空        → no-op 返回 None（绝不为 cleanup 反向构造 runtime）
+identity 一致     → close 并释放，返回该 runtime
+identity 冲突     → ConfigurationError fail-fast，绝不关闭别的配置
+```
+
+`MemOS.cleanup()` 在 `self._runtime is None` 时走该路径，因此
+「clean hook 用临时 provider 先 lazy 建好共享 runtime、根 provider 自己从未
+`_require_runtime()`」的边界也能收敛。未改成「clean hook 成功后立即 close 再让正式
+ingest 第二次 `init_server()`」——首轮裁决要求 clean 与正式 run 复用同一 runtime。
+未引入第二套全局缓存、弱引用注册表或 benchmark 特判。
+
+## R1.3 缺口三：generic runner 保护区起点
+
+`a87353a` 的保护区只包住 ingest/answer；clean hook、checkpoint preflight 与
+work-plan 都在保护区之前。改为：
+
+- `use_isolated` 计算上移到 clean hook 之前；
+- 用 `contextlib.ExitStack` 在**前置阶段之前**注册 `_cleanup_memory_provider`；
+- 正常路径在原完成点（`Completed` stage 之前）显式 `lifecycle_stack.close()`，
+  `close()` 会弹出回调，因此 context 退出时不重复；
+- isolated 路径不注册根 system；legacy bridge 与 operation-level 语义不变。
+
+`git diff -w` 显示该文件的实质改动仅为：`import contextlib`、`use_isolated` 上移、
+ExitStack 包裹与注册、原 `try/finally` 移除、完成点显式 `close()`。
+
+## R1.4 漏测一：环境作用域恢复
+
+新增 hermetic 反例（fake `init_server`，零真实服务）：
+
+- 预置「将被覆盖」的 `MOS_CHAT_MODEL=preexisting-model`、
+  `MEMSCHEDULER_USE_REDIS_QUEUE=true`、无关键 `MEMOS_ONLY_PREEXISTING=keep-me`，
+  并确保 `MOS_EMBEDDER_BACKEND` / `MOS_EMBEDDER_DIMS` / `NACOS_ENABLE_WATCH` /
+  `NEO4J_PASSWORD` 原先不存在；
+- 作用域内断言 config/OpenAI/secret 精确可见（含
+  `OPENAI_API_KEY=sk-super-secret`、`NEO4J_PASSWORD=super-secret-neo4j`）；
+- 成功与 `init_server()` 抛错两种情况都断言 `dict(os.environ) == before`：
+  被覆盖的回原值、原先不存在的重新消失；
+- 抛错时断言 secret 不出现在异常文本中；
+- 另补：secret 只从声明的环境变量名读取，缺失时 fail-fast。
+
+## R1.5 漏测二：真实 `MemosRuntime.__init__` 装配面
+
+穿过真实 `MemosRuntime.__init__`（只 fake 外部组件叶子）断言：
+
+- `init_server()` 恰好一次；
+- 真实 `AddHandler` 与 `SearchHandler` 的 `.deps` 是**同一** `HandlerDependencies`
+  对象，且就是 `runtime.dependencies`；
+- `scheduler` / `naive_mem_cube` / `tracker` 都来自同一 bundle，
+  `scheduler.status_tracker` 与 `dispatcher.status_tracker` 是同一个 tracker；
+- `memos.api.routers.server_router` 仍未被 import。
+
+该用例暴露了真实装配面的一手事实（首轮 `_FakeRuntime` 覆盖不到）：
+`SearchHandler` 还要求 `searcher` / `deepsearch_agent`，`AddHandler` 还要求
+`mem_reader` / `feedback_server`；且 current `BaseHandler` 把依赖存成 `.deps`
+而非 `.dependencies`。测试的叶子集合按 current `_validate_dependencies` 对齐。
+
+## R1.6 顺带修掉的测试隔离缺陷
+
+首轮 `tests/test_memos_adapter.py` 里只有请求 `memos_product_models` 的用例才做
+MemOS import 引导，其余 provider 级用例隐式依赖同文件执行顺序——按 node id 单独跑
+`test_one_session_batch_emits_one_add_request_and_one_terminal` 会
+`ModuleNotFoundError`。已加 module 级 autouse 引导 fixture 消除该顺序依赖；
+两个用例现在单独跑也通过（`2 passed`）。
+
+这不是本卡缺口，但属于同一允许文件内我自己引入的脆弱点，一并修正并在此披露。
+
+## R1.7 Mutation 结果
+
+| mutation | 转红用例 |
+| --- | --- |
+| 还原「close 前先清 owner/provider 引用」（即 `a87353a` 顺序） | `test_cleanup_refusal_keeps_every_retryable_reference`、`test_cleanup_succeeds_after_task_reaches_terminal_with_single_stop`、`test_scheduler_stop_failure_is_visible_and_owner_keeps_reference`、`test_root_provider_closes_runtime_created_by_clean_hook`、`test_root_cleanup_fails_fast_on_conflicting_owner_identity`（5 failed, 76 passed） |
+| 把 runner lifecycle guard 移回 clean hook / preflight 之后 | `test_clean_hook_failure_still_cleans_up_shared_provider_once`、`test_checkpoint_preflight_failure_still_cleans_up_shared_provider_once`（2 failed, 129 passed） |
+
+两次 mutation 后都已恢复并复跑绿。临时变体未提交。
+
+## R1.8 定向自检尾行
+
+```text
+uv run pytest -q tests/test_memos_adapter.py tests/test_prediction_runner.py \
+  tests/test_memos_registered_prediction.py tests/test_memos_lifecycle.py
+
+270 passed, 10 warnings in 5.92s
+```
+
+10 个 warning 仍是既有 MemOS `datetime.utcnow()` deprecation 与 MemOS config
+Pydantic serialization warning，与首轮及 R2 验收 note 一致。
+
+未跑全量 pytest、compileall、真实服务/API/模型（本卡 §5 限定）。
+
+## R1.9 偏差与停工点
+
+无停工点。改动严格限于本卡 §3 允许的 5 个文件；未触碰 CLI、registry、
+provider protocol、vendored MemOS、patch、TOML 与其他测试。
+
+一处需架构师知悉的实现选择：`MemosRuntime` 新增 `_stop_attempted`，使
+`stop()` 抛错后重试 `close()` 不再二次 stop。裁决 §2.1.6 只要求「错误可见 +
+不丢孤儿」，未规定重试是否应再次 stop；此处按「同一 scheduler 不重复 stop」取舍，
+若架构师希望重试时重新 stop，可在复核时改判。

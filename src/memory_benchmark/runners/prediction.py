@@ -6,6 +6,7 @@ conversation 级调度和断点续跑。它不包含 benchmark/method 特判，�
 
 from __future__ import annotations
 
+import contextlib
 import json
 import traceback
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
@@ -463,83 +464,92 @@ def run_predictions(
             for conversation in selected_conversations
             for question in selected_questions[conversation.conversation_id]
         ]
-        cleaned_failed_ingest_conversation_ids = _prepare_clean_failed_ingest_retries(
-            conversations=selected_conversations,
-            conversation_status=conversation_status,
-            policy=policy,
-            clean_failed_ingest_conversation=clean_failed_ingest_conversation,
-            paths=paths,
-            logger=logger,
-        )
         use_isolated = (
             system_factory is not None
             and build_context_template is not None
             and policy.max_workers > 1
             and not supports_shared_instance_parallelism
         )
-        if not use_isolated:
-            checkpoint_store = TurnIngestCheckpointStore(
-                paths.ingest_turn_checkpoints_dir
-            )
-            _preflight_ingest_checkpoints(
+        # shared/non-isolated v3 provider 的生命周期归本 runner 所有，且保护区必须
+        # 从 failed-ingest clean retry **之前**开始：MemOS 这类 provider 的 clean
+        # hook 会先 lazy 建好共享 runtime，因此 clean hook、checkpoint preflight 与
+        # work-plan 阶段任一失败都可能泄漏后台线程。正常路径仍在写 Completed
+        # stage/summary/run_completed 之前显式 close，close() 会弹出回调，
+        # 因此 context 退出时不会重复执行。isolated 路径的 provider 由各 worker
+        # 自行创建与清理，根 system 不参与。
+        with contextlib.ExitStack() as lifecycle_stack:
+            if not use_isolated:
+                lifecycle_stack.callback(_cleanup_memory_provider, system)
+            cleaned_failed_ingest_conversation_ids = _prepare_clean_failed_ingest_retries(
                 conversations=selected_conversations,
-                system=system,
-                policy=policy,
                 conversation_status=conversation_status,
-                checkpoint_store=checkpoint_store,
+                policy=policy,
+                clean_failed_ingest_conversation=clean_failed_ingest_conversation,
+                paths=paths,
+                logger=logger,
             )
-            atomic_write_json(paths.conversation_status_path, conversation_status)
-        work_plan = _build_prediction_work_plan(
-            conversations=selected_conversations,
-            selected_questions=selected_questions,
-            conversation_status=conversation_status,
-            prediction_records=prediction_records,
-            policy=policy,
-        )
-        run_control_metadata = {
-            "max_new_conversations": policy.max_new_conversations,
-            "retry_failed_conversations": policy.retry_failed_conversations,
-            "skipped_failed_conversations": list(
-                work_plan.skipped_failed_conversation_ids
-            ),
-            "budget_exhausted": work_plan.budget_exhausted,
-        }
-        if cleaned_failed_ingest_conversation_ids:
-            run_control_metadata["cleaned_failed_ingest_conversations"] = list(
-                cleaned_failed_ingest_conversation_ids
+            if not use_isolated:
+                checkpoint_store = TurnIngestCheckpointStore(
+                    paths.ingest_turn_checkpoints_dir
+                )
+                _preflight_ingest_checkpoints(
+                    conversations=selected_conversations,
+                    system=system,
+                    policy=policy,
+                    conversation_status=conversation_status,
+                    checkpoint_store=checkpoint_store,
+                )
+                atomic_write_json(paths.conversation_status_path, conversation_status)
+            work_plan = _build_prediction_work_plan(
+                conversations=selected_conversations,
+                selected_questions=selected_questions,
+                conversation_status=conversation_status,
+                prediction_records=prediction_records,
+                policy=policy,
+            )
+            run_control_metadata = {
+                "max_new_conversations": policy.max_new_conversations,
+                "retry_failed_conversations": policy.retry_failed_conversations,
+                "skipped_failed_conversations": list(
+                    work_plan.skipped_failed_conversation_ids
+                ),
+                "budget_exhausted": work_plan.budget_exhausted,
+            }
+            if cleaned_failed_ingest_conversation_ids:
+                run_control_metadata["cleaned_failed_ingest_conversations"] = list(
+                    cleaned_failed_ingest_conversation_ids
+                )
+
+            _conversation_progress_total = (
+                len(work_plan.ingested_conversation_ids) + len(work_plan.items)
+            )
+            _question_progress_total = (
+                len(work_plan.completed_question_ids)
+                + sum(len(item.pending_questions) for item in work_plan.items)
             )
 
-        _conversation_progress_total = (
-            len(work_plan.ingested_conversation_ids) + len(work_plan.items)
-        )
-        _question_progress_total = (
-            len(work_plan.completed_question_ids)
-            + sum(len(item.pending_questions) for item in work_plan.items)
-        )
+            logger.info(
+                "[bold]Prediction run[/bold] "
+                f"benchmark={dataset.dataset_name} method={run_context.method_name} "
+                f"conversations={_conversation_progress_total} questions={_question_progress_total}"
+            )
+            logger.log_event(
+                "run_started",
+                {
+                    "run_id": run_context.run_id,
+                    "benchmark": dataset.dataset_name,
+                    "method": run_context.method_name,
+                    "resume": policy.resume,
+                    "run_control": run_control_metadata,
+                },
+            )
 
-        logger.info(
-            "[bold]Prediction run[/bold] "
-            f"benchmark={dataset.dataset_name} method={run_context.method_name} "
-            f"conversations={_conversation_progress_total} questions={_question_progress_total}"
-        )
-        logger.log_event(
-            "run_started",
-            {
-                "run_id": run_context.run_id,
-                "benchmark": dataset.dataset_name,
-                "method": run_context.method_name,
-                "resume": policy.resume,
-                "run_control": run_control_metadata,
-            },
-        )
-
-        with ProgressReporter(
-            paths.progress_path,
-            enabled=policy.progress_enabled,
-        ) as progress:
-            progress.start_conversations(_conversation_progress_total)
-            progress.start_questions(_question_progress_total)
-            try:
+            with ProgressReporter(
+                paths.progress_path,
+                enabled=policy.progress_enabled,
+            ) as progress:
+                progress.start_conversations(_conversation_progress_total)
+                progress.start_questions(_question_progress_total)
                 if use_isolated:
                     _run_isolated_worker_pipeline(
                         work_plan=work_plan,
@@ -615,90 +625,84 @@ def run_predictions(
                         unified_prompt_builder=unified_prompt_builder,
                         prediction_transform=prediction_transform,
                     )
-            finally:
-                # shared/non-isolated v3 provider 的生命周期归本 runner 所有：
-                # 成功路径必须在写 Completed stage/summary/run_completed 之前收敛，
-                # 异常路径也必须在退出前收敛，否则 MemOS 这类带后台线程的 provider
-                # 会泄漏 consumer/monitor/dispatcher。isolated 路径的 provider 由
-                # 各 worker 自行创建与清理，根 system 不参与。
-                if not use_isolated:
-                    _cleanup_memory_provider(system)
-            progress.set_stage("Completed", step_index=3, step_count=3)
-            completed_conversation_count = sum(
-                1
-                for conversation in selected_conversations
-                if conversation_status.get(conversation.conversation_id, {}).get("status")
-                == "completed"
-            )
-            progress.update_conversations(
-                completed=completed_conversation_count,
-                total=_conversation_progress_total,
-                current_conversation_id=None,
-            )
-            progress.update_questions(
-                completed=len(prediction_records),
-                total=_question_progress_total,
-                current_conversation_id=None,
-                current_question_id=None,
-            )
-            progress.flush()
+                # 正常路径：在既有完成点收敛，早于 Completed/summary/run_completed。
+                lifecycle_stack.close()
+                progress.set_stage("Completed", step_index=3, step_count=3)
+                completed_conversation_count = sum(
+                    1
+                    for conversation in selected_conversations
+                    if conversation_status.get(conversation.conversation_id, {}).get("status")
+                    == "completed"
+                )
+                progress.update_conversations(
+                    completed=completed_conversation_count,
+                    total=_conversation_progress_total,
+                    current_conversation_id=None,
+                )
+                progress.update_questions(
+                    completed=len(prediction_records),
+                    total=_question_progress_total,
+                    current_conversation_id=None,
+                    current_question_id=None,
+                )
+                progress.flush()
 
-        conversation_prompts = _build_conversation_prompts(prediction_records)
-        if conversation_prompts:
-            atomic_write_jsonl(
-                paths.conversation_prompts_path,
-                [
-                    {"conversation_id": conv_id, **prompts}
-                    for conv_id, prompts in conversation_prompts.items()
-                ],
-            )
-            _strip_conversation_metadata(prediction_records)
-            atomic_write_jsonl(
-                paths.method_predictions_path,
-                [
-                    prediction_records[qid]
-                    for qid in question_order
-                    if qid in prediction_records
-                ],
-            )
+            conversation_prompts = _build_conversation_prompts(prediction_records)
+            if conversation_prompts:
+                atomic_write_jsonl(
+                    paths.conversation_prompts_path,
+                    [
+                        {"conversation_id": conv_id, **prompts}
+                        for conv_id, prompts in conversation_prompts.items()
+                    ],
+                )
+                _strip_conversation_metadata(prediction_records)
+                atomic_write_jsonl(
+                    paths.method_predictions_path,
+                    [
+                        prediction_records[qid]
+                        for qid in question_order
+                        if qid in prediction_records
+                    ],
+                )
 
-        if efficiency_store is not None:
-            _write_prediction_efficiency_summaries(
-                paths=paths,
-                efficiency_store=efficiency_store,
-            )
+            if efficiency_store is not None:
+                _write_prediction_efficiency_summaries(
+                    paths=paths,
+                    efficiency_store=efficiency_store,
+                )
 
-        summary = PredictionRunSummary(
-            run_id=run_context.run_id,
-            dataset_name=dataset.dataset_name,
-            total_conversations=len(selected_conversations),
-            completed_conversations=sum(
-                1
-                for conversation in selected_conversations
-                if conversation_status.get(conversation.conversation_id, {}).get("status")
-                == "completed"
-            ),
-            total_questions=len(question_order),
-            completed_questions=sum(
-                1 for question_id in question_order if question_id in prediction_records
-            ),
-            prediction_path=str(paths.method_predictions_path),
-            private_label_path=str(paths.evaluator_private_labels_path),
-            summary_path=str(paths.summary_path),
-            metadata={
-                "run_control": run_control_metadata,
-                "bridge_empty_memory_sentinel_count": _count_bridge_empty_memory_sentinel(
-                    paths.answer_prompts_path
+            summary = PredictionRunSummary(
+                run_id=run_context.run_id,
+                dataset_name=dataset.dataset_name,
+                total_conversations=len(selected_conversations),
+                completed_conversations=sum(
+                    1
+                    for conversation in selected_conversations
+                    if conversation_status.get(conversation.conversation_id, {}).get("status")
+                    == "completed"
                 ),
-            },
-        )
-        atomic_write_json(paths.summary_path, summary.to_dict())
-        logger.log_event("run_completed", summary.to_dict())
-        logger.info(
-            "[green]Prediction run completed[/green] "
-            f"answers={summary.completed_questions}/{summary.total_questions}"
-        )
-        return summary
+                total_questions=len(question_order),
+                completed_questions=sum(
+                    1 for question_id in question_order if question_id in prediction_records
+                ),
+                prediction_path=str(paths.method_predictions_path),
+                private_label_path=str(paths.evaluator_private_labels_path),
+                summary_path=str(paths.summary_path),
+                metadata={
+                    "run_control": run_control_metadata,
+                    "bridge_empty_memory_sentinel_count": _count_bridge_empty_memory_sentinel(
+                        paths.answer_prompts_path
+                    ),
+                },
+            )
+            atomic_write_json(paths.summary_path, summary.to_dict())
+            logger.log_event("run_completed", summary.to_dict())
+            logger.info(
+                "[green]Prediction run completed[/green] "
+                f"answers={summary.completed_questions}/{summary.total_questions}"
+            )
+            return summary
 
 
 def _write_prediction_efficiency_summaries(

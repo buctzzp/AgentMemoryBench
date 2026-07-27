@@ -390,6 +390,7 @@ class MemosRuntime:
         self.config = config
         self.identity = config.runtime_identity()
         self._closed = False
+        self._stop_attempted = False
         _ensure_memos_importable(path_settings)
         # lazy import：绝不 import `memos.api.routers.server_router`，
         # 它会在 module import 期初始化全局 server components。
@@ -417,15 +418,26 @@ class MemosRuntime:
         return self._closed
 
     def close(self) -> None:
-        """收敛 scheduler：先拒绝未完成 task，再 stop 恰好一次。"""
+        """收敛 scheduler：先拒绝未完成 task，再 stop 恰好一次。
+
+        **状态只在成功后提交**：pending task 导致拒绝时，本对象不做任何变更，
+        因此后台 task 到达终态后同一个 runtime 可以原样重试关闭。`stop()` 只会
+        被尝试一次——它抛错时异常照常上抛（失败必须可见），但不会在重试中被
+        二次调用，避免同一 scheduler 被 stop 两次。
+        """
 
         if self._closed:
             return
+        # 先拒绝：此调用之前不修改任何状态，保证 refusal 完全可重试。
         self.tracker.assert_no_pending_tasks()
+        if not self._stop_attempted:
+            stop = getattr(self.scheduler, "stop", None)
+            if callable(stop):
+                self._stop_attempted = True
+                stop()
+            else:
+                self._stop_attempted = True
         self._closed = True
-        stop = getattr(self.scheduler, "stop", None)
-        if callable(stop):
-            stop()
 
 
 class _MemosRuntimeOwner:
@@ -478,13 +490,53 @@ class _MemosRuntimeOwner:
             return runtime
 
     def release(self, runtime: MemosRuntime) -> None:
-        """关闭并释放当前 runtime；重复释放对 owner 幂等。"""
+        """关闭并释放当前 runtime；重复释放对 owner 幂等。
+
+        **只在 `runtime.close()` 成功后才清空引用**：close 因 pending task 被拒绝、
+        或 `scheduler.stop()` 抛错时，owner 仍持有该 runtime，异常照常上抛，
+        因此不会留下"仍在运行却无人持有"的孤儿。
+
+        close 在持锁状态下执行，保证 §2.1.5 的原子性：close 尚未完成时，
+        并发 `acquire()` 不会构造第二个同 config runtime。
+        """
 
         with self._lock:
             if self._runtime is not runtime:
+                # 已被别处释放：仍要确保该 runtime 自身收敛，且不误清他人引用。
+                runtime.close()
                 return
+            runtime.close()
             self._runtime = None
-        runtime.close()
+
+    def release_current_for_config(self, config: MemOSConfig) -> MemosRuntime | None:
+        """关闭并释放 owner 中与该 config 同 identity 的现有 runtime。
+
+        供"clean hook 已 lazy 建好 runtime，但根 provider 自己从未 acquire"的交接
+        场景使用（见支线 M4-R1 裁决 §2.2）：
+
+        - owner 为空：no-op 返回 `None`，**不得**为了 cleanup 反向构造 runtime；
+        - identity 一致：关闭并释放，返回该 runtime；
+        - identity 冲突：fail-fast，绝不关闭别的配置的 runtime。
+
+        Returns:
+            实际被释放的 runtime；owner 为空时为 `None`。
+
+        Raises:
+            ConfigurationError: owner 持有的是另一份 config identity 的 runtime。
+        """
+
+        with self._lock:
+            runtime = self._runtime
+            if runtime is None:
+                return None
+            if runtime.identity != config.runtime_identity():
+                raise ConfigurationError(
+                    "MemOS runtime owner holds a different config identity; "
+                    "refusing to close another configuration's runtime"
+                )
+            runtime.close()
+            self._runtime = None
+            return runtime
 
     def reset(self) -> None:
         """测试后确定性清空持有者，不调用 scheduler.stop。"""
@@ -800,17 +852,31 @@ class MemOS(MemoryProvider):
     def cleanup(self) -> None:
         """收敛 runtime：先拒绝 pending task，再对 scheduler stop 恰好一次。
 
+        **状态只在成功后提交**：release 抛错（pending task 拒绝、`stop()` 失败）时，
+        `_cleaned` 与 `_runtime` 保持不变，异常照常上抛；后台 task 到达终态后，
+        对同一个 provider 再次 `cleanup()` 会真正关闭，且 `scheduler.stop()`
+        总计仍只发生一次。
+
+        本 provider 自己从未 `_require_runtime()` 时（例如 failed-ingest clean hook
+        用临时 provider 先建好了共享 runtime），仍要接管并关闭 owner 中**同
+        identity**的现有 runtime；owner 为空则保持 no-op，绝不为了 cleanup 反向
+        构造 runtime。
+
         重复 cleanup 对 adapter 自身幂等，且不会二次调用 `scheduler.stop()`。
         """
 
         if self._cleaned:
             return
         runtime = self._runtime
-        self._cleaned = True
         if runtime is None:
+            # 交接路径：owner 里可能有 clean hook 建好的同 config runtime。
+            self._runtime_owner.release_current_for_config(self.config)
+            self._cleaned = True
             return
-        self._runtime = None
         self._runtime_owner.release(runtime)
+        # 走到这里说明 release 成功，才允许提交状态。
+        self._runtime = None
+        self._cleaned = True
 
 
 def clean_memos_conversation_state(

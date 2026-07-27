@@ -19,6 +19,7 @@ event stream 聚合器或 product 请求模型。
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import types
@@ -59,6 +60,21 @@ from test_memos_lifecycle import MEMOS_ROOT, _bootstrap_memos  # noqa: E402
 # --------------------------------------------------------------------------------------
 # 公共夹具
 # --------------------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _bootstrap_memos_for_module(tmp_path_factory):
+    """整个模块共享一次 MemOS import 引导。
+
+    provider 级用例会在 `ingest()`/`retrieve()` 里 lazy import
+    `memos.api.product_models`；若只有请求 `memos_product_models` 的用例才引导，
+    其余用例就隐式依赖同文件内的执行顺序（单独按 node id 跑会 ModuleNotFoundError）。
+    这里显式消除该顺序依赖。
+    """
+
+    if not MEMOS_ROOT.exists():
+        pytest.skip("third_party/methods/MemOS 未就位（local-only）")
+    _bootstrap_memos(tmp_path_factory.mktemp("memos_adapter_module"))
 
 
 @pytest.fixture(scope="module")
@@ -1526,3 +1542,436 @@ def test_manifest_never_leaks_secrets_or_absolute_paths():
     assert "vector_db_api_key" not in manifest
     for value in manifest.values():
         assert not (isinstance(value, str) and value.startswith("/"))
+
+
+# --------------------------------------------------------------------------------------
+# 10. M4-R1：cleanup refusal 必须可重试（成功后才提交状态）
+# --------------------------------------------------------------------------------------
+
+
+class _StopCountingRuntime(_FakeRuntime):
+    """可注入 scheduler stop 失败的替身 runtime，用于 R1 状态机反例。"""
+
+    def __init__(self, **kwargs):
+        """初始化 stop 失败开关。"""
+        super().__init__(**kwargs)
+        self.fail_stop = False
+
+    def close(self) -> None:
+        """镜像真实 close 的"成功后提交"语义。"""
+        if self._closed:
+            return
+        self.tracker.assert_no_pending_tasks()
+        if not getattr(self, "_stop_attempted", False):
+            self._stop_attempted = True
+            self.stop_calls += 1
+            if self.fail_stop:
+                raise RuntimeError("scheduler stop exploded")
+        self._closed = True
+
+
+def _pending_task(provider: MemOS, runtime, isolation_key="run1_conv1") -> str:
+    """在 tracker 上登记一个未终结的 MEM_READ task，返回 item id。"""
+
+    namespace = provider._namespace(isolation_key)
+    runtime.tracker.task_submitted(
+        task_id="biz-item0",
+        user_id=namespace,
+        task_type="mem_read",
+        business_task_id="biz",
+        mem_cube_id=namespace,
+    )
+    return "biz-item0"
+
+
+def test_cleanup_refusal_keeps_every_retryable_reference(tmp_path):
+    """pending 拒绝后 provider/owner/runtime 引用必须原样保留，可再次重试。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    runtime = provider._require_runtime()
+    owner = provider._runtime_owner
+    _pending_task(provider, runtime)
+
+    with pytest.raises(ConfigurationError, match="拒绝静默关闭"):
+        provider.cleanup()
+
+    # 关键：拒绝之后一切引用不变，runtime 没有变成"仍在跑却无人持有"的孤儿。
+    assert provider._cleaned is False
+    assert provider._runtime is runtime
+    assert owner._runtime is runtime
+    assert runtime.closed is False
+    assert runtime.stop_calls == 0
+
+
+def test_cleanup_succeeds_after_task_reaches_terminal_with_single_stop(tmp_path):
+    """pending task 转终态后重试 cleanup 必须真正关闭，且 stop 总计恰好一次。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="longmemeval")
+    runtime = provider._require_runtime()
+    owner = provider._runtime_owner
+    namespace = provider._namespace("run1_conv1")
+    item_id = _pending_task(provider, runtime)
+
+    with pytest.raises(ConfigurationError):
+        provider.cleanup()
+
+    runtime.tracker.task_started(task_id=item_id, user_id=namespace)
+    runtime.tracker.task_completed(item_id, namespace)
+
+    provider.cleanup()
+
+    assert provider._cleaned is True
+    assert provider._runtime is None
+    assert owner._runtime is None
+    assert runtime.closed is True
+    assert runtime.stop_calls == 1
+
+    # 再次 cleanup 幂等，不二次 stop。
+    provider.cleanup()
+    assert runtime.stop_calls == 1
+
+
+def test_scheduler_stop_failure_is_visible_and_owner_keeps_reference(tmp_path):
+    """scheduler stop 抛错必须可见，且 owner 不得把 runtime 丢成孤儿。"""
+
+    provider = _make_provider(
+        tmp_path,
+        benchmark_name="longmemeval",
+        runtime_factory=_StopCountingRuntime,
+    )
+    runtime = provider._require_runtime()
+    owner = provider._runtime_owner
+    runtime.fail_stop = True
+
+    with pytest.raises(RuntimeError, match="scheduler stop exploded"):
+        provider.cleanup()
+
+    assert owner._runtime is runtime
+    assert provider._runtime is runtime
+    assert provider._cleaned is False
+    assert runtime.closed is False
+    # stop 已尝试过一次，重试不得再次调用（避免同一 scheduler 被 stop 两次）。
+    assert runtime.stop_calls == 1
+    provider.cleanup()
+    assert runtime.stop_calls == 1
+
+
+def test_real_runtime_close_commits_state_only_after_success(tmp_path):
+    """真实 MemosRuntime.close 的状态机同样是"成功后提交"。"""
+
+    from memory_benchmark.methods.memos_adapter import MemosRuntime
+
+    runtime = object.__new__(MemosRuntime)
+    runtime._closed = False
+    runtime._stop_attempted = False
+    runtime.tracker = MemosLocalTaskTracker()
+    stop_calls: list[int] = []
+    runtime.scheduler = types.SimpleNamespace(
+        stop=lambda: stop_calls.append(1)
+    )
+    runtime.tracker.task_submitted(
+        task_id="i0",
+        user_id="ns",
+        task_type="mem_read",
+        business_task_id="biz",
+        mem_cube_id="ns",
+    )
+
+    with pytest.raises(ConfigurationError, match="拒绝静默关闭"):
+        runtime.close()
+    assert runtime.closed is False
+    assert stop_calls == []
+
+    runtime.tracker.task_started(task_id="i0", user_id="ns")
+    runtime.tracker.task_completed("i0", "ns")
+    runtime.close()
+
+    assert runtime.closed is True
+    assert stop_calls == [1]
+    runtime.close()
+    assert stop_calls == [1]
+
+
+# --------------------------------------------------------------------------------------
+# 11. M4-R1：clean hook → 根 provider 的单 runtime 交接
+# --------------------------------------------------------------------------------------
+
+
+def test_root_provider_closes_runtime_created_by_clean_hook(tmp_path):
+    """clean hook 建好 runtime、根 provider 从未 acquire 时，根 cleanup 必须接管关闭。"""
+
+    from memory_benchmark.config import OpenAISettings, load_path_settings
+
+    owner = _MemosRuntimeOwner()
+    path_settings = load_path_settings()
+    storage_root = path_settings.project_root / "outputs" / "unit-test-run" / "method_state"
+    config = _make_config()
+    shared = dict(
+        config=config,
+        path_settings=path_settings,
+        storage_root=storage_root,
+        openai_settings=OpenAISettings(api_key="k", base_url=None),
+        runtime_owner=owner,
+        runtime_factory=_FakeRuntime,
+    )
+    # clean hook 用的临时 provider 先 lazy 建好共享 runtime。
+    hook_provider = MemOS(benchmark_name="longmemeval", **shared)
+    runtime = hook_provider._require_runtime()
+    # 根 provider 同 config，但自己从未 _require_runtime()。
+    root_provider = MemOS(benchmark_name="longmemeval", **shared)
+    assert root_provider._runtime is None
+
+    root_provider.cleanup()
+
+    assert runtime.closed is True
+    assert runtime.stop_calls == 1
+    assert owner._runtime is None
+
+
+def test_root_cleanup_with_empty_owner_does_not_build_runtime(tmp_path):
+    """owner 为空的 no-work run，cleanup 不得反向构造 runtime。"""
+
+    built: list[str] = []
+
+    def _tracking_factory(**kwargs):
+        """记录是否被调用。"""
+        built.append("built")
+        return _FakeRuntime(**kwargs)
+
+    provider = _make_provider(
+        tmp_path,
+        benchmark_name="longmemeval",
+        runtime_factory=_tracking_factory,
+    )
+
+    provider.cleanup()
+
+    assert built == []
+    assert provider._runtime_owner._runtime is None
+    assert provider._cleaned is True
+
+
+def test_root_cleanup_fails_fast_on_conflicting_owner_identity(tmp_path):
+    """owner 持有另一份 config identity 时必须 fail-fast，且不关闭对方。"""
+
+    from memory_benchmark.config import OpenAISettings, load_path_settings
+
+    owner = _MemosRuntimeOwner()
+    path_settings = load_path_settings()
+    storage_root = path_settings.project_root / "outputs" / "unit-test-run" / "method_state"
+    openai = OpenAISettings(api_key="k", base_url=None)
+
+    other = MemOS(
+        config=_make_config(search_relativity=0.9),
+        path_settings=path_settings,
+        storage_root=storage_root,
+        openai_settings=openai,
+        runtime_owner=owner,
+        runtime_factory=_FakeRuntime,
+    )
+    other_runtime = other._require_runtime()
+
+    root = MemOS(
+        config=_make_config(),
+        path_settings=path_settings,
+        storage_root=storage_root,
+        openai_settings=openai,
+        runtime_owner=owner,
+        runtime_factory=_FakeRuntime,
+    )
+
+    with pytest.raises(ConfigurationError, match="different config identity"):
+        root.cleanup()
+
+    assert other_runtime.closed is False
+    assert other_runtime.stop_calls == 0
+    assert owner._runtime is other_runtime
+
+
+# --------------------------------------------------------------------------------------
+# 12. M4-R1：环境作用域恢复
+# --------------------------------------------------------------------------------------
+
+
+def _fake_component_bundle(scheduler=None, naive_cube=None):
+    """返回真实 Add/SearchHandler 构造所需的最小外部组件叶子集合。
+
+    条目来自 current `AddHandler._validate_dependencies` 与
+    `SearchHandler._validate_dependencies`；全部是惰性占位对象，不连任何真实服务。
+    """
+
+    return {
+        "mem_scheduler": scheduler if scheduler is not None else types.SimpleNamespace(
+            dispatcher=types.SimpleNamespace(status_tracker=None),
+            status_tracker=None,
+        ),
+        "naive_mem_cube": naive_cube if naive_cube is not None else object(),
+        "mem_reader": object(),
+        "feedback_server": object(),
+        "searcher": object(),
+        "deepsearch_agent": object(),
+        "llm": object(),
+    }
+
+
+def _install_fake_init_server(monkeypatch, observer, *, boom=False):
+    """把 component_init.init_server 换成只观察环境的替身。"""
+
+    import memos.api.handlers.component_init as component_init
+
+    def _fake_init_server():
+        """在作用域内快照环境，然后按需抛错。"""
+        observer.update(
+            {
+                key: os.environ.get(key)
+                for key in (
+                    "MOS_CHAT_MODEL",
+                    "MOS_EMBEDDER_BACKEND",
+                    "MOS_EMBEDDER_DIMS",
+                    "MEMSCHEDULER_USE_REDIS_QUEUE",
+                    "MOS_ENABLE_REORGANIZE",
+                    "ENABLE_CHAT_API",
+                    "NACOS_ENABLE_WATCH",
+                    "OPENAI_API_KEY",
+                    "NEO4J_PASSWORD",
+                    "MEMOS_ONLY_PREEXISTING",
+                )
+            }
+        )
+        if boom:
+            raise RuntimeError("init_server exploded")
+        return _fake_component_bundle()
+
+    monkeypatch.setattr(component_init, "init_server", _fake_init_server)
+
+
+@pytest.mark.parametrize("boom", [False, True])
+def test_scoped_environment_restores_exactly_on_success_and_failure(
+    tmp_path, memos_product_models, monkeypatch, boom
+):
+    """init_server 成功与抛错都必须逐字恢复原环境，且 secret 不外泄。"""
+
+    from memory_benchmark.config import OpenAISettings, load_path_settings
+    from memory_benchmark.methods.memos_adapter import MemosRuntime
+
+    # 一组"将被覆盖"的预置值 + 一组"原先不存在"的键。
+    monkeypatch.setenv("MOS_CHAT_MODEL", "preexisting-model")
+    monkeypatch.setenv("MEMSCHEDULER_USE_REDIS_QUEUE", "true")
+    monkeypatch.setenv("MEMOS_ONLY_PREEXISTING", "keep-me")
+    monkeypatch.setenv("MEMOS_NEO4J_PASSWORD", "super-secret-neo4j")
+    monkeypatch.delenv("MOS_EMBEDDER_BACKEND", raising=False)
+    monkeypatch.delenv("MOS_EMBEDDER_DIMS", raising=False)
+    monkeypatch.delenv("NACOS_ENABLE_WATCH", raising=False)
+    monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
+
+    before = dict(os.environ)
+    observed: dict[str, str | None] = {}
+    _install_fake_init_server(monkeypatch, observed, boom=boom)
+
+    def _build():
+        """构造真实 MemosRuntime（init_server 已被替身接管）。"""
+        return MemosRuntime(
+            config=_make_config(),
+            openai_settings=OpenAISettings(api_key="sk-super-secret", base_url=None),
+            path_settings=load_path_settings(),
+        )
+
+    if boom:
+        with pytest.raises(RuntimeError) as excinfo:
+            _build()
+        # secret 不得进入异常文本。
+        assert "sk-super-secret" not in str(excinfo.value)
+        assert "super-secret-neo4j" not in str(excinfo.value)
+    else:
+        _build()
+
+    # 作用域内：config / OpenAI / secret 值精确可见。
+    assert observed["MOS_CHAT_MODEL"] == "gpt-4o-mini"
+    assert observed["MOS_EMBEDDER_BACKEND"] == "sentence_transformer"
+    assert observed["MOS_EMBEDDER_DIMS"] == "384"
+    assert observed["MEMSCHEDULER_USE_REDIS_QUEUE"] == "false"
+    assert observed["MOS_ENABLE_REORGANIZE"] == "false"
+    assert observed["ENABLE_CHAT_API"] == "false"
+    assert observed["NACOS_ENABLE_WATCH"] == "false"
+    assert observed["OPENAI_API_KEY"] == "sk-super-secret"
+    assert observed["NEO4J_PASSWORD"] == "super-secret-neo4j"
+    # 与本 config 无关的预置键不受影响。
+    assert observed["MEMOS_ONLY_PREEXISTING"] == "keep-me"
+
+    # 作用域外：逐字恢复，被覆盖的回到原值、原先不存在的重新消失。
+    assert dict(os.environ) == before
+    assert os.environ["MOS_CHAT_MODEL"] == "preexisting-model"
+    assert os.environ["MEMSCHEDULER_USE_REDIS_QUEUE"] == "true"
+    assert "MOS_EMBEDDER_BACKEND" not in os.environ
+    assert "NEO4J_PASSWORD" not in os.environ
+
+
+def test_memos_environment_reads_secrets_only_from_declared_env_names(tmp_path):
+    """secret 只从声明的环境变量名读取；缺失时 fail-fast。"""
+
+    from memory_benchmark.config import OpenAISettings, load_path_settings
+    from memory_benchmark.methods.memos_adapter import _memos_environment
+
+    config = _make_config()
+    settings = load_path_settings()
+    openai = OpenAISettings(api_key="sk-x", base_url=None)
+
+    saved = os.environ.pop(config.graph_db_credential_env, None)
+    try:
+        with pytest.raises(ConfigurationError, match="password environment variable"):
+            _memos_environment(config, openai, settings)
+    finally:
+        if saved is not None:
+            os.environ[config.graph_db_credential_env] = saved
+
+
+# --------------------------------------------------------------------------------------
+# 13. M4-R1：真实 MemosRuntime 装配面（只 fake 外部组件叶子）
+# --------------------------------------------------------------------------------------
+
+
+def test_real_runtime_inits_once_and_shares_one_dependencies_bundle(
+    tmp_path, memos_product_models, monkeypatch
+):
+    """穿过真实 MemosRuntime.__init__：init_server 恰好一次，两 handler 共用同一 bundle。"""
+
+    import memos.api.handlers.component_init as component_init
+    from memory_benchmark.config import OpenAISettings, load_path_settings
+    from memory_benchmark.methods import memos_adapter as adapter_module
+    from memory_benchmark.methods.memos_adapter import MemosRuntime
+
+    monkeypatch.setenv("MEMOS_NEO4J_PASSWORD", "pw")
+    init_calls: list[int] = []
+    scheduler = types.SimpleNamespace(
+        dispatcher=types.SimpleNamespace(status_tracker=None),
+        status_tracker=None,
+    )
+    naive_cube = object()
+
+    def _fake_init_server():
+        """只返回外部组件叶子，不连任何真实服务。"""
+        init_calls.append(1)
+        return _fake_component_bundle(scheduler=scheduler, naive_cube=naive_cube)
+
+    monkeypatch.setattr(component_init, "init_server", _fake_init_server)
+    # install_local_tracker 走真实实现（scheduler/dispatcher 是叶子替身）。
+    runtime = MemosRuntime(
+        config=_make_config(),
+        openai_settings=OpenAISettings(api_key="sk", base_url=None),
+        path_settings=load_path_settings(),
+    )
+
+    assert init_calls == [1], "每个 runtime 只允许 init_server 一次"
+    # 真实 AddHandler / SearchHandler 必须共用同一 HandlerDependencies 对象
+    # （current BaseHandler 把它存成 `.deps`）。
+    assert runtime.add_handler.deps is runtime.search_handler.deps
+    assert runtime.add_handler.deps is runtime.dependencies
+    # scheduler / naive cube / tracker 都来自同一 bundle。
+    assert runtime.scheduler is scheduler
+    assert runtime.naive_mem_cube is naive_cube
+    assert scheduler.status_tracker is runtime.tracker
+    assert scheduler.dispatcher.status_tracker is runtime.tracker
+    assert isinstance(runtime.tracker, MemosLocalTaskTracker)
+    # 仍然不得触发 server_router。
+    assert "memos.api.routers.server_router" not in sys.modules
+    assert adapter_module.MEMOS_ADAPTER_VERSION == "memos-v2.0.25-product-v1"
