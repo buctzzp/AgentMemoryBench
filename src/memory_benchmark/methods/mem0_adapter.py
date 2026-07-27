@@ -162,17 +162,17 @@ class Mem0Config:
     def smoke(cls) -> "Mem0Config":
         """返回低成本真实链路 smoke profile。
 
-        smoke 只降低 conversation/question/turn 的运行规模和 conversation 并发；
-        extraction、embedding、检索深度、逐 turn add 和 `infer=True` 均保持官方
-        benchmark 语义。
+        smoke 只把 API LLM 换成已声明的低预算 runtime，并降低
+        conversation/question/turn 规模与 conversation 并发；embedding、检索深度、
+        逐 turn add 和 `infer=True` 保持主配置语义。该 profile 不与正式结果比较。
         """
 
         return cls(
-            extraction_model="gpt-4o-mini",
+            extraction_model="deepseek-v4-flash",
             embedding_model="sentence-transformers/all-MiniLM-L6-v2",
             embedding_dimensions=384,
             embedding_provider="huggingface",
-            reader_model="gpt-4o-mini",
+            reader_model="deepseek-v4-flash",
             top_k=20,
             max_workers=1,
             ingestion_chunk_size=1,

@@ -39,8 +39,121 @@ framework max_workers   1（smoke 与 official_full 都是 1）
 answer                  framework benchmark unified builder
 ```
 
-`smoke` 与 `official_full` 除 `profile_name` 外参数完全相同；成本控制只通过
-conversation/question/turn 规模裁剪。
+两 profile 的非 LLM build/search 参数完全相同。新 `smoke` 的 LLM runtime 是
+`opencodego/deepseek-v4-flash`，`official_full` 是
+`primary/gpt-4o-mini`；该预算型 smoke 不与正式结果比较。运行身份和 transport 见
+[`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
+
+### 2.1 直接 typed product 接口调用图
+
+本项目**不启动 HTTP host**，但也没有绕开产品逻辑重写算法。调用的是 host router
+最终委托的同一组 typed handler：
+
+```text
+首次 ingest/retrieve
+  → 在受控环境变量作用域内 init_server()
+  → HandlerDependencies.from_init_server(components)
+  → AddHandler(dependencies) + SearchHandler(dependencies)
+  → 两个 handler 共用同一 scheduler / naive_mem_cube / tracker
+```
+
+`init_server()` 对同一 config identity 在进程内只执行一次；provider 构造本身是 lazy，
+clean-only 路径不会为了清理反向创建 runtime。禁止 import
+`memos.api.routers.server_router`，因为它会在 import 期创建另一套全局 components。
+
+#### Ingest
+
+framework 先按 `consume_granularity="session"` 聚合成 `SessionBatch`。adapter 为每个
+canonical event 构造一条 message，然后调用：
+
+```python
+APIADDRequest(
+    user_id=namespace,
+    writable_cube_ids=[namespace],
+    session_id=unit.session_id,
+    task_id=business_task_id,
+    messages=[
+        {
+            "role": "user | assistant",
+            "content": "...",
+            "chat_time": "source time | None",
+            "message_id": "canonical turn id",
+        },
+        ...
+    ],
+    async_mode="async",
+    mode=None,
+)
+AddHandler.handle_add_memories(request)
+```
+
+`namespace == user_id == cube_id`；一个 conversation 一个 namespace。`task_id` 由
+namespace、session id 与 adapter 内递增序号确定性生成。`handle_add_memories()` 返回
+不代表 fine memory 已完成，adapter 随后必须调用：
+
+```text
+local_tracker.wait_for_business_task(
+  user_id=namespace,
+  business_task_id=task_id,
+  timeout_seconds=config.task_timeout_seconds
+)
+```
+
+只有 tracker 抵达唯一 terminal success 才算该 session ingest 完成；reader、storage、
+archive、raw delete、refresh 或 scheduler submit 任一失败都必须传播。
+
+#### Retrieve
+
+每题只调用 typed `SearchHandler`：
+
+```python
+APISearchRequest(
+    query=query.query_text,
+    user_id=namespace,
+    readable_cube_ids=[namespace],
+    mode="fast",
+    top_k=query.top_k,
+    relativity=...,
+    dedup=...,
+    rerank=...,
+    include_preference=False,
+    search_tool_memory=False,
+    include_skill_memory=False,
+    neighbor_discovery=...,
+    internet_search=False,
+    chat_history=[],
+    filter=None,
+    session_id=None,
+    reference_time=query.question_time,
+)
+SearchHandler.handle_search_memories(request)
+```
+
+adapter 只消费 `SearchResponse.data["text_mem"]`，按 bucket/memory 产品返回顺序扁平化；
+不会自行查底层 Qdrant/Neo4j、重排或二次截断。`reference_time` 在 v2.0.25 只是 schema
+字段，current search 未消费，故不能宣称按 question time 过滤。
+
+#### Failed-ingest clean 与 runtime close
+
+clean retry 不走危险的 `delete_by_memory_ids()`，而是直接调用产品 memory handler：
+
+```text
+DeleteMemoryRequest(writable_cube_ids=[namespace], user_id=namespace)
+  → handle_delete_memories(...)
+  → GetMemoryRequest(mem_cube_id=namespace, user_id=namespace, 三类附加 memory=false)
+  → handle_get_memories(...)
+  → text_mem 为空且 total_nodes == 0
+```
+
+删除前 local tracker 必须证明该 namespace 没有 pending task。run 收尾先执行
+`tracker.assert_no_pending_tasks()` 再 `scheduler.stop()`；pending refusal 可在 task
+终态后重试，`stop()` partial failure 则永久 fail-closed，既不标 closed，也不构造第二套
+runtime。
+
+实现入口：
+[`memos_adapter.py`](../../../src/memory_benchmark/methods/memos_adapter.py)；
+生命周期补丁：
+[`memos-product-runtime-observability.patch`](../../../scripts/patches/memos-product-runtime-observability.patch)。
 
 ## 3. 本项目对 MemOS 的修改（patch 内容）
 
@@ -160,7 +273,7 @@ model inventory 区分三类，本地 reranker 不伪装成 LLM：
 
 | model_id | role | mode |
 | --- | --- | --- |
-| `memos-build-llm` | memory build/extraction LLM（`gpt-4o-mini`） | api |
+| `memos-build-llm` | memory build/extraction LLM（smoke=`deepseek-v4-flash`；official=`gpt-4o-mini`） | api |
 | `memos-embedding` | 本地 MiniLM 384 | local |
 | `memos-reranker` | `cosine_local` 本地算法 | local |
 
@@ -176,3 +289,18 @@ framework question context。不得用 add pair 数或 `len(text)/4` 伪造 exac
 - MemOS async worker 的精确 per-call token/cost 观测；
 - official LoCoMo 双 namespace reproduction harness（主 profile 仍是一 conversation 一 cube）；
 - 跨 conversation 并行资格（首版 `max_workers=1`、禁 smoke override、禁共享实例并行）。
+
+## 10. 调查与裁决资产索引
+
+日常查“当前 MemOS 怎么调用”只读本页；需要复核某个承重结论再下钻：
+
+| 问题 | 一手证据 / 裁决 |
+| --- | --- |
+| source lock、release 与 PDF/源码身份 | [source lock](../../workstreams/ws02.7-method-track/branches/method-recertification/memos/notes/memos-v2.0.25-source-lock.md) |
+| product reader、时间、lineage、host/handler、scheduler 机制 | [runtime preflight R1](../../workstreams/ws02.7-method-track/branches/method-recertification/memos/notes/memos-v2.0.25-product-runtime-preflight-r1.md) |
+| async fast→fine 完成链与失败传播 | [R2 architect acceptance](../../workstreams/ws02.7-method-track/branches/method-recertification/memos/notes/memos-v2.0.25-async-lifecycle-r2-architect-acceptance.md) |
+| typed adapter、五格 payload、namespace、readout | [M4 implementation](../../workstreams/ws02.7-method-track/branches/method-recertification/memos/notes/memos-v2.0.25-product-adapter-m4-implementation.md) |
+| cleanup 四态与最终接收边界 | [M4 architect acceptance](../../workstreams/ws02.7-method-track/branches/method-recertification/memos/notes/memos-v2.0.25-product-adapter-m4-architect-acceptance.md) |
+
+根目录未跟踪的 `MemOS.md` 是用户提供的外部调研草稿，可作线索，**不是**本项目稳定事实
+源；本页与上表 notes 才是跨模型可恢复入口。

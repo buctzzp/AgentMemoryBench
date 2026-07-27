@@ -3,6 +3,9 @@
 > 判据模板：`../method-integration-checklist.md` §B；勾选总表：`../integration-status.md`。
 > 状态：**METHOD_FROZEN_V3（五格 current-v7 真实行为门、forced-flush exact-smoke
 > reachability 与 MemBench 100K current-identity refill 全部通过）**。
+> 2026-07-27 后的新 smoke 改用 `opencodego/deepseek-v4-flash`；本页既有 B11 数字与
+> token 观测仍是当时 `gpt-4o-mini` 历史 run，不改写、不跨模型比较。现行运行身份见
+> [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
 > 2026-07-17 的 method-frozen-v2 与 v6 LoCoMo smoke 仍是有效历史证据，但 v7 改变
 > 公共 readout 与 embedding observation 契约，不能沿用 v6 artifact 宣称当前版本已
 > frozen。online-soft lifecycle 主体、MemBench 时间语义 Phase A 与 LightMem

@@ -61,7 +61,7 @@ ws02.6 于 2026-07-12 将五家全部 frozen-v1；2026-07-15 MemBench 因 100k m
 | [MemoryOS](integration/memoryos.md) | ✅ | ✅PyPI；Chroma=reproduction variant | ✅pair/session | ✅物理 | ✅全层+时间 | ✅turn + M0 v1 | ✅no-op | ✅五格 prediction+judge 实测 | ✅降级审计 | ✅当前 MiniLM smoke build | ✅current 身份 truthful；author builder 待迁 | ✅五格 8 run 开箱 | **method-frozen-v1** |
 | [A-Mem](integration/amem.md) | ✅ | ✅官方 general product | ✅turn | ✅conversation 物理隔离 | ✅speaker/role/time/caption | ✅审计 lineage；evolved memory retrieval metric=N/A | ✅同步 add/evolution | ✅五格 prediction+judge 实测 | ✅fail-fast+clean retry | ✅product MiniLM-384 | ✅主 TOML | ✅五格 11 run 开箱 | **method-frozen-v1** |
 | [SimpleMem](integration/simplemem.md) | ✅ | ✅官方 text product | ✅turn | ✅conversation 物理隔离 | ✅speaker/content/time/caption | ✅合成 memory provenance=N/A；ranking pending | ✅conversation/session finalize | ✅五格 prediction+judge 实测 | ✅兼容 patch+clean retry | ✅controlled MiniLM-384 | ✅主 TOML；build 串行 | ✅五格 11 run 开箱 | **method-frozen-v1** |
-| MemOS | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
+| [MemOS](integration/memos.md) | ✅ | ✅product typed handler | ✅session | 🟡真实 DB 待 B11 | ✅五格 offline payload | 🟡provenance/ranking pending | ✅async task terminal | 🟡真实 judge 待 B11 | ✅fail-closed + namespace clean | ✅MiniLM-384 | ✅主 TOML | 🟡M4 complete；B11 pending | **adapter-m4** |
 | Letta/MemGPT | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | LangMem | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | Supermemory | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |

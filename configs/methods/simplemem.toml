@@ -9,7 +9,8 @@
 # 差异留档 method-interface-inventory.md hyperparameters 字段。
 
 [smoke]
-llm_model = "gpt-4o-mini"
+# budget-only connectivity profile；不与 official_full 结果比较。
+llm_model = "deepseek-v4-flash"
 embedding_model_path = "models/all-MiniLM-L6-v2"
 embedding_dimension = 384
 window_size = 40

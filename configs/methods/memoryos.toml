@@ -1,10 +1,11 @@
 # MemoryOS 通用产品（memoryos-pypi）引擎的固定方法参数。
-# smoke 与 official_full 仅由 benchmark 数据范围区分；方法本身参数保持一致。
+# 2026-07-27 起 smoke API runtime 为 opencodego/deepseek-v4-flash；
+# official_full 仍是 primary/gpt-4o-mini，历史 smoke 身份不改写。
 # 参数取 memoryos-pypi 官方默认（memoryos.py:30-44），与旧 eval/ LoCoMo 调参不同。
 # 迁移背景见 docs/workstreams/ws02.5-method-interface-audit/plan-memoryos-migration.md。
 
 [smoke]
-llm_model = "gpt-4o-mini"
+llm_model = "deepseek-v4-flash"
 embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
 short_term_capacity = 10
 mid_term_capacity = 2000

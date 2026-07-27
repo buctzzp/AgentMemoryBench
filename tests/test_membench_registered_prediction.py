@@ -115,7 +115,12 @@ def _install_offline_probe_runtime(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: OpenAISettings(api_key="sk-test", model="gpt-4o-mini"),
+        lambda project_root, api_provider=None: OpenAISettings(
+            api_key="sk-test",
+            model="deepseek-v4-flash",
+            provider="opencodego",
+            judge_transport="chat_completions",
+        ),
         raising=False,
     )
     fake_client = _FakeUnifiedAnswerClient()

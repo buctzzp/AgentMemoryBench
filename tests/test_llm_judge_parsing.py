@@ -10,9 +10,17 @@ import unittest
 
 import pytest
 
+from memory_benchmark.config import (
+    CHAT_COMPLETIONS_JUDGE_TRANSPORT,
+    OpenAISettings,
+)
 from memory_benchmark.core import AnswerResult, GoldAnswerInfo, Question
 from memory_benchmark.core.exceptions import JudgeOutputError
-from memory_benchmark.evaluators.llm_judge import JudgeDecision, parse_judge_response
+from memory_benchmark.evaluators.llm_judge import (
+    JudgeDecision,
+    LLMJudgeEvaluator,
+    parse_judge_response,
+)
 from memory_benchmark.evaluators.locomo_judge import LoCoMoJudgeEvaluator
 from memory_benchmark.evaluators.longmemeval_judge import LongMemEvalJudgeEvaluator
 
@@ -211,6 +219,27 @@ class JudgePromptBuilderTest(unittest.TestCase):
         self.assertEqual(kwargs["messages"][0]["role"], "user")
         self.assertIn("Answer yes or no only.", kwargs["messages"][0]["content"])
 
+    def test_opencodego_longmemeval_judge_preserves_visible_answer_budget(self) -> None:
+        """reasoning provider 不得让官方 10-token 上限吞掉可见 yes/no。"""
+
+        client = _FakeJudgeChatClient(response_text="yes")
+        settings = OpenAISettings(
+            api_key="sk-test",
+            base_url="https://opencode.example/v1",
+            model="deepseek-v4-flash",
+            provider="opencodego",
+            judge_transport=CHAT_COMPLETIONS_JUDGE_TRANSPORT,
+        )
+
+        LongMemEvalJudgeEvaluator(
+            mode="compact",
+            model=settings.model,
+            client=client,
+            openai_settings=settings,
+        ).evaluate(self.question, self.prediction, self.gold)
+
+        self.assertEqual(client.calls[0]["max_tokens"], 128)
+
     def test_longmemeval_temporal_prompt_allows_off_by_one_errors(self) -> None:
         """temporal-reasoning 分支应迁移官方 off-by-one 容错规则。"""
 
@@ -369,6 +398,58 @@ class _FakeJudgeChatClient:
             ],
             usage=SimpleNamespace(prompt_tokens=11, completion_tokens=1),
         )
+
+
+class _GenericCompactJudge(LLMJudgeEvaluator):
+    """只用于验证 provider transport 的最小通用 judge。"""
+
+    def build_prompt(
+        self,
+        question: Question | str,
+        prediction: AnswerResult | str,
+        gold_answer: GoldAnswerInfo | str,
+    ) -> str:
+        """返回固定 prompt，隔离 transport 行为。"""
+
+        return "Return exactly one lowercase word: true"
+
+
+def test_opencodego_generic_judge_uses_chat_completions_transport() -> None:
+    """Responses 不可用的 opencodego 必须走已声明的 chat transport。"""
+
+    client = _FakeJudgeChatClient(response_text="true")
+    settings = OpenAISettings(
+        api_key="sk-test",
+        base_url="https://opencode.example/v1",
+        model="deepseek-v4-flash",
+        provider="opencodego",
+        judge_transport=CHAT_COMPLETIONS_JUDGE_TRANSPORT,
+    )
+    evaluator = _GenericCompactJudge(
+        mode="compact",
+        model=settings.model,
+        client=client,
+        openai_settings=settings,
+    )
+    result = evaluator.evaluate(
+        Question(question_id="q1", conversation_id="c1", text="Q"),
+        AnswerResult(question_id="q1", conversation_id="c1", answer="A"),
+        GoldAnswerInfo(question_id="q1", answer="G"),
+    )
+
+    assert result.is_correct is True
+    assert client.calls == [
+        {
+            "model": "deepseek-v4-flash",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Return exactly one lowercase word: true",
+                }
+            ],
+            "temperature": 0,
+        }
+    ]
 
 
 if __name__ == "__main__":

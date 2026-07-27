@@ -13,8 +13,13 @@ import pytest
 
 from memory_benchmark.config.profiles import load_typed_profile
 from memory_benchmark.config.settings import (
+    CHAT_COMPLETIONS_JUDGE_TRANSPORT,
+    OPENCODEGO_API_PROVIDER,
+    RESPONSES_JUDGE_TRANSPORT,
+    OpenAISettings,
     load_openai_settings,
     load_path_settings,
+    resolve_api_provider_for_profile,
     resolve_answer_llm_settings,
 )
 from memory_benchmark.core import ConfigurationError
@@ -39,11 +44,11 @@ def test_load_typed_profile_builds_mem0_smoke_profile_from_section(tmp_path: Pat
         toml_path,
         """
         [smoke]
-        extraction_model = "gpt-4o-mini"
+        extraction_model = "deepseek-v4-flash"
         embedding_provider = "huggingface"
         embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
         embedding_dimensions = 384
-        reader_model = "gpt-4o-mini"
+        reader_model = "deepseek-v4-flash"
         top_k = 20
         max_workers = 1
         ingestion_chunk_size = 1
@@ -195,6 +200,83 @@ def test_load_openai_settings_reads_key_and_base_url_from_env_file(
     assert settings.model == "gpt-4o-mini"
 
 
+def test_load_openai_settings_reads_explicit_opencodego_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """opencodego 只读自己的三项配置，并公开 chat-only judge 身份。"""
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "opencode_go_key=unit-test-opencode-key",
+                "opencode_base_url=https://opencode.example/v1",
+                "opencode_model_name=deepseek-v4-flash",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    for key in (
+        "opencode_go_key",
+        "OPENCODE_GO_KEY",
+        "opencode_base_url",
+        "OPENCODE_BASE_URL",
+        "opencode_model_name",
+        "OPENCODE_MODEL_NAME",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = load_openai_settings(
+        project_root=tmp_path,
+        env_file=env_file,
+        api_provider=OPENCODEGO_API_PROVIDER,
+    )
+
+    assert settings.provider == "opencodego"
+    assert settings.model == "deepseek-v4-flash"
+    assert settings.judge_transport == CHAT_COMPLETIONS_JUDGE_TRANSPORT
+    runtime = settings.to_runtime_manifest_dict()
+    assert runtime["provider"] == "opencodego"
+    assert runtime["model"] == "deepseek-v4-flash"
+    assert runtime["judge_transport"] == "chat_completions"
+    assert "unit-test-opencode-key" not in repr(runtime)
+    assert "opencode.example" not in repr(runtime)
+
+
+@pytest.mark.parametrize(
+    ("provider", "judge_transport"),
+    (
+        ("opencodego", RESPONSES_JUDGE_TRANSPORT),
+        ("primary", CHAT_COMPLETIONS_JUDGE_TRANSPORT),
+    ),
+)
+def test_openai_settings_rejects_provider_transport_contradiction(
+    provider: str,
+    judge_transport: str,
+) -> None:
+    """provider 与 transport 必须构成单一 runtime 身份，不能各自漂移。"""
+
+    with pytest.raises(ConfigurationError, match="requires judge transport"):
+        OpenAISettings(
+            api_key="sk-test",
+            model="test-model",
+            provider=provider,
+            judge_transport=judge_transport,
+        )
+
+
+@pytest.mark.parametrize(
+    "profile_name",
+    ("official-full", "official_full", "author-locomo", "author_locomo"),
+)
+def test_formal_and_author_profiles_use_primary_provider(profile_name: str) -> None:
+    """正式主表与作者校准不能因 smoke 预算路由而切到 opencodego。"""
+
+    assert resolve_api_provider_for_profile(profile_name) == "primary"
+
+
 def test_load_typed_profile_builds_memoryos_official_full_profile_from_project_toml() -> None:
     """项目内的 MemoryOS official_full profile 应加载为固定论文参数。"""
 
@@ -214,7 +296,7 @@ def test_load_typed_profile_builds_memoryos_official_full_profile_from_project_t
 
 
 def test_load_typed_profile_builds_matching_memoryos_smoke_and_official_profiles() -> None:
-    """MemoryOS smoke 与 official_full 应在非并发字段上保持一致。"""
+    """MemoryOS 两 profile 只允许 budget LLM、并发与 profile 身份不同。"""
 
     toml_path = PROJECT_ROOT / "configs" / "methods" / "memoryos.toml"
     smoke = load_typed_profile(toml_path, "smoke", MemoryOSPaperConfig)
@@ -222,6 +304,8 @@ def test_load_typed_profile_builds_matching_memoryos_smoke_and_official_profiles
 
     assert smoke.profile_name == "smoke"
     assert official_full.profile_name == "official_full"
+    assert smoke.llm_model == "deepseek-v4-flash"
+    assert official_full.llm_model == "gpt-4o-mini"
     assert smoke.embedding_model_name == "sentence-transformers/all-MiniLM-L6-v2"
     assert official_full.embedding_model_name == "sentence-transformers/all-MiniLM-L6-v2"
     assert smoke.longmemeval_prompt_profile == "memoryos-pypi-retrieve-v1"
@@ -229,11 +313,11 @@ def test_load_typed_profile_builds_matching_memoryos_smoke_and_official_profiles
     assert {
         key: value
         for key, value in smoke.to_manifest().items()
-        if key not in {"profile_name", "max_workers"}
+        if key not in {"profile_name", "max_workers", "llm_model"}
     } == {
         key: value
         for key, value in official_full.to_manifest().items()
-        if key not in {"profile_name", "max_workers"}
+        if key not in {"profile_name", "max_workers", "llm_model"}
     }
 
 

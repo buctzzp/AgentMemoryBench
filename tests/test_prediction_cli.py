@@ -62,6 +62,18 @@ from memory_benchmark.cli.run_prediction import (
 pytestmark = pytest.mark.unit
 
 
+def _smoke_openai_settings() -> OpenAISettings:
+    """返回与当前 smoke runtime identity 一致的无网络测试配置。"""
+
+    return OpenAISettings(
+        api_key="sk-test",
+        base_url="https://opencode.example/v1",
+        model="deepseek-v4-flash",
+        provider="opencodego",
+        judge_transport="chat_completions",
+    )
+
+
 def _pending_fake_build_identity(
     config_manifest: dict[str, object],
 ) -> BuildIdentityDeclaration:
@@ -638,7 +650,7 @@ def test_registered_prediction_builds_system_from_registry_context(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: object(),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -838,11 +850,7 @@ def test_registered_operation_level_prediction_passes_clean_failed_ingest_hook(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: OpenAISettings(
-            api_key="sk-test",
-            base_url="https://example.test/v1",
-            model="gpt-4o-mini",
-        ),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1054,7 +1062,7 @@ def test_registered_prediction_passes_benchmark_policy_separately_from_method_ma
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: object(),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1187,7 +1195,7 @@ def test_registered_prediction_omits_benchmark_policy_when_unregistered(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: object(),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1312,7 +1320,7 @@ def test_registered_prediction_rejects_v1_registration_with_unversioned_labels(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: object(),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1453,11 +1461,7 @@ def test_custom_method_class_runs_without_builtin_registry(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: OpenAISettings(
-            api_key="sk-test",
-            base_url="https://example.test/v1",
-            model="gpt-4o-mini",
-        ),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1565,11 +1569,7 @@ def test_custom_method_class_writes_prediction_artifacts(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: OpenAISettings(
-            api_key="sk-test",
-            base_url="https://example.test/v1",
-            model="gpt-4o-mini",
-        ),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1737,11 +1737,7 @@ def test_registered_prediction_builds_framework_answer_reader(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: OpenAISettings(
-            api_key="sk-test",
-            base_url="https://example.test/v1",
-            model="gpt-4o-mini",
-        ),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1785,37 +1781,39 @@ def test_registered_prediction_builds_framework_answer_reader(
         "answer_prompt_file_sha256": hashlib.sha256(
             prompt_path.read_bytes()
         ).hexdigest(),
-        "answer_model": "gpt-4o-mini",
+        "answer_model": "deepseek-v4-flash",
         "answer_parameters": {
             "message_role": "user",
             "temperature": 0.0,
-            # LoCoMo answer LLM 参数已冻结为跨 method 一致值（plan Task 5），
-            # 不再是 mem0 专属的 4096/None。
-            "max_tokens": 32,
+            # opencodego 当前模型会先消耗 reasoning tokens；smoke 兼容层只把
+            # 官方 LoCoMo 的 32-token 上限抬到 128，其他参数保持不变。
+            "max_tokens": 128,
             "top_p": 1.0,
             "timeout_seconds": 60.0,
             "max_retries": 8,
         },
+        "api_runtime": {
+            "contract_version": "v1",
+            "provider": "opencodego",
+            "model": "deepseek-v4-flash",
+            "answer_transport": "chat_completions",
+            "judge_transport": "chat_completions",
+        },
+        "provider_compatibility": "opencodego_reasoning_completion_floor_128_v1",
     }
     assert {
         descriptor.model_id for descriptor in runner_calls[0]["model_inventory"]
     } == {
         "mem0-answer-llm",
-        "gpt-4o-mini",
+        "deepseek-v4-flash",
     }
-    assert captured_settings == [
-        OpenAISettings(
-            api_key="sk-test",
-            base_url="https://example.test/v1",
-            model="gpt-4o-mini",
-        )
-    ]
+    assert captured_settings == [_smoke_openai_settings()]
     assert captured_answer_settings == [
         AnswerLLMSettings(
-            model="gpt-4o-mini",
+            model="deepseek-v4-flash",
             message_role="user",
             temperature=0.0,
-            max_tokens=32,
+            max_tokens=128,
             top_p=1.0,
             timeout_seconds=60.0,
             max_retries=8,
@@ -1981,7 +1979,7 @@ def test_registered_prediction_allows_mem0_smoke_worker_override(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: object(),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -2114,7 +2112,7 @@ def test_registered_prediction_wires_efficiency_observability_when_enabled(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: object(),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -2259,7 +2257,7 @@ def test_all_expands_in_registration_order_and_uses_explicit_variant_suffixes(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: object(),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -2367,7 +2365,7 @@ def test_longmemeval_single_variant_run_id_uses_explicit_suffix(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: object(),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(prediction_cli, "_preflight_prediction_run", lambda **kwargs: None)
@@ -2453,7 +2451,7 @@ def test_locomo_run_id_does_not_add_single_variant_suffix(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: object(),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(prediction_cli, "_preflight_prediction_run", lambda **kwargs: None)
@@ -2618,7 +2616,7 @@ def test_hierarchical_output_layout_groups_run_by_method_benchmark_and_mode(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: object(),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(prediction_cli, "_preflight_prediction_run", lambda **kwargs: None)
@@ -2934,7 +2932,7 @@ def test_second_child_preflight_failure_creates_no_output_or_method(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: openai_loaded.append("loaded"),
+        lambda project_root, api_provider=None: openai_loaded.append("loaded"),
         raising=False,
     )
 
@@ -3045,7 +3043,9 @@ def test_openai_settings_load_only_after_all_preflights(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root: events.append("openai") or object(),
+        lambda project_root, api_provider=None: (
+            events.append("openai") or _smoke_openai_settings()
+        ),
         raising=False,
     )
     monkeypatch.setattr(

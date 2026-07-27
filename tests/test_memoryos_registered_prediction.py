@@ -57,7 +57,7 @@ def _write_memoryos_profiles(project_root: Path) -> None:
     profile_path.write_text(
         """
 [smoke]
-llm_model = "gpt-4o-mini"
+llm_model = "deepseek-v4-flash"
 embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
 short_term_capacity = 1
 mid_term_capacity = 2000
@@ -364,6 +364,9 @@ def _openai_settings() -> OpenAISettings:
     return OpenAISettings(
         api_key="sk-test",
         base_url="https://example.invalid/v1",
+        model="deepseek-v4-flash",
+        provider="opencodego",
+        judge_transport="chat_completions",
     )
 
 
@@ -522,7 +525,7 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: _openai_settings(),
+        lambda project_root, api_provider=None: _openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -596,11 +599,11 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
     # LoCoMo reader 参数由 benchmark 统一冻结，不能继续沿用 MemoryOS 旧 profile。
     assert captured["method_manifest"] == {
         "answer_reader": {
-            "answer_model": "gpt-4o-mini",
+            "answer_model": "deepseek-v4-flash",
             "answer_parameters": {
                 "message_role": "user",
                 "temperature": 0.0,
-                "max_tokens": 32,
+                "max_tokens": 128,
                 "top_p": 1.0,
                 "timeout_seconds": 60.0,
                 "max_retries": 8,
@@ -608,6 +611,14 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
             "answer_prompt_file_sha256": None,
             "answer_prompt_profile": "default",
             "answer_protocol": "retrieve_first_v1",
+            "api_runtime": {
+                "contract_version": "v1",
+                "provider": "opencodego",
+                "model": "deepseek-v4-flash",
+                "answer_transport": "chat_completions",
+                "judge_transport": "chat_completions",
+            },
+            "provider_compatibility": "opencodego_reasoning_completion_floor_128_v1",
         },
         "config": _FakeMemoryOS.instances[0].config.to_manifest(),
         "consume_granularity": "session",
@@ -656,7 +667,7 @@ def test_new_memoryos_run_writes_only_canonical_prediction_artifacts(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: _openai_settings(),
+        lambda project_root, api_provider=None: _openai_settings(),
         raising=False,
     )
     _patch_framework_answer_client(monkeypatch)
@@ -894,7 +905,7 @@ def test_memoryos_resume_manifest_mismatch_fails_before_factory_attach_or_direct
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: _openai_settings(),
+        lambda project_root, api_provider=None: _openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -960,7 +971,7 @@ def test_memoryos_smoke_worker_override_is_accepted(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: _openai_settings(),
+        lambda project_root, api_provider=None: _openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(

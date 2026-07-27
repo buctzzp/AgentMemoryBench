@@ -33,9 +33,14 @@
   survey，method 走 `reference/integration/<method>.md`，再顺链接读承重 evidence note。
 - 想知道 method 超参数、作者配置与 answer prompt 如何选择：
   `reference/method-toml-and-answer-builder-policy.md`。
+- 想知道 smoke/official 使用哪个 API provider、model、transport，以及如何进入
+  manifest/resume：`reference/api-runtime-profiles.md`。
 - 想跑命令、查代码结构：`CLAUDE.md`。
 - 想比较 actor 的真实交付：`reference/actor-performance-ledger.md`（任务级样本，不是
   脱离卡难度的模型神榜）。
 - 想复用架构经验：先读 `reference/architect-playbook.md` 热入口，再按
   `reference/playbooks/architect/README.md` 的任务标签定点检索案例；禁止默认全文灌入
   冷层 casebook。
+- 想在硬规则未覆盖的灰区做结构/设计裁决：`reference/code-structure-principles.md`
+  （架构师参考：代码结构 7 条 + 项目设计 8 条 + 四问判断流程 + 本仓库真实判例与
+  可复现核查命令。只提供判据，实际结构改动仍归 `ws03`）。

@@ -273,9 +273,12 @@ def _install_offline_registered_stack(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: OpenAISettings(
+        lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
+            model="deepseek-v4-flash",
+            provider="opencodego",
+            judge_transport="chat_completions",
         ),
         raising=False,
     )

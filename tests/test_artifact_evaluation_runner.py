@@ -63,6 +63,18 @@ from memory_benchmark.storage import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _smoke_openai_settings() -> OpenAISettings:
+    """返回与新 smoke provider identity 一致的离线测试配置。"""
+
+    return OpenAISettings(
+        api_key="sk-test",
+        base_url="https://opencode.example/v1",
+        model="deepseek-v4-flash",
+        provider="opencodego",
+        judge_transport="chat_completions",
+    )
+
+
 def _pending_fake_build_identity(
     config_manifest: dict[str, object],
 ) -> BuildIdentityDeclaration:
@@ -582,11 +594,7 @@ def test_registered_mock_v3_prediction_can_be_evaluated_offline(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: OpenAISettings(
-            api_key="sk-test",
-            base_url="https://example.test/v1",
-            model="gpt-4o-mini",
-        ),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -962,11 +970,7 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
         """构造离线 fake provider，并保留 build context 供断言。"""
 
         assert context.config.profile_name == "smoke"
-        assert context.openai_settings == OpenAISettings(
-            api_key="sk-test",
-            base_url="https://example.test/v1",
-            model="gpt-4o-mini",
-        )
+        assert context.openai_settings == _smoke_openai_settings()
         system = _FakeOfflineProvider()
         captured_systems.append(system)
         return system
@@ -979,11 +983,7 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
         def __init__(self, *, settings: OpenAISettings, answer_settings=None) -> None:
             """只校验配置来源，不创建真实网络 client。"""
 
-            assert settings == OpenAISettings(
-                api_key="sk-test",
-                base_url="https://example.test/v1",
-                model="gpt-4o-mini",
-            )
+            assert settings == _smoke_openai_settings()
 
         def complete(self, *, prompt: str) -> str:
             """返回固定答案，证明 framework reader 可以离线装配。"""
@@ -1037,11 +1037,7 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: OpenAISettings(
-            api_key="sk-test",
-            base_url="https://example.test/v1",
-            model="gpt-4o-mini",
-        ),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1813,11 +1809,7 @@ def _patch_membench_mock_prediction(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: OpenAISettings(
-            api_key="sk-test",
-            base_url="https://example.test/v1",
-            model="gpt-4o-mini",
-        ),
+        lambda project_root, api_provider=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(

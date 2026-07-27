@@ -171,7 +171,7 @@ class LoCoMoJudgeEvaluator(LLMJudgeEvaluator):
         """
 
         client = self._get_client()
-        model = self.model or self._get_settings().openai.model
+        model = self.model or self._get_openai_settings().model
         kwargs: dict[str, Any] = dict(
             model=model,
             messages=[{"role": "user", "content": prompt}],

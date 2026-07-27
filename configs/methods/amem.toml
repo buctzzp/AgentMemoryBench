@@ -1,8 +1,10 @@
 # A-Mem 官方通用产品 AgenticMemorySystem profile。
 # smoke 只缩小 benchmark 数据规模；method 检索深度保持产品建议 k=10。
+# 2026-07-27 起 smoke API runtime 显式走 opencodego/deepseek-v4-flash；
+# official_full 仍保持已冻结的 primary/gpt-4o-mini，二者不得混作效果对比。
 
 [smoke]
-llm_model = "gpt-4o-mini"
+llm_model = "deepseek-v4-flash"
 embedding_model = "all-MiniLM-L6-v2"
 retrieve_k = 10
 api_timeout_seconds = 60.0

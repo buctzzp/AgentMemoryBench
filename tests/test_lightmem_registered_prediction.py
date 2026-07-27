@@ -241,9 +241,12 @@ def test_lightmem_registered_prediction_runs_generic_runner_offline(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: OpenAISettings(
+        lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
+            model="deepseek-v4-flash",
+            provider="opencodego",
+            judge_transport="chat_completions",
         ),
         raising=False,
     )
@@ -406,8 +409,12 @@ def test_lightmem_native_config_track_flows_through_both_official_grids(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: OpenAISettings(
-            api_key="sk-test", base_url="https://example.invalid/v1"
+        lambda project_root, api_provider=None: OpenAISettings(
+            api_key="sk-test",
+            base_url="https://example.invalid/v1",
+            model="deepseek-v4-flash",
+            provider="opencodego",
+            judge_transport="chat_completions",
         ),
     )
     monkeypatch.setattr(

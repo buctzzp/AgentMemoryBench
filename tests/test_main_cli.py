@@ -28,6 +28,7 @@ from memory_benchmark.cli.run_prediction import (
     PredictionBatchResult,
     PredictionVariantResult,
 )
+from memory_benchmark.config import OpenAISettings
 from memory_benchmark.core import ConfigurationError
 from memory_benchmark.methods.config_track import (
     build_native_track_identity,
@@ -375,6 +376,13 @@ def test_execute_evaluate_runs_offline_f1_without_loading_openai(
             calls.append((Path(path), selected, expected_benchmark)) or summary
         ),
     )
+    monkeypatch.setattr(
+        commands,
+        "load_openai_settings",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("offline metric must not load API settings")
+        ),
+    )
     results = execute_evaluate(
         EvaluateCommand(
             project_root=tmp_path,
@@ -385,6 +393,133 @@ def test_execute_evaluate_runs_offline_f1_without_loading_openai(
 
     assert results == (summary,)
     assert calls == [(run_dir, evaluator, "locomo")]
+
+
+def test_execute_evaluate_uses_prediction_api_runtime_for_judge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """新 smoke judge 必须复用 prediction manifest 的 provider/model/transport。"""
+
+    run_dir = _write_manifest(tmp_path, "run-opencodego")
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    runtime = {
+        "contract_version": "v1",
+        "provider": "opencodego",
+        "model": "deepseek-v4-flash",
+        "answer_transport": "chat_completions",
+        "judge_transport": "chat_completions",
+    }
+    manifest["method"] = {
+        "answer_reader": {
+            "answer_model": "deepseek-v4-flash",
+            "api_runtime": runtime,
+        }
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    settings = OpenAISettings(
+        api_key="sk-test",
+        base_url="https://opencode.example/v1",
+        model="deepseek-v4-flash",
+        provider="opencodego",
+        judge_transport="chat_completions",
+    )
+    loaded_providers: list[str] = []
+    evaluator_calls: list[dict[str, object]] = []
+    evaluator = object()
+    monkeypatch.setattr(
+        commands,
+        "load_openai_settings",
+        lambda *, project_root, api_provider: (
+            loaded_providers.append(api_provider) or settings
+        ),
+    )
+    monkeypatch.setattr(
+        commands,
+        "load_evaluator_profile",
+        lambda **kwargs: SimpleNamespace(mode="compact", model="gpt-4o-mini"),
+    )
+    monkeypatch.setattr(
+        commands,
+        "create_evaluator",
+        lambda *args, **kwargs: evaluator_calls.append(kwargs) or evaluator,
+    )
+    monkeypatch.setattr(
+        commands,
+        "run_artifact_evaluation",
+        lambda *args, **kwargs: SimpleNamespace(metric_name="locomo_judge"),
+    )
+
+    execute_evaluate(
+        EvaluateCommand(
+            project_root=tmp_path,
+            run_id="run-opencodego",
+            metrics=("locomo-judge",),
+            confirm_api=True,
+        )
+    )
+
+    assert loaded_providers == ["opencodego"]
+    assert evaluator_calls[0]["model"] == "deepseek-v4-flash"
+    assert evaluator_calls[0]["openai_settings"] is settings
+
+
+def test_execute_evaluate_rejects_api_runtime_environment_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`.env` 模型漂移时不能用另一模型悄悄重评已有 smoke。"""
+
+    run_dir = _write_manifest(tmp_path, "run-drift")
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["method"] = {
+        "answer_reader": {
+            "answer_model": "deepseek-v4-flash",
+            "api_runtime": {
+                "contract_version": "v1",
+                "provider": "opencodego",
+                "model": "deepseek-v4-flash",
+                "answer_transport": "chat_completions",
+                "judge_transport": "chat_completions",
+            },
+        }
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(
+        commands,
+        "load_openai_settings",
+        lambda **kwargs: OpenAISettings(
+            api_key="sk-test",
+            base_url="https://opencode.example/v1",
+            model="different-model",
+            provider="opencodego",
+            judge_transport="chat_completions",
+        ),
+    )
+    monkeypatch.setattr(
+        commands,
+        "load_evaluator_profile",
+        lambda **kwargs: SimpleNamespace(mode="compact", model="gpt-4o-mini"),
+    )
+    monkeypatch.setattr(
+        commands,
+        "create_evaluator",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("drift must fail before evaluator construction")
+        ),
+    )
+
+    with pytest.raises(ConfigurationError, match="does not match"):
+        execute_evaluate(
+            EvaluateCommand(
+                project_root=tmp_path,
+                run_id="run-drift",
+                metrics=("locomo-judge",),
+                confirm_api=True,
+            )
+        )
 
 
 def test_execute_evaluate_rejects_unconfirmed_judge_before_profile_or_api(

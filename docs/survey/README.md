@@ -55,6 +55,7 @@
 | MemoryOS | [integration/memoryos.md](../reference/integration/memoryos.md) |
 | A-Mem | [integration/amem.md](../reference/integration/amem.md) |
 | SimpleMem | [integration/simplemem.md](../reference/integration/simplemem.md) |
+| MemOS | [integration/memos.md](../reference/integration/memos.md) |
 | EverOS | [integration/everos.md](../reference/integration/everos.md) |
 
 尚未形成接入事实页的 method 先看 `docs/reference/method-interface-inventory.md`；完成首轮一手

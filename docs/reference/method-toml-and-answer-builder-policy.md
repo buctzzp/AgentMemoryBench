@@ -39,8 +39,13 @@ answer_builder = "<method>_longmemeval_official"
 
 1. “跨五个 benchmark 固定”指**同一 method** 的主配置固定，不要求十个 method 使用
    相同的内部数值。
-2. `smoke` 不为省钱篡改算法参数；成本只靠数据、conversation/question/turn 范围和并发
-   缩小。若确有无法避免的 smoke-only 行为差异，必须进 manifest 并单独披露。
+2. `smoke` 不为省钱篡改 embedding、检索、update、summary、storage 等 method 算法参数；
+   成本优先靠数据、conversation/question/turn 范围和并发缩小。2026-07-27 起允许一个
+   明确例外：低预算 smoke 的 API runtime 使用
+   `opencodego/deepseek-v4-flash`，正式 `official_full` 保持
+   `primary/gpt-4o-mini`。这是流通验证而非效果对比，provider/model/transport 与必要的
+   reasoning completion floor 必须进入 manifest/resume；细则见
+   [`api-runtime-profiles.md`](api-runtime-profiles.md)。
 3. `author_<benchmark>` 是稀疏的作者复现配置，不是主表默认，也不因为当前 benchmark
    同名就自动启用。作者没有跑过的格子不编造 section、不代替作者调参。
 4. 每个 section 写完整、可独立解析的参数。当前阶段不引入继承或多层 merge，少量重复优于

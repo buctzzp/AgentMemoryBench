@@ -4,6 +4,9 @@
 > `../integration-status.md`。
 > 状态：**M1 一手取证、shared-lifecycle R1-R5、Track identity M0 与五格 B11 真实 smoke
 > 均通过；current product build 已冻结为 `method-frozen-v1`。**
+> 2026-07-27 后的新 smoke 改用 `opencodego/deepseek-v4-flash`；原 B11 run 的
+> `gpt-4o-mini` 身份保持历史真实，不改写、不跨模型比较。现行运行身份见
+> [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
 > 证据底：`ws02.7/notes/m1-memoryos-evidence.md`、
 > `ws02.7/notes/m2-memoryos-adapter.md`。
 

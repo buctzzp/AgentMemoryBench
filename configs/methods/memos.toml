@@ -6,15 +6,17 @@
 #        dispatcher → MEM_READ fine 抽取 → raw 清理 → refresh
 #   HTTP host / server_router 一律禁止；答题走 framework benchmark builder。
 #
-# smoke 与 official_full 的 build/search 参数完全相同；两者 max_workers 都为 1，
+# smoke 与 official_full 的非 LLM build/search 参数完全相同；两者 max_workers 都为 1，
 # 因为 MemOS factory 按 config 缓存单例、reader 还持有构造期 graph DB，跨
 # namespace interleaving 与 observation scope 尚未一手验证（见支线 README
 # "M4 保持 pending 的边界"）。成本控制只通过 conversation/question/turn 规模裁剪。
+# 2026-07-27 起 smoke 的 LLM transport/model 是预算型
+# opencodego/deepseek-v4-flash；official_full 保持 primary/gpt-4o-mini。
 #
 # secret 只声明**环境变量名**，值不进本文件、不进 manifest、不进日志。
 
 [smoke]
-llm_model = "gpt-4o-mini"
+llm_model = "deepseek-v4-flash"
 embedding_backend = "sentence_transformer"
 embedding_model_path = "models/all-MiniLM-L6-v2"
 embedding_dimension = 384

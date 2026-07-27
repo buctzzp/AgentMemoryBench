@@ -244,9 +244,12 @@ def test_amem_registered_prediction_runs_generic_runner_offline(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: OpenAISettings(
+        lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
+            model="deepseek-v4-flash",
+            provider="opencodego",
+            judge_transport="chat_completions",
         ),
         raising=False,
     )
@@ -349,6 +352,9 @@ def test_amem_factory_loads_completed_conversations_for_resume(
         openai_settings=OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
+            model="deepseek-v4-flash",
+            provider="opencodego",
+            judge_transport="chat_completions",
         ),
         path_settings=replace(load_path_settings(PROJECT_ROOT), outputs_root=tmp_path),
         storage_root=tmp_path / "method_state",

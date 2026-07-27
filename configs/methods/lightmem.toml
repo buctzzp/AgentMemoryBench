@@ -21,7 +21,8 @@
 # 裁决见 branches/input-role-semantics/notes/lightmem-messages-membench-beam-role-audit.md。
 
 [smoke]
-llm_model = "gpt-4o-mini"
+# budget-only connectivity profile；真实 runtime 由 manifest 的 api_runtime v1 盖章。
+llm_model = "deepseek-v4-flash"
 embedding_model_path = "models/all-MiniLM-L6-v2"
 llmlingua_model_path = "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
 retrieve_limit = 60

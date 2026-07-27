@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from memory_benchmark.config import load_path_settings
+from memory_benchmark.config import OpenAISettings, load_path_settings
 from memory_benchmark.config.profiles import load_typed_profile
 from memory_benchmark.core import ConfigurationError
 
@@ -73,6 +73,7 @@ def _build_beam_rubric_judge(
     client: Any | None = None,
     project_root: str | None = None,
     env_file: str | None = None,
+    openai_settings: OpenAISettings | None = None,
 ) -> BeamRubricJudgeEvaluator:
     """按已验证 profile 构造 BEAM rubric judge。"""
 
@@ -82,6 +83,7 @@ def _build_beam_rubric_judge(
         client=client,
         project_root=project_root,
         env_file=env_file,
+        openai_settings=openai_settings,
     )
 
 
@@ -158,6 +160,7 @@ def _build_locomo_judge(
     client: Any | None = None,
     project_root: str | None = None,
     env_file: str | None = None,
+    openai_settings: OpenAISettings | None = None,
 ) -> LoCoMoJudgeEvaluator:
     """按已验证 profile 构造 LoCoMo LLM judge。"""
 
@@ -167,6 +170,7 @@ def _build_locomo_judge(
         client=client,
         project_root=project_root,
         env_file=env_file,
+        openai_settings=openai_settings,
     )
 
 
@@ -177,6 +181,7 @@ def _build_longmemeval_judge(
     client: Any | None = None,
     project_root: str | None = None,
     env_file: str | None = None,
+    openai_settings: OpenAISettings | None = None,
 ) -> LongMemEvalJudgeEvaluator:
     """按已验证 profile 构造 LongMemEval LLM judge。"""
 
@@ -186,6 +191,7 @@ def _build_longmemeval_judge(
         client=client,
         project_root=project_root,
         env_file=env_file,
+        openai_settings=openai_settings,
     )
 
 
@@ -196,6 +202,7 @@ def _build_halumem_extraction(
     client: Any | None = None,
     project_root: str | None = None,
     env_file: str | None = None,
+    openai_settings: OpenAISettings | None = None,
 ) -> HalumemExtractionEvaluator:
     """按已验证 profile 构造 HaluMem extraction judge。"""
 
@@ -205,6 +212,7 @@ def _build_halumem_extraction(
         client=client,
         project_root=project_root,
         env_file=env_file,
+        openai_settings=openai_settings,
     )
 
 
@@ -215,6 +223,7 @@ def _build_halumem_update(
     client: Any | None = None,
     project_root: str | None = None,
     env_file: str | None = None,
+    openai_settings: OpenAISettings | None = None,
 ) -> HalumemUpdateEvaluator:
     """按已验证 profile 构造 HaluMem update judge。"""
 
@@ -224,6 +233,7 @@ def _build_halumem_update(
         client=client,
         project_root=project_root,
         env_file=env_file,
+        openai_settings=openai_settings,
     )
 
 
@@ -234,6 +244,7 @@ def _build_halumem_qa(
     client: Any | None = None,
     project_root: str | None = None,
     env_file: str | None = None,
+    openai_settings: OpenAISettings | None = None,
 ) -> HalumemQAEvaluator:
     """按已验证 profile 构造 HaluMem QA judge。"""
 
@@ -243,6 +254,7 @@ def _build_halumem_qa(
         client=client,
         project_root=project_root,
         env_file=env_file,
+        openai_settings=openai_settings,
     )
 
 

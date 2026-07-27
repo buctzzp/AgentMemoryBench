@@ -87,6 +87,13 @@ namespace-safe clean retry、stop failure 永久 fail-closed 与五格强反例�
 **当前唯一入口：M5 B11 前置与真实服务 smoke。**先闭合服务依赖、成本边界、run identity
 和开箱门；未经用户确认真实服务环境、预算、规模与 run_id，不启动 Neo4j/Qdrant/API。
 
+2026-07-27 已关闭 M5 的 API provider 前置：新 smoke 使用显式
+`opencodego/deepseek-v4-flash`，Chat Completions 普通、judge 与 JSON mode 均已最小真调用
+通过，Responses 明确不可用；provider/model/transport 已进入 manifest/resume，正式
+`official_full` 仍保持 primary。实现见
+[`../../api-runtime-smoke/README.md`](../../api-runtime-smoke/README.md)。
+这不等于 MemOS B11 已执行：Neo4j/Qdrant 服务、规模与 run_id 门仍保持。
+
 ## M4 保持 pending 的边界
 
 - 真实 Neo4j/Qdrant 跨 namespace 隔离与 MMR/rerank stable-ranking；

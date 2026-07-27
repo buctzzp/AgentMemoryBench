@@ -544,19 +544,21 @@ def test_memos_build_identity_declares_source_proven_normalization() -> None:
     assert declaration.embedding.distance == "qdrant-cosine"
 
 
-def test_memos_profiles_differ_in_nothing_but_are_both_serial() -> None:
-    """smoke 与 official_full 的 build/search 参数必须完全相同，且都为单 worker。"""
+def test_memos_profiles_only_differ_in_budget_model_and_are_both_serial() -> None:
+    """两 profile 仅允许 LLM runtime 身份不同，非 LLM 参数保持一致。"""
 
     import dataclasses
 
     smoke = load_method_profile("memos", "smoke")
     official = load_method_profile("memos", "official-full")
 
-    # `profile_name` 是 section 身份，本来就应不同；其余 build/search 参数必须全等。
+    # profile 与 budget-only LLM 身份不同；其余 build/search 参数必须全等。
     smoke_fields = dataclasses.asdict(smoke)
     official_fields = dataclasses.asdict(official)
     assert smoke_fields.pop("profile_name") == "smoke"
     assert official_fields.pop("profile_name") == "official_full"
+    assert smoke_fields.pop("llm_model") == "deepseek-v4-flash"
+    assert official_fields.pop("llm_model") == "gpt-4o-mini"
     assert smoke_fields == official_fields
     assert smoke.max_workers == 1
     assert official.max_workers == 1

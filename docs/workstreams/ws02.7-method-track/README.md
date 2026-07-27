@@ -51,7 +51,13 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   `dff8185`、`02ffc9d`、`3e1d621`，并通过
   [M4 架构师最终验收](branches/method-recertification/memos/notes/memos-v2.0.25-product-adapter-m4-architect-acceptance.md)：
   主树 `1863 passed, 3 deselected, 11 warnings, 29 subtests passed`，compileall 与 patch
-  reverse-check 均通过。当前进入 **M5 B11 前置**；未经用户确认真实服务环境、预算、规模与
+  reverse-check 均通过。2026-07-27 又按用户裁决完成
+  [API runtime smoke 支线](branches/api-runtime-smoke/README.md)：新 smoke 锁为
+  `opencodego/deepseek-v4-flash + Chat Completions`，Responses 不可用与 JSON mode 可用均
+  已最小真调用证实；manifest/resume/evaluate 身份与离线 metric 免 secret 读取已锁强反例，
+  无 API 全量为
+  `1879 passed, 3 deselected, 11 warnings, 29 subtests passed in 132.87s`，compileall
+  exit 0。当前仍处于 **M5 B11 前置**；未经用户确认真实服务环境、预算、规模与
   run_id，不启动 Neo4j/Qdrant/API smoke。
   复用五个 benchmark 稳定事实，不重开 raw census，也不把真实 DB/image/HaluMem
   fine-output 等 pending 能力提前写成 valid。

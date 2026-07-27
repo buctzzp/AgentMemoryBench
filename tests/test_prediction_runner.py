@@ -1532,6 +1532,43 @@ def test_resume_manifest_rejects_every_nested_track_identity_change(
     assert not _manifests_match_for_resume(changed, original)
 
 
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    (
+        ("provider", "primary"),
+        ("model", "gpt-4o-mini"),
+        ("answer_transport", "responses"),
+        ("judge_transport", "responses"),
+        ("contract_version", "v2"),
+    ),
+)
+def test_resume_manifest_rejects_api_runtime_identity_change(
+    field: str,
+    replacement: str,
+) -> None:
+    """provider/model/transport 任一变化都必须阻断旧 smoke resume。"""
+
+    original = {
+        "method": {
+            "answer_reader": {
+                "answer_model": "deepseek-v4-flash",
+                "api_runtime": {
+                    "contract_version": "v1",
+                    "provider": "opencodego",
+                    "model": "deepseek-v4-flash",
+                    "answer_transport": "chat_completions",
+                    "judge_transport": "chat_completions",
+                },
+            }
+        }
+    }
+    changed = json.loads(json.dumps(original))
+    changed["method"]["answer_reader"]["api_runtime"][field] = replacement
+
+    assert not _manifests_match_for_resume(original, changed)
+    assert not _manifests_match_for_resume(changed, original)
+
+
 def test_runner_uses_membench_unified_prompt_builder_and_choice_parser(
     tmp_path: Path,
 ) -> None:

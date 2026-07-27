@@ -14,6 +14,7 @@
 | [`input-role-semantics`](input-role-semantics/README.md) | canonical speaker role、benchmark gold evidence unit、Recall/NDCG 分母 | gold M0 + LightMem hybrid + MemBench split 均已关闭；交棒 retrieval M1 |
 | [`method-recertification`](method-recertification/README.md) | 共享修复完成后按现行 commit 逐 method 重走 B1-B11，不靠历史 frozen 惯性 | 首批五家均 frozen；结构归一 M0 后转 MemOS，EverOS 最后 |
 | [`evaluator-observability`](evaluator-observability/README.md) | artifact-level API evaluator 的 judge scope、model inventory 与 token observation 共享断链 | 共享修复与 BEAM/HaluMem 真实 refill 均已关闭；后续 method 直接复用 |
+| [`api-runtime-smoke`](api-runtime-smoke/README.md) | smoke 与正式 run 的 provider/model/transport、manifest/resume 和 judge 兼容 | opencodego 只作低预算 smoke；正式主表继续 primary |
 
 每条支线用自身 README 记录范围、文档索引和稳定依赖顺序，`cards/` 放可整份复制给
 actor 的卡，`notes/` 放一手审计、架构裁决与施工记录。**权威当前动作、commit/test

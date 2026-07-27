@@ -2,6 +2,9 @@
 
 > 判据模板：`../method-integration-checklist.md` §B；勾选总表：`../integration-status.md`。
 > 状态：**method-frozen-v2（2026-07-20 current-v3 五格重认证完成）**。
+> 2026-07-27 后的新 smoke 改用 `opencodego/deepseek-v4-flash`；冻结 B11 仍是当时
+> `gpt-4o-mini` 历史证据，不跨模型比较。现行运行身份见
+> [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
 > 现行冻结证据与声明缺口见
 > `../../workstreams/ws02.7-method-track/branches/method-recertification/mem0/notes/mem0-frozen-v2.md`；
 > `../../workstreams/ws02.7-method-track/notes/mem0-frozen-v1.md` 保留为历史快照。

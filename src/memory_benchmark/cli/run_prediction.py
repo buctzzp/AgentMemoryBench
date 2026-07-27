@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 from pathlib import Path
@@ -25,9 +25,12 @@ from memory_benchmark.benchmark_adapters.contracts import (
 )
 from memory_benchmark.config.settings import (
     AnswerLLMSettings,
-    DEFAULT_OPENAI_MODEL,
+    OPENCODEGO_API_PROVIDER,
+    build_api_runtime_manifest,
     load_openai_settings,
     load_path_settings,
+    resolve_api_model_for_provider,
+    resolve_api_provider_for_profile,
     resolve_answer_llm_settings,
 )
 from memory_benchmark.core import (
@@ -374,6 +377,16 @@ def run_registered_conversation_qa_prediction(
         profile_name=profile_name,
         project_root=path_settings.project_root,
     )
+    use_framework_answer_reader = (
+        MethodCapability.MEMORY_RETRIEVAL
+        in method_registration.provided_capabilities
+    )
+    api_provider = resolve_api_provider_for_profile(profile_name)
+    api_model = resolve_api_model_for_provider(api_provider)
+    api_runtime_manifest = build_api_runtime_manifest(
+        provider=api_provider,
+        model=api_model,
+    )
     # 注册表是 build identity 的单一事实源：从当前强类型 config manifest 解析，
     # 不由 config_track 再维护一份 method 静态矩阵。
     config_manifest = config.to_manifest()
@@ -446,6 +459,15 @@ def run_registered_conversation_qa_prediction(
             )
         ),
     )
+    if method_registration.requires_api:
+        configured_model = method_registration.model_name_getter(config)
+        if configured_model != api_model:
+            raise ConfigurationError(
+                f"{method_registration.display_name} profile model "
+                f"{configured_model!r} does not match {api_provider!r} runtime "
+                f"model {api_model!r}; update the TOML profile instead "
+                "of silently overriding method semantics"
+            )
     source_identity = method_registration.source_identity_factory(path_settings)
     max_workers = method_registration.max_workers_getter(config)
     max_workers = _resolve_smoke_max_workers(
@@ -455,32 +477,42 @@ def run_registered_conversation_qa_prediction(
         configured_max_workers=max_workers,
         allow_override=method_registration.allow_smoke_worker_override,
     )
-    use_framework_answer_reader = (
-        MethodCapability.MEMORY_RETRIEVAL
-        in method_registration.provided_capabilities
-    )
     prompt_track = (
         getattr(benchmark_registration, "prompt_track", "native")
         if use_framework_answer_reader
         else "native"
     )
-    answer_llm_settings = (
-        config_track_bundle.answer_llm_settings
-        if config_track_bundle is not None
-        else resolve_answer_llm_settings(
-            method_name=method_registration.name,
-            benchmark_name=benchmark_registration.name,
-            model=DEFAULT_OPENAI_MODEL,
+    answer_llm_settings: AnswerLLMSettings | None = None
+    answer_compatibility_note: str | None = None
+    if use_framework_answer_reader:
+        base_answer_settings = (
+            replace(
+                config_track_bundle.answer_llm_settings,
+                model=api_model,
+            )
+            if config_track_bundle is not None
+            else resolve_answer_llm_settings(
+                method_name=method_registration.name,
+                benchmark_name=benchmark_registration.name,
+                model=api_model,
+            )
         )
-        if use_framework_answer_reader
-        else None
-    )
+        (
+            answer_llm_settings,
+            answer_compatibility_note,
+        ) = _apply_provider_answer_compatibility(
+            answer_settings=base_answer_settings,
+            api_provider=api_provider,
+            profile_name=profile_name,
+        )
     answer_reader_manifest = (
         _build_answer_reader_manifest(
             project_root=path_settings.project_root,
             prompt_file=answer_prompt_file,
             profile_name=answer_prompt_profile,
             answer_settings=answer_llm_settings,
+            api_runtime_manifest=api_runtime_manifest,
+            provider_compatibility_note=answer_compatibility_note,
         )
         if use_framework_answer_reader
         else None
@@ -625,20 +657,25 @@ def run_registered_conversation_qa_prediction(
         method_registration.requires_api or use_framework_answer_reader
     )
     openai_settings = (
-        load_openai_settings(project_root=path_settings.project_root)
+        load_openai_settings(
+            project_root=path_settings.project_root,
+            api_provider=api_provider,
+        )
         if requires_openai_settings
         else None
     )
+    if (
+        openai_settings is not None
+        and openai_settings.to_runtime_manifest_dict() != api_runtime_manifest
+    ):
+        raise ConfigurationError(
+            "Loaded API settings disagree with the preflight runtime identity"
+        )
     answer_reader = None
     if use_framework_answer_reader:
         if openai_settings is None:
             raise ConfigurationError(
                 "Framework answer reader requires OpenAI-compatible settings"
-            )
-        if openai_settings.model != DEFAULT_OPENAI_MODEL:
-            raise ConfigurationError(
-                "Framework answer reader currently requires model "
-                f"{DEFAULT_OPENAI_MODEL}; got {openai_settings.model}"
             )
         if answer_llm_settings is None:
             raise ConfigurationError("Framework answer reader settings are missing")
@@ -845,6 +882,12 @@ def _run_custom_conversation_qa_prediction(
             "custom method resume requires an explicit existing run_id"
         )
 
+    api_provider = resolve_api_provider_for_profile(profile_name)
+    api_model = resolve_api_model_for_provider(api_provider)
+    api_runtime_manifest = build_api_runtime_manifest(
+        provider=api_provider,
+        model=api_model,
+    )
     run_scope = _resolve_profile_run_scope(profile_name)
     selector = variant or benchmark_registration.default_variant
     selected_variants = resolve_variant_selector(benchmark_registration, variant)
@@ -886,16 +929,26 @@ def _run_custom_conversation_qa_prediction(
         smoke_max_workers=smoke_max_workers,
         allow_unsafe_custom_parallel=allow_unsafe_custom_parallel,
     )
-    answer_llm_settings = resolve_answer_llm_settings(
+    base_answer_settings = resolve_answer_llm_settings(
         method_name="custom",
         benchmark_name=benchmark_name,
-        model=DEFAULT_OPENAI_MODEL,
+        model=api_model,
+    )
+    (
+        answer_llm_settings,
+        answer_compatibility_note,
+    ) = _apply_provider_answer_compatibility(
+        answer_settings=base_answer_settings,
+        api_provider=api_provider,
+        profile_name=profile_name,
     )
     answer_reader_manifest = _build_answer_reader_manifest(
         project_root=project_root,
         prompt_file=answer_prompt_file,
         profile_name=answer_prompt_profile,
         answer_settings=answer_llm_settings,
+        api_runtime_manifest=api_runtime_manifest,
+        provider_compatibility_note=answer_compatibility_note,
     )
     prompt_track = getattr(benchmark_registration, "prompt_track", "native")
     benchmark_policy_manifest = _build_benchmark_policy_manifest(benchmark_registration)
@@ -1000,11 +1053,13 @@ def _run_custom_conversation_qa_prediction(
             retrieval_observation_contract=child.retrieval_observation_contract,
         )
 
-    openai_settings = load_openai_settings(project_root=path_settings.project_root)
-    if openai_settings.model != DEFAULT_OPENAI_MODEL:
+    openai_settings = load_openai_settings(
+        project_root=path_settings.project_root,
+        api_provider=api_provider,
+    )
+    if openai_settings.to_runtime_manifest_dict() != api_runtime_manifest:
         raise ConfigurationError(
-            "Framework answer reader currently requires model "
-            f"{DEFAULT_OPENAI_MODEL}; got {openai_settings.model}"
+            "Loaded API settings disagree with the preflight runtime identity"
         )
     answer_reader = FrameworkAnswerReader(
         client=OpenAICompatibleAnswerLLMClient(
@@ -1675,6 +1730,8 @@ def _build_answer_reader_manifest(
     prompt_file: str | Path | None,
     profile_name: str,
     answer_settings: AnswerLLMSettings | None,
+    api_runtime_manifest: dict[str, object] | None,
+    provider_compatibility_note: str | None = None,
 ) -> dict[str, object]:
     """构造 retrieve-first reader 的公开身份信息。
 
@@ -1688,7 +1745,7 @@ def _build_answer_reader_manifest(
             prompt_path = project_root / prompt_path
         prompt_file_sha256 = hashlib.sha256(prompt_path.read_bytes()).hexdigest()
 
-    return {
+    manifest: dict[str, object] = {
         "answer_protocol": "retrieve_first_v1",
         "answer_prompt_profile": profile_name,
         "answer_prompt_file_sha256": prompt_file_sha256,
@@ -1696,7 +1753,32 @@ def _build_answer_reader_manifest(
         "answer_parameters": (
             None if answer_settings is None else answer_settings.to_manifest_dict()
         ),
+        "api_runtime": api_runtime_manifest,
     }
+    if provider_compatibility_note is not None:
+        manifest["provider_compatibility"] = provider_compatibility_note
+    return manifest
+
+
+def _apply_provider_answer_compatibility(
+    *,
+    answer_settings: AnswerLLMSettings,
+    api_provider: str,
+    profile_name: str,
+) -> tuple[AnswerLLMSettings, str | None]:
+    """为 reasoning smoke 保留官方可见答案预算，不改 formal/official 参数。"""
+
+    if (
+        profile_name == "smoke"
+        and api_provider == OPENCODEGO_API_PROVIDER
+        and answer_settings.max_tokens is not None
+        and answer_settings.max_tokens < 128
+    ):
+        return (
+            replace(answer_settings, max_tokens=128),
+            "opencodego_reasoning_completion_floor_128_v1",
+        )
+    return answer_settings, None
 
 
 def run_mem0_locomo_prediction(

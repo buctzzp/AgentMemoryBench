@@ -140,9 +140,12 @@ def test_simplemem_registered_prediction_runs_locomo_and_longmemeval_fake_smoke(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: OpenAISettings(
+        lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
+            model="deepseek-v4-flash",
+            provider="opencodego",
+            judge_transport="chat_completions",
         ),
         raising=False,
     )
@@ -232,9 +235,12 @@ def test_simplemem_registered_prediction_workers_gt_1_manifest_has_protocol_fiel
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root: OpenAISettings(
+        lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
+            model="deepseek-v4-flash",
+            provider="opencodego",
+            judge_transport="chat_completions",
         ),
         raising=False,
     )

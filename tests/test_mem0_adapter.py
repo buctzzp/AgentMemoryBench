@@ -478,12 +478,13 @@ def _build_longmemeval_conversation() -> Conversation:
 
 
 def test_mem0_profiles_separate_smoke_and_official_full_parameters() -> None:
-    """smoke 只降低运行范围参数，全量 profile 必须锁定官方 benchmark 参数。"""
+    """smoke 只换预算 LLM/运行范围，非 LLM 参数与正式 profile 保持一致。"""
 
     smoke = Mem0Config.smoke()
     full = Mem0Config.official_full()
 
-    assert smoke.extraction_model == "gpt-4o-mini"
+    assert smoke.extraction_model == "deepseek-v4-flash"
+    assert smoke.reader_model == "deepseek-v4-flash"
     assert smoke.embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
     assert smoke.embedding_dimensions == 384
     assert smoke.embedding_provider == "huggingface"
@@ -495,6 +496,7 @@ def test_mem0_profiles_separate_smoke_and_official_full_parameters() -> None:
     assert smoke.api_max_retries == 8
 
     assert full.extraction_model == "gpt-4o-mini"
+    assert full.reader_model == "gpt-4o-mini"
     assert full.embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
     assert full.embedding_dimensions == 384
     assert full.embedding_provider == "huggingface"
@@ -1783,7 +1785,7 @@ def test_get_answer_searches_only_question_conversation_and_calls_reader() -> No
         "method": "mem0",
         "retrieved_memory_count": 1,
         "top_k": 20,
-        "reader_model": "gpt-4o-mini",
+        "reader_model": "deepseek-v4-flash",
     }
     reader_messages = reader.calls[0]["messages"]
     assert len(reader_messages) == 1

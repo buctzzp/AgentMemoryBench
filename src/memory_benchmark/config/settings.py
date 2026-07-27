@@ -16,6 +16,17 @@ from memory_benchmark.core import ConfigurationError
 
 
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+PRIMARY_API_PROVIDER = "primary"
+OPENCODEGO_API_PROVIDER = "opencodego"
+OPENCODEGO_SMOKE_MODEL = "deepseek-v4-flash"
+SUPPORTED_API_PROVIDERS = frozenset(
+    {PRIMARY_API_PROVIDER, OPENCODEGO_API_PROVIDER}
+)
+RESPONSES_JUDGE_TRANSPORT = "responses"
+CHAT_COMPLETIONS_JUDGE_TRANSPORT = "chat_completions"
+SUPPORTED_JUDGE_TRANSPORTS = frozenset(
+    {RESPONSES_JUDGE_TRANSPORT, CHAT_COMPLETIONS_JUDGE_TRANSPORT}
+)
 # 统一网络兜底：框架 client 与 answer LLM client 使用同一档超时/重试，避免 full
 # 长跑时框架侧只重试 2 次被瞬时抖动打断而白烧前置成本（ws02.6）。
 DEFAULT_TIMEOUT_SECONDS = 60.0
@@ -95,7 +106,9 @@ class OpenAISettings:
     字段:
         api_key: OpenAI 或 OpenAI-compatible 服务的 API key。不能写入日志。
         base_url: API base URL，例如 `https://api.openai.com/v1` 或兼容网关地址。
-        model: 当前项目固定使用的模型名，现阶段为 `gpt-4o-mini`。
+        model: 当前 runtime profile 实际使用的模型名。
+        provider: 不含 secret 的稳定 provider 身份。
+        judge_transport: judge 使用 Responses API 或 Chat Completions API。
         timeout_seconds: 单次 API 请求超时时间。
         max_retries: OpenAI SDK 内部最大重试次数。
     """
@@ -103,8 +116,42 @@ class OpenAISettings:
     api_key: str
     base_url: str | None = None
     model: str = DEFAULT_OPENAI_MODEL
+    provider: str = PRIMARY_API_PROVIDER
+    judge_transport: str = RESPONSES_JUDGE_TRANSPORT
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     max_retries: int = DEFAULT_MAX_RETRIES
+
+    def __post_init__(self) -> None:
+        """强校验 provider runtime，避免 secret 之外的实验身份含糊。"""
+
+        if not self.api_key.strip():
+            raise ConfigurationError("API key must not be blank")
+        if self.base_url is not None and not self.base_url.strip():
+            raise ConfigurationError("API base_url must be None or non-blank")
+        if not self.model.strip():
+            raise ConfigurationError("API model must not be blank")
+        if self.provider not in SUPPORTED_API_PROVIDERS:
+            raise ConfigurationError(
+                f"Unsupported API provider: {self.provider!r}"
+            )
+        if self.judge_transport not in SUPPORTED_JUDGE_TRANSPORTS:
+            raise ConfigurationError(
+                f"Unsupported judge transport: {self.judge_transport!r}"
+            )
+        expected_transport = (
+            CHAT_COMPLETIONS_JUDGE_TRANSPORT
+            if self.provider == OPENCODEGO_API_PROVIDER
+            else RESPONSES_JUDGE_TRANSPORT
+        )
+        if self.judge_transport != expected_transport:
+            raise ConfigurationError(
+                f"API provider {self.provider!r} requires judge transport "
+                f"{expected_transport!r}; got {self.judge_transport!r}"
+            )
+        if self.timeout_seconds <= 0:
+            raise ConfigurationError("API timeout_seconds must be positive")
+        if self.max_retries < 0:
+            raise ConfigurationError("API max_retries must be non-negative")
 
     def to_client_kwargs(self) -> dict[str, object]:
         """转换为 OpenAI SDK client 参数。
@@ -139,9 +186,48 @@ class OpenAISettings:
             "api_key": _redact_secret(self.api_key),
             "base_url": self.base_url,
             "model": self.model,
+            "provider": self.provider,
+            "judge_transport": self.judge_transport,
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
         }
+
+    def to_runtime_manifest_dict(self) -> dict[str, object]:
+        """返回不含 key/base URL 明文、可参与 resume 的 runtime 身份。"""
+
+        return build_api_runtime_manifest(
+            provider=self.provider,
+            model=self.model,
+        )
+
+
+def build_api_runtime_manifest(
+    *,
+    provider: str,
+    model: str,
+) -> dict[str, object]:
+    """从非 secret 的 provider/model 构造可在 preflight 前使用的运行身份。"""
+
+    normalized_provider = provider.strip().lower()
+    normalized_model = model.strip()
+    if normalized_provider not in SUPPORTED_API_PROVIDERS:
+        raise ConfigurationError(
+            f"Unsupported API provider: {provider!r}"
+        )
+    if not normalized_model:
+        raise ConfigurationError("API runtime model must not be blank")
+    judge_transport = (
+        CHAT_COMPLETIONS_JUDGE_TRANSPORT
+        if normalized_provider == OPENCODEGO_API_PROVIDER
+        else RESPONSES_JUDGE_TRANSPORT
+    )
+    return {
+        "contract_version": "v1",
+        "provider": normalized_provider,
+        "model": normalized_model,
+        "answer_transport": CHAT_COMPLETIONS_JUDGE_TRANSPORT,
+        "judge_transport": judge_transport,
+    }
 
 
 @dataclass(frozen=True)
@@ -335,12 +421,14 @@ class AppSettings:
 def load_settings(
     project_root: str | Path | None = None,
     env_file: str | Path | None = None,
+    api_provider: str = PRIMARY_API_PROVIDER,
 ) -> AppSettings:
     """读取项目配置。
 
     输入:
         project_root: 项目根目录；为空时使用当前工作目录。
         env_file: `.env` 文件路径；为空时默认读取 `project_root/.env`。
+        api_provider: 需要读取的 API provider profile。
 
     输出:
         AppSettings: 路径配置和 OpenAI 配置。
@@ -353,6 +441,7 @@ def load_settings(
     openai_settings = load_openai_settings(
         project_root=path_settings.project_root,
         env_file=env_file,
+        api_provider=api_provider,
     )
     return AppSettings(paths=path_settings, openai=openai_settings)
 
@@ -360,12 +449,14 @@ def load_settings(
 def load_openai_settings(
     project_root: str | Path | None = None,
     env_file: str | Path | None = None,
+    api_provider: str = PRIMARY_API_PROVIDER,
 ) -> OpenAISettings:
     """读取 OpenAI 相关配置。
 
     输入:
         project_root: 项目根目录；为空时使用当前工作目录推断。
         env_file: `.env` 文件路径；为空时默认读取 `project_root/.env`。
+        api_provider: `primary` 或 `opencodego`。
 
     输出:
         OpenAISettings: 只包含 API 连接所需字段的结构化配置。
@@ -385,16 +476,82 @@ def load_openai_settings(
         selected_env_file = selected_env_file.resolve()
     load_dotenv(dotenv_path=selected_env_file, override=False)
 
-    api_key = _first_non_empty_env("OPENAI_KEY", "OPENAI_API_KEY")
-    if not api_key:
-        raise ConfigurationError("Missing OpenAI API key: set OPENAI_KEY in .env or environment")
-
-    base_url = _first_non_empty_env("BASE_URL", "OPENAI_BASE_URL")
+    normalized_provider = api_provider.strip().lower()
+    if normalized_provider == PRIMARY_API_PROVIDER:
+        api_key = _first_non_empty_env("OPENAI_KEY", "OPENAI_API_KEY")
+        if not api_key:
+            raise ConfigurationError(
+                "Missing primary API key: set OPENAI_KEY in .env or environment"
+            )
+        base_url = _first_non_empty_env("BASE_URL", "OPENAI_BASE_URL")
+        model = DEFAULT_OPENAI_MODEL
+        judge_transport = RESPONSES_JUDGE_TRANSPORT
+    elif normalized_provider == OPENCODEGO_API_PROVIDER:
+        api_key = _first_non_empty_env("opencode_go_key", "OPENCODE_GO_KEY")
+        base_url = _first_non_empty_env(
+            "opencode_base_url",
+            "OPENCODE_BASE_URL",
+        )
+        model = _first_non_empty_env(
+            "opencode_model_name",
+            "OPENCODE_MODEL_NAME",
+        )
+        missing = [
+            field_name
+            for field_name, value in (
+                ("opencode_go_key", api_key),
+                ("opencode_base_url", base_url),
+                ("opencode_model_name", model),
+            )
+            if value is None
+        ]
+        if missing:
+            raise ConfigurationError(
+                "Missing opencodego setting(s): " + ", ".join(missing)
+            )
+        judge_transport = CHAT_COMPLETIONS_JUDGE_TRANSPORT
+    else:
+        raise ConfigurationError(
+            f"Unsupported API provider: {api_provider!r}; expected one of "
+            f"{sorted(SUPPORTED_API_PROVIDERS)}"
+        )
 
     return OpenAISettings(
         api_key=api_key,
         base_url=base_url,
-        model=DEFAULT_OPENAI_MODEL,
+        model=model,
+        provider=normalized_provider,
+        judge_transport=judge_transport,
+    )
+
+
+def resolve_api_provider_for_profile(profile_name: str) -> str:
+    """把运行 profile 映射到显式 API provider，不读取 secret。"""
+
+    normalized = profile_name.strip().lower()
+    if normalized == "smoke":
+        return OPENCODEGO_API_PROVIDER
+    if (
+        normalized in {"official-full", "official_full"}
+        or normalized.startswith("author-")
+        or normalized.startswith("author_")
+    ):
+        return PRIMARY_API_PROVIDER
+    raise ConfigurationError(
+        f"Unsupported run profile for API provider routing: {profile_name!r}"
+    )
+
+
+def resolve_api_model_for_provider(api_provider: str) -> str:
+    """返回公开 runtime profile 锁定的模型名，供 secret load 前 manifest 使用。"""
+
+    normalized = api_provider.strip().lower()
+    if normalized == OPENCODEGO_API_PROVIDER:
+        return OPENCODEGO_SMOKE_MODEL
+    if normalized == PRIMARY_API_PROVIDER:
+        return DEFAULT_OPENAI_MODEL
+    raise ConfigurationError(
+        f"Unsupported API provider: {api_provider!r}"
     )
 
 

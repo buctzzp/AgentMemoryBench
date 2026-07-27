@@ -11,7 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from memory_benchmark.config import load_path_settings
+from memory_benchmark.config import (
+    OpenAISettings,
+    load_openai_settings,
+    load_path_settings,
+)
 from memory_benchmark.core import ConfigurationError
 from memory_benchmark.evaluators.registry import (
     create_evaluator,
@@ -192,6 +196,8 @@ def execute_evaluate(command: EvaluateCommand) -> tuple[Any, ...]:
     )
 
     results: list[Any] = []
+    run_api_settings: OpenAISettings | None = None
+    api_settings_resolved = False
     for metric_name in command.metrics:
         registration = get_evaluator_registration(metric_name)
         if registration.requires_api and not command.confirm_api:
@@ -204,12 +210,24 @@ def execute_evaluate(command: EvaluateCommand) -> tuple[Any, ...]:
                 profile_name=command.judge_profile,
                 project_root=root,
             )
+            if not api_settings_resolved:
+                run_api_settings = _resolve_run_api_settings(
+                    manifest=manifest,
+                    project_root=root,
+                )
+                api_settings_resolved = True
+            judge_model = (
+                profile.model
+                if run_api_settings is None
+                else run_api_settings.model
+            )
             evaluator = create_evaluator(
                 metric_name,
                 benchmark_name,
                 profile_name=profile.mode,
-                model=profile.model,
+                model=judge_model,
                 project_root=str(root),
+                openai_settings=run_api_settings,
             )
             if (
                 native_bundle is not None
@@ -223,8 +241,9 @@ def execute_evaluate(command: EvaluateCommand) -> tuple[Any, ...]:
                 native_judge = native_bundle.judge_profile
                 evaluator = LoCoMoJudgeEvaluator(
                     mode=profile.mode,
-                    model=profile.model,
+                    model=judge_model,
                     project_root=str(root),
+                    openai_settings=run_api_settings,
                     prompt_template_override=native_judge.prompt_template,
                     skipped_categories=native_judge.skipped_categories,
                     prompt_profile_override=native_judge.profile_name,
@@ -238,6 +257,52 @@ def execute_evaluate(command: EvaluateCommand) -> tuple[Any, ...]:
             )
         )
     return tuple(results)
+
+
+def _resolve_run_api_settings(
+    *,
+    manifest: dict[str, Any],
+    project_root: Path,
+) -> OpenAISettings | None:
+    """从新 run manifest 恢复 API runtime；历史产物保留旧 primary 懒加载。"""
+
+    method_manifest = manifest.get("method")
+    if not isinstance(method_manifest, dict):
+        return None
+    answer_reader = method_manifest.get("answer_reader")
+    if not isinstance(answer_reader, dict):
+        return None
+    if "api_runtime" not in answer_reader:
+        return None
+    raw_runtime = answer_reader.get("api_runtime")
+    if not isinstance(raw_runtime, dict):
+        raise ConfigurationError(
+            "method.answer_reader.api_runtime must be an object"
+        )
+    if raw_runtime.get("contract_version") != "v1":
+        raise ConfigurationError(
+            "Unsupported method.answer_reader.api_runtime contract_version"
+        )
+    provider = raw_runtime.get("provider")
+    if not isinstance(provider, str) or not provider.strip():
+        raise ConfigurationError(
+            "method.answer_reader.api_runtime.provider must be non-empty"
+        )
+    settings = load_openai_settings(
+        project_root=project_root,
+        api_provider=provider,
+    )
+    expected = settings.to_runtime_manifest_dict()
+    if raw_runtime != expected:
+        raise ConfigurationError(
+            "Current API runtime does not match prediction manifest identity"
+        )
+    answer_model = answer_reader.get("answer_model")
+    if answer_model != settings.model:
+        raise ConfigurationError(
+            "method.answer_reader.answer_model disagrees with api_runtime.model"
+        )
+    return settings
 
 
 def _resolve_evaluation_track_identity(

@@ -11,7 +11,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Iterator
 
-from memory_benchmark.config import load_settings
+from memory_benchmark.config import (
+    CHAT_COMPLETIONS_JUDGE_TRANSPORT,
+    OPENCODEGO_API_PROVIDER,
+    RESPONSES_JUDGE_TRANSPORT,
+    OpenAISettings,
+    load_settings,
+)
 from memory_benchmark.core import AnswerResult, GoldAnswerInfo, MetricResult, Question
 from memory_benchmark.core.exceptions import ConfigurationError, JudgeOutputError
 from memory_benchmark.observability.efficiency import (
@@ -164,6 +170,7 @@ class LLMJudgeEvaluator:
         client: Any | None = None,
         project_root: str | None = None,
         env_file: str | None = None,
+        openai_settings: OpenAISettings | None = None,
         efficiency_collector: EfficiencyCollector | None = None,
     ) -> None:
         """初始化 judge 外壳。
@@ -174,6 +181,7 @@ class LLMJudgeEvaluator:
             client: 可注入的兼容 OpenAI client，便于后续测试或替换。
             project_root: 读取配置时使用的项目根目录。
             env_file: 读取配置时使用的 `.env` 路径。
+            openai_settings: 命令层已按 run identity 解析的 provider 配置。
             efficiency_collector: runner 管理的可选 evaluator-side observation collector。
 
         输出:
@@ -186,6 +194,7 @@ class LLMJudgeEvaluator:
         self._project_root = project_root
         self._env_file = env_file
         self._settings = None
+        self._openai_settings = openai_settings
         self.efficiency_collector = efficiency_collector
 
     def build_prompt(
@@ -261,7 +270,7 @@ class LLMJudgeEvaluator:
     def efficiency_model_inventory(self) -> tuple[ModelDescriptor, ...]:
         """返回 judge evaluator 会写入 observation 的模型身份。"""
 
-        model_name = self.model or self._get_settings().openai.model
+        model_name = self.model or self._get_openai_settings().model
         return (
             ModelDescriptor(
                 model_id="judge-llm",
@@ -347,12 +356,24 @@ class LLMJudgeEvaluator:
         """
 
         client = self._get_client()
-        model = self.model or self._get_settings().openai.model
-        response = client.responses.create(
-            model=model,
-            input=api_input,
-            temperature=0,
-        )
+        api_settings = self._resolve_invocation_settings()
+        model = self.model or api_settings.model
+        if api_settings.judge_transport == RESPONSES_JUDGE_TRANSPORT:
+            response = client.responses.create(
+                model=model,
+                input=api_input,
+                temperature=0,
+            )
+        elif api_settings.judge_transport == CHAT_COMPLETIONS_JUDGE_TRANSPORT:
+            response = client.chat.completions.create(
+                model=model,
+                messages=_judge_chat_messages(api_input),
+                temperature=0,
+            )
+        else:  # pragma: no cover - OpenAISettings 已在构造期封闭枚举
+            raise ConfigurationError(
+                f"Unsupported judge transport: {api_settings.judge_transport!r}"
+            )
         text = _extract_response_text(response)
         input_tokens, output_tokens = _extract_usage_tokens(response)
         usage = resolve_token_usage(
@@ -396,8 +417,33 @@ class LLMJudgeEvaluator:
         if self._client is None:
             from openai import OpenAI
 
-            self._client = OpenAI(**self._get_settings().openai.to_client_kwargs())
+            self._client = OpenAI(**self._get_openai_settings().to_client_kwargs())
         return self._client
+
+    def _resolve_invocation_settings(self) -> OpenAISettings:
+        """返回本次 judge 的 transport；旧 fake client 默认保留 Responses 语义。"""
+
+        if self._openai_settings is None and self._client is not None:
+            return OpenAISettings(
+                api_key="<injected-test-client>",
+                model=self.model or "gpt-4o-mini",
+            )
+        return self._get_openai_settings()
+
+    def _get_openai_settings(self) -> OpenAISettings:
+        """返回命令层注入或从 primary profile 懒加载的 API 配置。"""
+
+        if self._openai_settings is not None:
+            return self._openai_settings
+        return self._get_settings().openai
+
+    def _provider_completion_limit(self, requested: int) -> int:
+        """为 reasoning provider 放宽隐藏推理与可见答案共享的 token 预算。"""
+
+        settings = self._resolve_invocation_settings()
+        if settings.provider == OPENCODEGO_API_PROVIDER:
+            return max(requested, 128)
+        return requested
 
     def _get_settings(self) -> Any:
         """懒加载项目配置。
@@ -497,6 +543,13 @@ def _extract_response_text(response: Any) -> str:
     if isinstance(output_text, str) and output_text.strip():
         return output_text
 
+    choices = _get_mapping_or_attr(response, "choices")
+    if isinstance(choices, list) and choices:
+        message = _get_mapping_or_attr(choices[0], "message")
+        content = _get_mapping_or_attr(message, "content")
+        if isinstance(content, str) and content.strip():
+            return content
+
     if isinstance(response, dict):
         output = response.get("output")
     else:
@@ -512,6 +565,35 @@ def _extract_response_text(response: Any) -> str:
                         return text
 
     raise JudgeOutputError("model response does not contain output text")
+
+
+def _judge_chat_messages(api_input: Any) -> list[dict[str, Any]]:
+    """把 Responses 风格 judge input 无损映射到 Chat Completions messages。"""
+
+    if isinstance(api_input, str):
+        return [{"role": "user", "content": api_input}]
+    if not isinstance(api_input, list) or not api_input:
+        raise ConfigurationError(
+            "chat-completions judge input must be a string or non-empty message list"
+        )
+    messages: list[dict[str, Any]] = []
+    for index, item in enumerate(api_input):
+        if not isinstance(item, dict):
+            raise ConfigurationError(
+                f"chat-completions judge message {index} must be a dict"
+            )
+        role = item.get("role")
+        content = item.get("content")
+        if not isinstance(role, str) or not role.strip():
+            raise ConfigurationError(
+                f"chat-completions judge message {index} requires role"
+            )
+        if not isinstance(content, str):
+            raise ConfigurationError(
+                f"chat-completions judge message {index} requires string content"
+            )
+        messages.append(dict(item))
+    return messages
 
 
 class _TiktokenCounter:
