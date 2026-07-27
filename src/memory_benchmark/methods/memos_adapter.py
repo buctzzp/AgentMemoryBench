@@ -390,7 +390,9 @@ class MemosRuntime:
         self.config = config
         self.identity = config.runtime_identity()
         self._closed = False
-        self._stop_attempted = False
+        # `scheduler.stop()` 失败后的永久 fail-closed 状态（见 close()）。
+        self._close_failed = False
+        self._close_error: BaseException | None = None
         _ensure_memos_importable(path_settings)
         # lazy import：绝不 import `memos.api.routers.server_router`，
         # 它会在 module import 期初始化全局 server components。
@@ -417,26 +419,57 @@ class MemosRuntime:
 
         return self._closed
 
+    @property
+    def close_failed(self) -> bool:
+        """返回该 runtime 是否已因 `scheduler.stop()` 失败而永久不可复用。"""
+
+        return self._close_failed
+
+    @property
+    def close_error(self) -> BaseException | None:
+        """返回首次 `scheduler.stop()` 失败的原始异常，未失败时为 `None`。"""
+
+        return self._close_error
+
     def close(self) -> None:
         """收敛 scheduler：先拒绝未完成 task，再 stop 恰好一次。
 
         **状态只在成功后提交**：pending task 导致拒绝时，本对象不做任何变更，
-        因此后台 task 到达终态后同一个 runtime 可以原样重试关闭。`stop()` 只会
-        被尝试一次——它抛错时异常照常上抛（失败必须可见），但不会在重试中被
-        二次调用，避免同一 scheduler 被 stop 两次。
+        因此后台 task 到达终态后同一个 runtime 可以原样重试关闭（pending refusal
+        不是 close failure）。
+
+        **`stop()` 失败是永久 fail-closed**：current MemOS
+        `BaseSchedulerQueueMixin.stop()` 先由 `stop_consumer()` 把 `_running`
+        置 False，再执行 `dispatcher.shutdown()` 与 `dispatcher_monitor.stop()`；
+        后两步抛错时 scheduler 可能只关掉了一部分，而第二次调用 upstream
+        `stop()` 会因 `_running=False` 直接返回。因此"重试时跳过 stop 并标
+        closed"不是幂等，而是把**未证实完全关闭**伪装成成功。这里改为记录
+        `_close_failed`/`_close_error`，之后每次 close 都稳定 fail-fast 并链回
+        首个异常，绝不标 closed、绝不允许复用。
+
+        Raises:
+            ConfigurationError: 该 runtime 先前 `stop()` 已失败，不可安全复用。
         """
 
+        if self._close_failed:
+            raise ConfigurationError(
+                "MemOS runtime is permanently unusable: a previous "
+                "scheduler.stop() failed, so the scheduler may be only partially "
+                "shut down and must not be reused or reported as closed"
+            ) from self._close_error
         if self._closed:
             return
-        # 先拒绝：此调用之前不修改任何状态，保证 refusal 完全可重试。
+        # 先拒绝：此调用之前不修改任何状态，保证 pending refusal 完全可重试。
         self.tracker.assert_no_pending_tasks()
-        if not self._stop_attempted:
-            stop = getattr(self.scheduler, "stop", None)
-            if callable(stop):
-                self._stop_attempted = True
+        stop = getattr(self.scheduler, "stop", None)
+        if callable(stop):
+            try:
                 stop()
-            else:
-                self._stop_attempted = True
+            except BaseException as exc:
+                # 首次失败原样上抛（失败必须可见），同时进入永久 poisoned 状态。
+                self._close_failed = True
+                self._close_error = exc
+                raise
         self._closed = True
 
 
@@ -474,6 +507,14 @@ class _MemosRuntimeOwner:
                         "identity; refusing to build a second runtime in the same "
                         "process"
                     )
+                if existing.close_failed:
+                    # 永久 fail-closed：既不能像普通 open runtime 那样返回，
+                    # 也不能绕过它另建第二份。
+                    raise ConfigurationError(
+                        "MemOS runtime for this config previously failed to close "
+                        "(scheduler.stop() error); refusing to reuse it or build a "
+                        "second runtime in the same process"
+                    ) from existing.close_error
                 if existing.closed:
                     raise ConfigurationError(
                         "MemOS runtime for this config has already been closed; "
@@ -496,6 +537,9 @@ class _MemosRuntimeOwner:
         或 `scheduler.stop()` 抛错时，owner 仍持有该 runtime，异常照常上抛，
         因此不会留下"仍在运行却无人持有"的孤儿。
 
+        已进入永久 fail-closed 的 runtime 由 `close()` 自身稳定 fail-fast，
+        因此本方法对它同样是"拒绝并保留引用"，不会误清。
+
         close 在持锁状态下执行，保证 §2.1.5 的原子性：close 尚未完成时，
         并发 `acquire()` 不会构造第二个同 config runtime。
         """
@@ -516,7 +560,8 @@ class _MemosRuntimeOwner:
 
         - owner 为空：no-op 返回 `None`，**不得**为了 cleanup 反向构造 runtime；
         - identity 一致：关闭并释放，返回该 runtime；
-        - identity 冲突：fail-fast，绝不关闭别的配置的 runtime。
+        - identity 冲突：fail-fast，绝不关闭别的配置的 runtime；
+        - 已永久 fail-closed：由 `close()` 稳定 fail-fast，引用保持不变。
 
         Returns:
             实际被释放的 runtime；owner 为空时为 `None`。

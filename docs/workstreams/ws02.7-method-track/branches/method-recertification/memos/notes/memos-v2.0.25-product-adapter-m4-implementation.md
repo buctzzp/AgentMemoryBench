@@ -485,3 +485,148 @@ provider protocol、vendored MemOS、patch、TOML 与其他测试。
 `stop()` 抛错后重试 `close()` 不再二次 stop。裁决 §2.1.6 只要求「错误可见 +
 不丢孤儿」，未规定重试是否应再次 stop；此处按「同一 scheduler 不重复 stop」取舍，
 若架构师希望重试时重新 stop，可在复核时改判。
+
+---
+
+# M4-R1 follow-up：stop failure 永久 fail-closed
+
+日期：2026-07-27
+follow-up commit 基线：`de29c4c`
+
+## R2.0 判词
+
+```text
+READY_FOR_MEMOS_M4_FINAL_ARCHITECT_ACCEPTANCE(
+  stop failure is permanently fail-closed;
+  no false closed state or runtime reuse remains
+)
+```
+
+## R2.1 撤回 `de29c4c` 的口径
+
+**本节明确撤回上文 R1.9 的实现选择**：`de29c4c` 用 `_stop_attempted` 让
+「`stop()` 抛错后第二次 `close()` 跳过 stop 并标 closed」，当时的理由是
+「同一 scheduler 不重复 stop」。架构师裁定该口径**不成立**，理由是 current
+upstream 的一手事实：
+
+```text
+third_party/methods/MemOS/src/memos/mem_scheduler/base_mixins/queue_ops.py
+
+stop_consumer():309
+    if not self._running: return
+    self._running = False          # 314：早早置 False
+
+stop():340
+    if not self._running: return   # 341-343：第二次调用直接返回
+    self.stop_consumer()           # 345
+    self._monitor_thread.join(...) # 347-348
+    self.dispatcher.shutdown()     # 350-352：这里及之后仍可能抛错
+    self.dispatcher_monitor.stop() # 354-356
+```
+
+即：`dispatcher.shutdown()` 或更后的步骤抛错时，scheduler 可能只关闭了一部分；
+而第二次调用 upstream `stop()` 会因 `_running=False` 直接返回、什么都不做。
+所以「第二次 cleanup 不再 stop、直接标 closed 并从 owner 清引用」不是幂等，
+而是把**未证实的完全关闭**伪装成成功。`de29c4c` 的行为据此作废。
+
+## R2.2 最终状态机
+
+```text
+stop() 成功
+  → runtime.closed = True
+  → owner / provider 释放引用
+
+stop() 首次抛错
+  → 原异常原样上抛（可见）
+  → runtime.closed      = False
+  → runtime.close_failed = True（记录 close_error）
+  → owner / provider 保留同一 runtime
+  → acquire / reuse / 构造第二个 runtime 全部拒绝
+
+之后每次 close / cleanup
+  → 不再调用 stop
+  → 稳定抛 ConfigurationError，并 `raise ... from` 链回首个异常
+  → 永远不标 closed、永远不清 owner / provider 引用
+```
+
+实现：`MemosRuntime` 去掉 `_stop_attempted`，改为强类型 close state
+`_close_failed: bool` + `_close_error: BaseException | None`，并暴露只读
+`close_failed` / `close_error`。`_MemosRuntimeOwner.acquire()` 遇到同 config 的
+close-failed runtime 直接 fail-fast（既不返回、也不新建第二份）；
+`release()` 与 `release_current_for_config()` 由 `close()` 自身稳定 fail-fast，
+因此天然「拒绝并保留引用」。
+
+这是永久 poisoned 状态：只能让当前 run 失败并退出进程，不假装可恢复。
+测试专用 `owner.reset()` 仍可清 fixture，生产路径不靠它掩盖失败。
+异常文本只描述「先前 stop 失败、不可安全复用」，不含 API key 或 DB secret，
+也不写入任何公开 manifest/artifact。
+
+实测状态机（生产 provider/owner + 注入 stop 失败）：
+
+```text
+FIRST_CLEANUP_ERROR: RuntimeError scheduler stop exploded
+AFTER_FIRST: {'provider_cleaned': False, 'provider_runtime_is_none': False,
+              'owner_runtime_is_none': False, 'runtime_closed': False,
+              'close_failed': True, 'stop_calls': 1}
+CLEANUP_2_ERROR: ConfigurationError MemOS runtime is permanently unusable... | cause: RuntimeError
+AFTER_2:     {... 同上，stop_calls 仍为 1 ...}
+CLEANUP_3_ERROR: ConfigurationError MemOS runtime is permanently unusable... | cause: RuntimeError
+AFTER_3:     {... 同上，stop_calls 仍为 1 ...}
+```
+
+## R2.3 保持不变的行为
+
+- pending-task refusal **不是** close failure：`de29c4c` 已证实的
+  pending→terminal→cleanup 成功路径原样保留（有专门反例锁死
+  `close_failed is False`、`stop_calls` 从 0 到 1）；
+- stop 正常成功后的重复 cleanup 仍幂等、stop 恰好一次；
+- owner-empty cleanup 仍 no-op 且不反向构造 runtime；
+- runner、registry、CLI、patch、vendored MemOS、TOML 均未改动。
+
+## R2.4 新增强反例
+
+`tests/test_memos_adapter.py` 第 14 节，8 条：
+
+1. `test_first_stop_failure_is_visible_and_marks_close_failed`
+2. `test_subsequent_cleanups_after_stop_failure_keep_failing_closed`
+3. `test_stop_failure_error_chain_links_back_to_first_failure`
+4. `test_acquire_refuses_close_failed_runtime_without_building_a_second`
+5. `test_release_current_for_config_refuses_close_failed_runtime`
+6. `test_pending_refusal_is_not_a_close_failure`
+7. `test_successful_stop_keeps_idempotent_cleanup_unchanged`
+8. `test_real_runtime_stop_failure_is_permanently_fail_closed`（穿过真实
+   `MemosRuntime.close()`）
+
+同时把替身 `_FakeRuntime.close()` 升级成与生产同构的 fail-closed 语义
+（原先只镜像 `de29c4c` 的旧口径），避免替身与生产漂移；`_StopCountingRuntime`
+退化为仅为可读性保留的薄子类，注入方式是 `runtime.fail_stop = True`。
+
+## R2.5 Mutation
+
+| mutation | 转红用例 |
+| --- | --- |
+| 删掉 `close()` 的 close-failed 二次拒绝门，恢复 `de29c4c` 的「第二次标 closed」 | `test_real_runtime_stop_failure_is_permanently_fail_closed`（1 failed, 88 passed） |
+| 删掉 `acquire()` 的 close-failed 拒绝门 | `test_acquire_refuses_close_failed_runtime_without_building_a_second`（1 failed, 88 passed） |
+
+两次恢复后全绿，临时变体未提交。
+
+**覆盖口径如实说明**：第 14 节中 1–3、5–7 走的是替身 `_FakeRuntime.close()`
+（它们锁的是 provider/owner 的接线与状态提交时机），因此对 `close()` 本体的
+mutation 不会让它们转红；对 `close()` 本体的生产覆盖来自第 8 条，对 owner
+生产闸门的覆盖来自第 4 条——两条各自都被上表的 mutation 证实有效。
+
+## R2.6 定向自检尾行
+
+```text
+uv run pytest -q tests/test_memos_adapter.py \
+  tests/test_prediction_runner.py::test_cleanup_failure_is_visible_and_run_is_not_completed \
+  tests/test_prediction_runner.py::test_cleanup_failure_preserves_primary_exception_context
+
+91 passed in 4.15s
+```
+
+未跑全量 pytest、compileall、真实服务/API/模型（本卡 §5 限定）。
+
+## R2.7 偏差与停工点
+
+无停工点，无偏差。改动严格限于本卡 §2 允许的 3 个文件。

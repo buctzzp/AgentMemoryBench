@@ -199,19 +199,43 @@ class _FakeRuntime:
         self.scheduler = types.SimpleNamespace(stop_calls=0)
         self.stop_calls = 0
         self._closed = False
+        # 与真实 MemosRuntime 同构的永久 fail-closed 状态。
+        self.fail_stop = False
+        self._close_failed = False
+        self._close_error = None
 
     @property
     def closed(self) -> bool:
         """返回是否已关闭。"""
         return self._closed
 
+    @property
+    def close_failed(self) -> bool:
+        """返回是否已因 stop 失败而永久不可复用。"""
+        return self._close_failed
+
+    @property
+    def close_error(self):
+        """返回首次 stop 失败的原始异常。"""
+        return self._close_error
+
     def close(self) -> None:
-        """模拟真实 close：先拒绝 pending，再 stop 恰好一次。"""
+        """镜像真实 close：pending refusal 可重试；stop 失败永久 fail-closed。"""
+        if self._close_failed:
+            raise ConfigurationError(
+                "MemOS runtime is permanently unusable: a previous "
+                "scheduler.stop() failed"
+            ) from self._close_error
         if self._closed:
             return
         self.tracker.assert_no_pending_tasks()
-        self._closed = True
         self.stop_calls += 1
+        if self.fail_stop:
+            error = RuntimeError("scheduler stop exploded")
+            self._close_failed = True
+            self._close_error = error
+            raise error
+        self._closed = True
 
 
 def _make_provider(tmp_path, *, benchmark_name=None, config=None, runtime_factory=None):
@@ -1550,24 +1574,11 @@ def test_manifest_never_leaks_secrets_or_absolute_paths():
 
 
 class _StopCountingRuntime(_FakeRuntime):
-    """可注入 scheduler stop 失败的替身 runtime，用于 R1 状态机反例。"""
+    """命名清晰的别名：close/stop 语义完全由 `_FakeRuntime` 提供。
 
-    def __init__(self, **kwargs):
-        """初始化 stop 失败开关。"""
-        super().__init__(**kwargs)
-        self.fail_stop = False
-
-    def close(self) -> None:
-        """镜像真实 close 的"成功后提交"语义。"""
-        if self._closed:
-            return
-        self.tracker.assert_no_pending_tasks()
-        if not getattr(self, "_stop_attempted", False):
-            self._stop_attempted = True
-            self.stop_calls += 1
-            if self.fail_stop:
-                raise RuntimeError("scheduler stop exploded")
-        self._closed = True
+    保留独立名称是为了让 stop-failure 反例的意图一眼可读；注入方式是
+    `runtime.fail_stop = True`。
+    """
 
 
 def _pending_task(provider: MemOS, runtime, isolation_key="run1_conv1") -> str:
@@ -1650,9 +1661,7 @@ def test_scheduler_stop_failure_is_visible_and_owner_keeps_reference(tmp_path):
     assert provider._runtime is runtime
     assert provider._cleaned is False
     assert runtime.closed is False
-    # stop 已尝试过一次，重试不得再次调用（避免同一 scheduler 被 stop 两次）。
-    assert runtime.stop_calls == 1
-    provider.cleanup()
+    assert runtime.close_failed is True
     assert runtime.stop_calls == 1
 
 
@@ -1663,7 +1672,8 @@ def test_real_runtime_close_commits_state_only_after_success(tmp_path):
 
     runtime = object.__new__(MemosRuntime)
     runtime._closed = False
-    runtime._stop_attempted = False
+    runtime._close_failed = False
+    runtime._close_error = None
     runtime.tracker = MemosLocalTaskTracker()
     stop_calls: list[int] = []
     runtime.scheduler = types.SimpleNamespace(
@@ -1975,3 +1985,216 @@ def test_real_runtime_inits_once_and_shares_one_dependencies_bundle(
     # 仍然不得触发 server_router。
     assert "memos.api.routers.server_router" not in sys.modules
     assert adapter_module.MEMOS_ADAPTER_VERSION == "memos-v2.0.25-product-v1"
+
+
+# --------------------------------------------------------------------------------------
+# 14. M4-R1 follow-up：scheduler.stop() 失败必须永久 fail-closed
+# --------------------------------------------------------------------------------------
+#
+# 一手依据（current MemOS v2.0.25
+# `src/memos/mem_scheduler/base_mixins/queue_ops.py`）：
+#   stop() → stop_consumer() 先把 `_running=False` → 再 dispatcher.shutdown()
+#            → 再 dispatcher_monitor.stop()
+# 因此后半段抛错时 scheduler 可能只关掉一部分，而第二次调用 upstream stop()
+# 会因 `_running=False` 直接返回。"第二次 cleanup 跳过 stop 并标 closed" 会把
+# 未证实的关闭伪装成成功，故本节锁死永久 fail-closed 语义。
+
+
+def _stop_failing_provider(tmp_path):
+    """构造一个已注入 stop 失败的 provider，返回 (provider, runtime, owner)。"""
+
+    provider = _make_provider(
+        tmp_path,
+        benchmark_name="longmemeval",
+        runtime_factory=_StopCountingRuntime,
+    )
+    runtime = provider._require_runtime()
+    runtime.fail_stop = True
+    return provider, runtime, provider._runtime_owner
+
+
+def test_first_stop_failure_is_visible_and_marks_close_failed(tmp_path):
+    """首次 stop 抛错：异常可见、stop 恰一次、引用全保留、closed=False。"""
+
+    provider, runtime, owner = _stop_failing_provider(tmp_path)
+
+    with pytest.raises(RuntimeError, match="scheduler stop exploded"):
+        provider.cleanup()
+
+    assert runtime.stop_calls == 1
+    assert runtime.closed is False
+    assert runtime.close_failed is True
+    assert provider._cleaned is False
+    assert provider._runtime is runtime
+    assert owner._runtime is runtime
+
+
+def test_subsequent_cleanups_after_stop_failure_keep_failing_closed(tmp_path):
+    """第二、三次 cleanup 必须稳定 fail-fast，且不再调用 stop、不标 closed。"""
+
+    provider, runtime, owner = _stop_failing_provider(tmp_path)
+
+    with pytest.raises(RuntimeError, match="scheduler stop exploded"):
+        provider.cleanup()
+
+    for _ in range(2):
+        with pytest.raises(ConfigurationError, match="permanently unusable"):
+            provider.cleanup()
+        # 永远不得标 closed、不得清引用、不得二次 stop。
+        assert runtime.stop_calls == 1
+        assert runtime.closed is False
+        assert runtime.close_failed is True
+        assert provider._cleaned is False
+        assert provider._runtime is runtime
+        assert owner._runtime is runtime
+
+
+def test_stop_failure_error_chain_links_back_to_first_failure(tmp_path):
+    """后续 fail-fast 必须用 `raise ... from` 链回首次 stop failure。"""
+
+    provider, runtime, _ = _stop_failing_provider(tmp_path)
+
+    with pytest.raises(RuntimeError):
+        provider.cleanup()
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        provider.cleanup()
+
+    assert excinfo.value.__cause__ is runtime.close_error
+    assert "scheduler stop exploded" in str(excinfo.value.__cause__)
+
+
+def test_acquire_refuses_close_failed_runtime_without_building_a_second(tmp_path):
+    """close-failed 后 acquire 同 config 必须拒绝，且不新建 runtime。"""
+
+    from memory_benchmark.config import OpenAISettings, load_path_settings
+
+    built: list[str] = []
+
+    def _counting_factory(**kwargs):
+        """记录 runtime 构造次数。"""
+        built.append("built")
+        return _StopCountingRuntime(**kwargs)
+
+    provider = _make_provider(
+        tmp_path,
+        benchmark_name="longmemeval",
+        runtime_factory=_counting_factory,
+    )
+    runtime = provider._require_runtime()
+    runtime.fail_stop = True
+    owner = provider._runtime_owner
+    assert built == ["built"]
+
+    with pytest.raises(RuntimeError, match="scheduler stop exploded"):
+        provider.cleanup()
+
+    with pytest.raises(ConfigurationError, match="previously failed to close"):
+        owner.acquire(
+            config=_make_config(),
+            openai_settings=OpenAISettings(api_key="k", base_url=None),
+            path_settings=load_path_settings(),
+            runtime_factory=_counting_factory,
+        )
+
+    # 既不复用、也不构造第二份。
+    assert built == ["built"]
+    assert owner._runtime is runtime
+    assert runtime.closed is False
+
+
+def test_release_current_for_config_refuses_close_failed_runtime(tmp_path):
+    """根 provider 的交接路径遇到 close-failed 同样拒绝并保留引用。"""
+
+    provider, runtime, owner = _stop_failing_provider(tmp_path)
+
+    with pytest.raises(RuntimeError, match="scheduler stop exploded"):
+        provider.cleanup()
+
+    with pytest.raises(ConfigurationError, match="permanently unusable"):
+        owner.release_current_for_config(provider.config)
+
+    assert owner._runtime is runtime
+    assert runtime.closed is False
+    assert runtime.stop_calls == 1
+
+
+def test_pending_refusal_is_not_a_close_failure(tmp_path):
+    """pending refusal 不得被误判成 close-failed；终态后仍能正常关闭。"""
+
+    provider = _make_provider(
+        tmp_path,
+        benchmark_name="longmemeval",
+        runtime_factory=_StopCountingRuntime,
+    )
+    runtime = provider._require_runtime()
+    namespace = provider._namespace("run1_conv1")
+    item_id = _pending_task(provider, runtime)
+
+    with pytest.raises(ConfigurationError, match="拒绝静默关闭"):
+        provider.cleanup()
+
+    assert runtime.close_failed is False
+    assert runtime.stop_calls == 0
+
+    runtime.tracker.task_started(task_id=item_id, user_id=namespace)
+    runtime.tracker.task_completed(item_id, namespace)
+    provider.cleanup()
+
+    assert runtime.closed is True
+    assert runtime.close_failed is False
+    assert runtime.stop_calls == 1
+
+
+def test_successful_stop_keeps_idempotent_cleanup_unchanged(tmp_path):
+    """stop 正常成功时，重复 cleanup 仍幂等且 stop 恰好一次（行为不变）。"""
+
+    provider = _make_provider(
+        tmp_path,
+        benchmark_name="longmemeval",
+        runtime_factory=_StopCountingRuntime,
+    )
+    runtime = provider._require_runtime()
+
+    provider.cleanup()
+    provider.cleanup()
+    provider.cleanup()
+
+    assert runtime.closed is True
+    assert runtime.close_failed is False
+    assert runtime.stop_calls == 1
+    assert provider._runtime_owner._runtime is None
+
+
+def test_real_runtime_stop_failure_is_permanently_fail_closed():
+    """穿过真实 MemosRuntime.close：stop 失败后永久 fail-closed，绝不二次 stop。"""
+
+    from memory_benchmark.methods.memos_adapter import MemosRuntime
+
+    runtime = object.__new__(MemosRuntime)
+    runtime._closed = False
+    runtime._close_failed = False
+    runtime._close_error = None
+    runtime.tracker = MemosLocalTaskTracker()
+    stop_calls: list[int] = []
+
+    def _boom():
+        """模拟 dispatcher.shutdown() 阶段失败。"""
+        stop_calls.append(1)
+        raise RuntimeError("dispatcher shutdown exploded")
+
+    runtime.scheduler = types.SimpleNamespace(stop=_boom)
+
+    with pytest.raises(RuntimeError, match="dispatcher shutdown exploded") as first:
+        runtime.close()
+    assert runtime.closed is False
+    assert runtime.close_failed is True
+    assert stop_calls == [1]
+
+    for _ in range(2):
+        with pytest.raises(ConfigurationError, match="permanently unusable") as again:
+            runtime.close()
+        assert again.value.__cause__ is first.value
+        # upstream stop() 第二次会因 _running=False 直接返回，因此绝不能再调用。
+        assert stop_calls == [1]
+        assert runtime.closed is False
