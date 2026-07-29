@@ -6,10 +6,12 @@
 #        dispatcher → MEM_READ fine 抽取 → raw 清理 → refresh
 #   HTTP host / server_router 一律禁止；答题走 framework benchmark builder。
 #
-# smoke 与 official_full 的非 LLM build/search 参数完全相同；两者 max_workers 都为 1，
-# 因为 MemOS factory 按 config 缓存单例、reader 还持有构造期 graph DB，跨
-# namespace interleaving 与 observation scope 尚未一手验证（见支线 README
-# "M4 保持 pending 的边界"）。成本控制只通过 conversation/question/turn 规模裁剪。
+# smoke 与 official_full 的非 LLM build/search 参数完全相同；两者 max_workers
+# 都固定为 1。虽然 runner 可为 W2 构造两个 provider，但 MemOSRuntimeOwner 仍会
+# 按同一 config 复用进程级 runtime/embedder；真实 LongMemEval W2 已在并发
+# SentenceTransformer tokenizer 上触发 `RuntimeError: Already borrowed`。因此当前
+# product profile 明确不支持 framework conversation 并行，CLI 必须在 runtime/API
+# 启动前拒绝 `--workers` 覆盖。MemOS 产品内部 async dispatcher 保持开启。
 # 2026-07-27 起 smoke 的 LLM transport/model 是预算型
 # opencodego/deepseek-v4-flash；official_full 保持 primary/gpt-4o-mini。
 #

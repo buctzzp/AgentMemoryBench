@@ -241,6 +241,11 @@ def test_load_openai_settings_reads_explicit_opencodego_profile(
     assert runtime["provider"] == "opencodego"
     assert runtime["model"] == "deepseek-v4-flash"
     assert runtime["judge_transport"] == "chat_completions"
+    assert runtime["contract_version"] == "v2"
+    assert runtime["thinking_mode"] == "disabled"
+    assert settings.chat_completions_request_overrides() == {
+        "extra_body": {"thinking": {"type": "disabled"}}
+    }
     assert "unit-test-opencode-key" not in repr(runtime)
     assert "opencode.example" not in repr(runtime)
 

@@ -1539,7 +1539,8 @@ def test_resume_manifest_rejects_every_nested_track_identity_change(
         ("model", "gpt-4o-mini"),
         ("answer_transport", "responses"),
         ("judge_transport", "responses"),
-        ("contract_version", "v2"),
+        ("thinking_mode", "provider_default"),
+        ("contract_version", "v3"),
     ),
 )
 def test_resume_manifest_rejects_api_runtime_identity_change(
@@ -1553,11 +1554,12 @@ def test_resume_manifest_rejects_api_runtime_identity_change(
             "answer_reader": {
                 "answer_model": "deepseek-v4-flash",
                 "api_runtime": {
-                    "contract_version": "v1",
+                    "contract_version": "v2",
                     "provider": "opencodego",
                     "model": "deepseek-v4-flash",
                     "answer_transport": "chat_completions",
                     "judge_transport": "chat_completions",
+                    "thinking_mode": "disabled",
                 },
             }
         }

@@ -447,6 +447,24 @@ def test_smoke_concurrency_override_is_bounded_and_does_not_change_full() -> Non
         resolve_prediction_max_workers(full, smoke_max_workers=2)
 
 
+def test_memos_smoke_rejects_worker_override_before_runtime_loading() -> None:
+    """MemOS W2 已证不安全，registered preflight 必须拒绝覆盖。"""
+
+    registration = prediction_cli.get_method_registration("memos")
+
+    with pytest.raises(
+        ConfigurationError,
+        match="MemOS does not support --workers override",
+    ):
+        prediction_cli._resolve_smoke_max_workers(
+            method_display_name=registration.display_name,
+            profile_name="smoke",
+            smoke_max_workers=2,
+            configured_max_workers=1,
+            allow_override=registration.allow_smoke_worker_override,
+        )
+
+
 def test_smoke_context_truncated_does_not_depend_on_private_evidence() -> None:
     """method 可见的截断标记只能来自公开 history，不能由私有 evidence 派生。"""
 
@@ -1785,21 +1803,22 @@ def test_registered_prediction_builds_framework_answer_reader(
         "answer_parameters": {
             "message_role": "user",
             "temperature": 0.0,
-            # opencodego 当前模型会先消耗 reasoning tokens；smoke 兼容层只把
-            # 官方 LoCoMo 的 32-token 上限抬到 128，其他参数保持不变。
+            # opencodego 显式关闭 thinking；smoke 兼容层只把官方 LoCoMo 的
+            # 32-token 上限抬到 128，给简短可见答案留出稳定余量。
             "max_tokens": 128,
             "top_p": 1.0,
             "timeout_seconds": 60.0,
             "max_retries": 8,
         },
         "api_runtime": {
-            "contract_version": "v1",
+            "contract_version": "v2",
             "provider": "opencodego",
             "model": "deepseek-v4-flash",
             "answer_transport": "chat_completions",
             "judge_transport": "chat_completions",
+            "thinking_mode": "disabled",
         },
-        "provider_compatibility": "opencodego_reasoning_completion_floor_128_v1",
+        "provider_compatibility": "opencodego_non_thinking_completion_floor_128_v2",
     }
     assert {
         descriptor.model_id for descriptor in runner_calls[0]["model_inventory"]

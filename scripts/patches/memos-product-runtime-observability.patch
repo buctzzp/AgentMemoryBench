@@ -1,8 +1,21 @@
 diff --git a/src/memos/api/config.py b/src/memos/api/config.py
-index 43ad586d..8f2690fb 100644
+index 43ad586d..ac8c6a9b 100644
 --- a/src/memos/api/config.py
 +++ b/src/memos/api/config.py
-@@ -641 +641,20 @@ class APIConfig:
+@@ -421,0 +422,12 @@ class APIConfig:
++        provider_compatibility = os.getenv("MEMRADER_PROVIDER_COMPATIBILITY", "")
++        if provider_compatibility == "opencodego_json_non_thinking_v1":
++            config["extra_body"] = {
++                "thinking": {"type": "disabled"},
++                "response_format": {"type": "json_object"},
++            }
++        elif provider_compatibility:
++            raise ValueError(
++                "Unsupported MEMRADER_PROVIDER_COMPATIBILITY: "
++                f"{provider_compatibility!r}"
++            )
++
+@@ -641 +653,20 @@ class APIConfig:
 -        else:  # ollama
 +        elif embedder_backend == "sentence_transformer":
 +            # benchmark 适配：暴露 EmbedderFactory 已原生支持的本地 sentence_transformer
@@ -24,7 +37,7 @@ index 43ad586d..8f2690fb 100644
 +                },
 +            }
 +        elif embedder_backend == "ollama":
-@@ -650,0 +670,7 @@ class APIConfig:
+@@ -650,0 +682,7 @@ class APIConfig:
 +        else:
 +            # benchmark 适配：未知 backend 过去会静默落入 Ollama，导致主配置声明的
 +            # embedding 与实际运行不一致；改为显式 fail-fast。
@@ -32,6 +45,47 @@ index 43ad586d..8f2690fb 100644
 +                f"Unsupported MOS_EMBEDDER_BACKEND: {embedder_backend!r}. "
 +                "Supported backends: universal_api, sentence_transformer, ollama."
 +            )
+diff --git a/src/memos/api/handlers/component_init.py b/src/memos/api/handlers/component_init.py
+index d4595a19..9faa3cad 100644
+--- a/src/memos/api/handlers/component_init.py
++++ b/src/memos/api/handlers/component_init.py
+@@ -108,0 +109,27 @@ def _init_chat_llms(chat_llm_configs: list[dict]) -> dict[str, Any]:
++def _build_internet_retriever_config_if_enabled() -> Any | None:
++    """只在产品显式启用互联网检索时构造其配置。
++
++    `ENABLE_INTERNET=false` 是完整关闭语义：不得为了一个不可达能力而校验
++    Bocha reader 的 LLM 字段或加载其可选依赖。
++    """
++
++    if os.getenv("ENABLE_INTERNET", "false").lower() != "true":
++        return None
++    return build_internet_retriever_config()
++
++
++def _create_internet_retriever_if_enabled(
++    internet_retriever_config: Any | None,
++    *,
++    embedder: Any,
++) -> Any | None:
++    """按已构造配置创建互联网 retriever；关闭时保持 `None`。"""
++
++    if internet_retriever_config is None:
++        return None
++    return InternetRetrieverFactory.from_config(
++        internet_retriever_config,
++        embedder=embedder,
++    )
++
++
+@@ -168 +195 @@ def init_server() -> dict[str, Any]:
+-    internet_retriever_config = build_internet_retriever_config()
++    internet_retriever_config = _build_internet_retriever_config_if_enabled()
+@@ -209,2 +236,3 @@ def init_server() -> dict[str, Any]:
+-    internet_retriever = InternetRetrieverFactory.from_config(
+-        internet_retriever_config, embedder=embedder
++    internet_retriever = _create_internet_retriever_if_enabled(
++        internet_retriever_config,
++        embedder=embedder,
 diff --git a/src/memos/graph_dbs/neo4j_community.py b/src/memos/graph_dbs/neo4j_community.py
 index b5c92f40..2d58c73f 100644
 --- a/src/memos/graph_dbs/neo4j_community.py
@@ -42,7 +96,7 @@ index b5c92f40..2d58c73f 100644
 +            # graph write reports success for a half-written memory.
 +            raise
 diff --git a/src/memos/mem_reader/multi_modal_struct.py b/src/memos/mem_reader/multi_modal_struct.py
-index c46331f1..ef44da5f 100644
+index c46331f1..1b8bd028 100644
 --- a/src/memos/mem_reader/multi_modal_struct.py
 +++ b/src/memos/mem_reader/multi_modal_struct.py
 @@ -95,2 +95,7 @@ class MultiModalStructMemReader(SimpleStructMemReader):
@@ -61,7 +115,17 @@ index c46331f1..ef44da5f 100644
 +                    fallback_errors.append(e2)
 +            if fallback_errors:
 +                raise fallback_errors[0]
-@@ -507,11 +516,6 @@ class MultiModalStructMemReader(SimpleStructMemReader):
+@@ -504,0 +514,9 @@ class MultiModalStructMemReader(SimpleStructMemReader):
++            if (
++                not isinstance(response_json, dict)
++                or "memory list" not in response_json
++                or not isinstance(response_json["memory list"], list)
++            ):
++                raise ValueError(
++                    "MemOS fine extraction returned an invalid JSON contract: "
++                    "expected an object containing a list-valued 'memory list'"
++                )
+@@ -507,11 +525,6 @@ class MultiModalStructMemReader(SimpleStructMemReader):
 -            response_json = {
 -                "memory list": [
 -                    {
@@ -79,42 +143,42 @@ index c46331f1..ef44da5f 100644
 +            # text. A successful call that legitimately yields an empty memory list still
 +            # returns normally below.
 +            raise
-@@ -700 +704,5 @@ class MultiModalStructMemReader(SimpleStructMemReader):
+@@ -700 +713,5 @@ class MultiModalStructMemReader(SimpleStructMemReader):
 -                return fine_items
 +                # [memory-benchmark observability patch] Returning an empty item list here
 +                # turns a failed extraction into an indistinguishable "legal zero
 +                # extraction"; only a successful call that yields an empty memory list may
 +                # complete.
 +                raise
-@@ -739,0 +748,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
+@@ -739,0 +757,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
 +                        # [memory-benchmark observability patch] A failed memory-item
 +                        # construction/embedding must not silently shrink the result.
 +                        raise
-@@ -770,0 +782,2 @@ class MultiModalStructMemReader(SimpleStructMemReader):
+@@ -770,0 +791,2 @@ class MultiModalStructMemReader(SimpleStructMemReader):
 +                    # [memory-benchmark observability patch] See above.
 +                    raise
-@@ -814,0 +828,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
+@@ -814,0 +837,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
 +            # [memory-benchmark observability patch] Let every fine worker settle, then
 +            # aggregate-raise; a dropped worker would silently shrink the extraction.
 +            fine_worker_errors: list[Exception] = []
-@@ -821,0 +838,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
+@@ -821,0 +847,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
 +                    fine_worker_errors.append(e)
 +            if fine_worker_errors:
 +                raise fine_worker_errors[0]
-@@ -980,0 +1000,4 @@ class MultiModalStructMemReader(SimpleStructMemReader):
+@@ -980,0 +1009,4 @@ class MultiModalStructMemReader(SimpleStructMemReader):
 +                # [memory-benchmark observability patch] Let every parser future settle,
 +                # then aggregate-raise. Dropping a failed message here would silently write
 +                # a partial fast memory for only some of the turns in the batch.
 +                parse_errors: list[Exception] = []
-@@ -998,0 +1022,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
+@@ -998,0 +1031,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
 +                            parse_errors.append(e)
 +                if parse_errors:
 +                    raise parse_errors[0]
-@@ -1290,0 +1317,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
+@@ -1290,0 +1326,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
 +            # [memory-benchmark observability patch] Let every scene future settle, then
 +            # aggregate-raise instead of returning a partially-read memory list.
 +            scene_errors: list[Exception] = []
-@@ -1298,0 +1328,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
+@@ -1298,0 +1337,3 @@ class MultiModalStructMemReader(SimpleStructMemReader):
 +                    scene_errors.append(e)
 +        if scene_errors:
 +            raise scene_errors[0]
@@ -295,3 +359,25 @@ index 27399259..2f9f77ef 100644
 +                # [memory-benchmark observability patch] A failed MEM_READ submit means the
 +                # fine-extraction stage will never run, so the add must not report success.
 +                raise
+diff --git a/src/memos/llms/openai.py b/src/memos/llms/openai.py
+index 9a29ea68..f6322054 100644
+--- a/src/memos/llms/openai.py
++++ b/src/memos/llms/openai.py
+@@ -26,0 +27,5 @@ class OpenAILLM(BaseLLM):
++        # Optional, adapter-owned observability hook.  The product runtime leaves it
++        # unset, so the upstream success path is byte-for-byte unchanged.  When set,
++        # it receives only the completed response/request/result triple; secrets are
++        # not added to the callback payload.
++        self.response_callback = None
+@@ -92 +97,4 @@ class OpenAILLM(BaseLLM):
+-            return self._parse_response(response)
++            result = self._parse_response(response)
++            if self.response_callback is not None:
++                self.response_callback(self, response, request_body, result)
++            return result
+@@ -110 +118,4 @@ class OpenAILLM(BaseLLM):
+-            return self._parse_response(backup_response)
++            result = self._parse_response(backup_response)
++            if self.response_callback is not None:
++                self.response_callback(self, backup_response, backup_body, result)
++            return result

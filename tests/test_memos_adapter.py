@@ -1,4 +1,4 @@
-"""MemOS v2.0.25 product v3 adapter 强反例。
+"""MemOS v2.0.25 product v4 adapter 强反例。
 
 覆盖四层，全部零真实 API / DB / 模型 / 网络：
 
@@ -45,6 +45,13 @@ from memory_benchmark.methods.memos_adapter import (
     clean_memos_conversation_state,
 )
 from memory_benchmark.methods.memos_lifecycle import MemosLocalTaskTracker
+from memory_benchmark.observability.efficiency import (
+    EfficiencyCollector,
+    EfficiencyStage,
+    EmbeddingCallObservation,
+    LLMCallObservation,
+    MeasurementSource,
+)
 from memory_benchmark.runners.event_stream import (
     GranularityAggregator,
     build_turn_events,
@@ -238,18 +245,32 @@ class _FakeRuntime:
         self._closed = True
 
 
-def _make_provider(tmp_path, *, benchmark_name=None, config=None, runtime_factory=None):
+def _make_provider(
+    tmp_path,
+    *,
+    benchmark_name=None,
+    config=None,
+    runtime_factory=None,
+    efficiency_collector=None,
+):
     """构造挂在独立 runtime owner 上的 MemOS provider。"""
 
     from memory_benchmark.config import OpenAISettings, load_path_settings
 
     path_settings = load_path_settings()
-    storage_root = path_settings.project_root / "outputs" / "unit-test-run" / "method_state"
+    storage_root = (
+        path_settings.project_root
+        / "outputs"
+        / "unit-test-run"
+        / tmp_path.name
+        / "method_state"
+    )
     provider = MemOS(
         config=config or _make_config(),
         path_settings=path_settings,
         storage_root=storage_root,
         openai_settings=OpenAISettings(api_key="unit-test-key", base_url=None),
+        efficiency_collector=efficiency_collector,
         benchmark_name=benchmark_name,
         runtime_owner=_MemosRuntimeOwner(),
         runtime_factory=runtime_factory or _FakeRuntime,
@@ -361,6 +382,310 @@ def test_existing_ollama_and_universal_branches_are_preserved(
     assert universal["backend"] == "universal_api"
     assert universal["config"]["provider"] == "openai"
     assert universal["config"]["model_name_or_path"] == "text-embedding-3-large"
+
+
+def test_memreader_default_has_no_provider_specific_extra_body(
+    memos_product_models, monkeypatch
+):
+    """primary runtime 不得被 opencodego 的结构化输出参数污染。"""
+
+    monkeypatch.delenv("MEMRADER_PROVIDER_COMPATIBILITY", raising=False)
+
+    config = memos_product_models.api_config.get_memreader_config()["config"]
+
+    assert "extra_body" not in config
+
+
+def test_memreader_opencodego_compatibility_is_exact(
+    memos_product_models, monkeypatch
+):
+    """opencodego smoke 必须同时关闭 thinking 并要求 JSON object。"""
+
+    monkeypatch.setenv(
+        "MEMRADER_PROVIDER_COMPATIBILITY",
+        "opencodego_json_non_thinking_v1",
+    )
+
+    config = memos_product_models.api_config.get_memreader_config()["config"]
+
+    assert config["extra_body"] == {
+        "thinking": {"type": "disabled"},
+        "response_format": {"type": "json_object"},
+    }
+
+
+def test_memreader_unknown_provider_compatibility_fails_fast(
+    memos_product_models, monkeypatch
+):
+    """未知 provider compatibility 不得静默退化成默认请求。"""
+
+    monkeypatch.setenv(
+        "MEMRADER_PROVIDER_COMPATIBILITY",
+        "unknown-contract",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Unsupported MEMRADER_PROVIDER_COMPATIBILITY",
+    ):
+        memos_product_models.api_config.get_memreader_config()
+
+
+# --------------------------------------------------------------------------------------
+# 1.5. B7：OpenAI usage 暴露与 async scope 回放
+# --------------------------------------------------------------------------------------
+
+
+def _fake_chat_completion(content: str, *, input_tokens: int, output_tokens: int):
+    """构造 OpenAILLM._parse_response 可消费的最小 Chat Completion。"""
+
+    return types.SimpleNamespace(
+        choices=[
+            types.SimpleNamespace(
+                message=types.SimpleNamespace(
+                    content=content,
+                    tool_calls=None,
+                )
+            )
+        ],
+        usage=types.SimpleNamespace(
+            prompt_tokens=input_tokens,
+            completion_tokens=output_tokens,
+        ),
+        model_dump_json=lambda: "{}",
+    )
+
+
+def _fake_openai_llm(openai_llm_type, *, primary, backup=None):
+    """绕过 SDK 构造，给真实 patched OpenAILLM.generate 注入 hermetic client。"""
+
+    llm = object.__new__(openai_llm_type)
+    llm.config = types.SimpleNamespace(
+        model_name_or_path="build-model",
+        temperature=0.0,
+        max_tokens=32,
+        top_p=1.0,
+        extra_body={},
+        remove_think_prefix=False,
+        backup_model_name_or_path="backup-model",
+    )
+    llm.client = types.SimpleNamespace(
+        chat=types.SimpleNamespace(
+            completions=types.SimpleNamespace(create=primary)
+        )
+    )
+    llm.use_backup_client = backup is not None
+    llm.backup_client = (
+        types.SimpleNamespace(
+            chat=types.SimpleNamespace(
+                completions=types.SimpleNamespace(create=backup)
+            )
+        )
+        if backup is not None
+        else None
+    )
+    llm.response_callback = None
+    return llm
+
+
+def test_patched_openai_llm_exposes_success_response_usage_to_callback(
+    memos_product_models,
+):
+    """primary 成功时 callback 必须看到原 response/body/result，返回文本不变。"""
+
+    from memos.llms.openai import OpenAILLM
+
+    response = _fake_chat_completion("structured", input_tokens=11, output_tokens=3)
+    llm = _fake_openai_llm(OpenAILLM, primary=lambda **kwargs: response)
+    observed: list[tuple[Any, dict[str, Any], str]] = []
+    llm.response_callback = (
+        lambda owner, raw, body, result: observed.append((raw, body, result))
+    )
+
+    result = llm.generate([{"role": "user", "content": "remember this"}])
+
+    assert result == "structured"
+    assert len(observed) == 1
+    assert observed[0][0] is response
+    assert observed[0][1]["model"] == "build-model"
+    assert observed[0][1]["messages"] == [
+        {"role": "user", "content": "remember this"}
+    ]
+    assert observed[0][1]["temperature"] == 0.0
+    assert observed[0][1]["max_tokens"] == 32
+    assert observed[0][1]["top_p"] == 1.0
+    assert observed[0][1]["extra_body"] == {}
+    assert observed[0][2] == "structured"
+
+
+def test_patched_openai_llm_without_callback_preserves_success_result(
+    memos_product_models,
+):
+    """未安装观测 callback 时，patched product success path 的返回值必须不变。"""
+
+    from memos.llms.openai import OpenAILLM
+
+    response = _fake_chat_completion("unchanged", input_tokens=7, output_tokens=2)
+    llm = _fake_openai_llm(OpenAILLM, primary=lambda **kwargs: response)
+
+    assert llm.response_callback is None
+    assert llm.generate([{"role": "user", "content": "remember"}]) == "unchanged"
+
+
+def test_patched_openai_llm_reports_only_successful_backup_response(
+    memos_product_models,
+):
+    """primary 失败、backup 成功时只记录实际成功的 backup body/usage。"""
+
+    from memos.llms.openai import OpenAILLM
+
+    def _primary(**kwargs):
+        """模拟 primary transport failure。"""
+
+        raise RuntimeError("primary unavailable")
+
+    backup_response = _fake_chat_completion(
+        "backup result",
+        input_tokens=13,
+        output_tokens=4,
+    )
+    llm = _fake_openai_llm(
+        OpenAILLM,
+        primary=_primary,
+        backup=lambda **kwargs: backup_response,
+    )
+    observed: list[tuple[Any, dict[str, Any], str]] = []
+    llm.response_callback = (
+        lambda owner, raw, body, result: observed.append((raw, body, result))
+    )
+
+    assert llm.generate([{"role": "user", "content": "x"}]) == "backup result"
+    assert len(observed) == 1
+    assert observed[0][0] is backup_response
+    assert observed[0][1]["model"] == "backup-model"
+    assert observed[0][2] == "backup result"
+
+
+class _ObservedEmbeddingModel:
+    """带真实 tokenizer 形状的最小 SentenceTransformer 替身。"""
+
+    def __init__(self) -> None:
+        """创建 tokenizer/max_seq_length 与调用记录。"""
+
+        self.calls: list[list[str]] = []
+        self.model = types.SimpleNamespace(
+            tokenizer=types.SimpleNamespace(
+                encode=lambda text, **kwargs: str(text).split()[
+                    : kwargs.get("max_length")
+                ]
+            ),
+            max_seq_length=3,
+        )
+
+    def _truncate_texts(self, texts):
+        """镜像 upstream 字符预截断入口。"""
+
+        return list(texts)
+
+    def embed(self, texts):
+        """记录输入并返回固定向量。"""
+
+        normalized = [str(text) for text in texts]
+        self.calls.append(normalized)
+        return [[0.0, 1.0] for _ in normalized]
+
+
+def test_async_model_calls_are_replayed_into_original_framework_scopes(tmp_path):
+    """后台线程无 ContextVar 时，LLM/embedding 仍归属原 build/retrieval scope。"""
+
+    collector = EfficiencyCollector(run_id="memos-efficiency", enabled=True)
+    provider = _make_provider(
+        tmp_path,
+        benchmark_name="longmemeval",
+        efficiency_collector=collector,
+    )
+    llm = types.SimpleNamespace(response_callback=None)
+    embedder = _ObservedEmbeddingModel()
+    runtime = types.SimpleNamespace(
+        components={
+            "llm": llm,
+            "mem_reader": types.SimpleNamespace(
+                llm=llm,
+                general_llm=llm,
+                embedder=embedder,
+            ),
+            "embedder": embedder,
+        }
+    )
+    provider._install_efficiency_observers(runtime)
+
+    with collector.conversation_scope("conv-1") as build_scope:
+        assert provider._begin_efficiency_capture(EfficiencyStage.MEMORY_BUILD)
+
+        def _background_build() -> None:
+            """模拟 scheduler worker 内完成 LLM 与 embedding。"""
+
+            response = _fake_chat_completion(
+                '{"memory list":[]}',
+                input_tokens=17,
+                output_tokens=5,
+            )
+            llm.response_callback(
+                llm,
+                response,
+                {"messages": [{"role": "user", "content": "alpha beta"}]},
+                '{"memory list":[]}',
+            )
+            embedder.embed(["one two three four"])
+
+        worker = threading.Thread(target=_background_build)
+        worker.start()
+        worker.join()
+        provider._finish_efficiency_capture(EfficiencyStage.MEMORY_BUILD)
+        collector.record_memory_build_total_latency(latency_ms=1.0)
+
+    build_llm = [
+        record
+        for record in build_scope.records
+        if isinstance(record, LLMCallObservation)
+    ]
+    build_embeddings = [
+        record
+        for record in build_scope.records
+        if isinstance(record, EmbeddingCallObservation)
+    ]
+    assert len(build_llm) == 1
+    assert build_llm[0].stage is EfficiencyStage.MEMORY_BUILD
+    assert build_llm[0].conversation_id == "conv-1"
+    assert build_llm[0].question_id is None
+    assert build_llm[0].input_tokens == 17
+    assert build_llm[0].output_tokens == 5
+    assert build_llm[0].token_measurement_source is MeasurementSource.API_USAGE
+    assert len(build_embeddings) == 1
+    assert build_embeddings[0].stage is EfficiencyStage.MEMORY_BUILD
+    assert build_embeddings[0].input_tokens == 3
+
+    with collector.question_scope("conv-1", "q1") as question_scope:
+        assert provider._begin_efficiency_capture(EfficiencyStage.RETRIEVAL)
+        worker = threading.Thread(target=lambda: embedder.embed(["query tokens"]))
+        worker.start()
+        worker.join()
+        provider._finish_efficiency_capture(EfficiencyStage.RETRIEVAL)
+        collector.record_retrieval_result(
+            latency_ms=2.0,
+            injected_memory_context_tokens=0,
+        )
+        collector.record_answer_generation(latency_ms=3.0)
+
+    retrieval_embeddings = [
+        record
+        for record in question_scope.records
+        if isinstance(record, EmbeddingCallObservation)
+    ]
+    assert len(retrieval_embeddings) == 1
+    assert retrieval_embeddings[0].stage is EfficiencyStage.RETRIEVAL
+    assert retrieval_embeddings[0].conversation_id == "conv-1"
+    assert retrieval_embeddings[0].question_id == "q1"
 
 
 # --------------------------------------------------------------------------------------
@@ -562,7 +887,10 @@ def test_one_session_batch_emits_one_add_request_and_one_terminal(tmp_path):
     runtime = provider._require_runtime()
     assert len(runtime.add_handler.requests) == 1
     assert result.metadata["terminal_task_count"] == 1
-    assert runtime.add_handler.requests[0].task_id == result.metadata["business_task_id"]
+    assert result.metadata["add_request_count"] == 1
+    assert result.metadata["source_message_count"] == 5
+    assert result.metadata["written_message_count"] == 5
+    assert runtime.add_handler.requests[0].task_id == result.metadata["business_task_ids"][0]
 
 
 def test_failed_background_task_propagates(tmp_path):
@@ -785,30 +1113,60 @@ def _halumem_conversation() -> Conversation:
 
 
 def test_locomo_payload_uses_declared_roles_real_names_and_shared_caption(tmp_path):
-    """LoCoMo：固定 A/B role 不随首发漂移，真实 speaker 前缀 + 共享 caption 契约。"""
+    """LoCoMo：官方双视角、反向 role、batch=2、真实 speaker/caption。"""
 
     provider = _make_provider(tmp_path, benchmark_name="locomo")
     requests = _ingest_all(provider, _locomo_conversation(), "run1_locomo1")
 
-    assert len(requests) == 1
-    messages = requests[0].messages
-    assert [m["role"] for m in messages] == ["assistant", "user", "assistant", "user"]
-    assert messages[0]["content"] == "Melanie: Hi there"
-    assert messages[1]["content"] == (
+    namespace_a = provider._namespace("run1_locomo1", locomo_view="speaker_a")
+    namespace_b = provider._namespace("run1_locomo1", locomo_view="speaker_b")
+    assert namespace_a != namespace_b
+    assert [len(request.messages) for request in requests] == [2, 2, 2, 2]
+    assert [request.user_id for request in requests] == [
+        namespace_a,
+        namespace_a,
+        namespace_b,
+        namespace_b,
+    ]
+    messages_a = [
+        message
+        for request in requests[:2]
+        for message in request.messages
+    ]
+    messages_b = [
+        message
+        for request in requests[2:]
+        for message in request.messages
+    ]
+    assert [m["role"] for m in messages_a] == [
+        "assistant",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert [m["role"] for m in messages_b] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert [m["message_id"] for m in messages_a] == ["t1", "t2", "t3", "t4"]
+    assert [m["message_id"] for m in messages_b] == ["t1", "t2", "t3", "t4"]
+    assert messages_a[0]["content"] == "Melanie: Hi there"
+    assert messages_a[1]["content"] == (
         "Caroline: Look at this [Sharing image that shows: a red bike]"
     )
     # caption-only turn 仍非空，且不带 path/query。
-    assert messages[2]["content"] == "Melanie: [Sharing image that shows: a blue car]"
-    assert "a.jpg" not in messages[1]["content"]
-    assert "?q=1" not in messages[1]["content"]
+    assert messages_a[2]["content"] == "Melanie: [Sharing image that shows: a blue car]"
+    assert "a.jpg" not in messages_a[1]["content"]
+    assert "?q=1" not in messages_a[1]["content"]
     # 多 caption 按顺序全部保留，且没有事件流的 `(image description: ...)` 双拼。
-    assert messages[3]["content"] == (
+    assert messages_a[3]["content"] == (
         "Caroline: Two of them [Sharing image that shows: first] "
         "[Sharing image that shows: second]"
     )
-    assert "(image description:" not in " ".join(m["content"] for m in messages)
-    assert all(m["chat_time"] == "2023-05-01 10:00:00" for m in messages)
-    assert [m["message_id"] for m in messages] == ["t1", "t2", "t3", "t4"]
+    assert "(image description:" not in " ".join(m["content"] for m in messages_a)
+    assert all(m["chat_time"] == "2023-05-01 10:00:00" for m in messages_a + messages_b)
 
 
 def test_locomo_role_mapping_is_independent_of_who_speaks_first(tmp_path):
@@ -819,9 +1177,62 @@ def test_locomo_role_mapping_is_independent_of_who_speaks_first(tmp_path):
     provider = _make_provider(tmp_path, benchmark_name="locomo")
     requests = _ingest_all(provider, conversation, "run1_locomo1")
 
-    roles = {m["message_id"]: m["role"] for m in requests[0].messages}
-    assert roles["t1"] == "assistant"  # Melanie == speaker_b
-    assert roles["t2"] == "user"  # Caroline == speaker_a
+    roles_a = {
+        message["message_id"]: message["role"]
+        for request in requests[:2]
+        for message in request.messages
+    }
+    roles_b = {
+        message["message_id"]: message["role"]
+        for request in requests[2:]
+        for message in request.messages
+    }
+    assert roles_a["t1"] == "assistant"  # Melanie == speaker_b
+    assert roles_a["t2"] == "user"  # Caroline == speaker_a
+    assert roles_b["t1"] == "user"
+    assert roles_b["t2"] == "assistant"
+
+
+def test_locomo_odd_tail_is_singleton_in_both_views_without_placeholder(tmp_path):
+    """官方 batch=2 的奇数尾在双视角都保持真实 singleton，不造空回复。"""
+
+    conversation = _locomo_conversation()
+    conversation.sessions[0].turns.append(
+        Turn(turn_id="t5", speaker="Caroline", content="odd tail")
+    )
+    provider = _make_provider(tmp_path, benchmark_name="locomo")
+    requests = _ingest_all(provider, conversation, "run1_locomo1")
+
+    assert [len(request.messages) for request in requests] == [2, 2, 1, 2, 2, 1]
+    assert requests[2].messages == [
+        {
+            "role": "user",
+            "content": "Caroline: odd tail",
+            "chat_time": "2023-05-01 10:00:00",
+            "message_id": "t5",
+        }
+    ]
+    assert requests[5].messages[0]["role"] == "assistant"
+    assert requests[5].messages[0]["content"] == "Caroline: odd tail"
+
+
+def test_locomo_submits_all_async_batches_before_waiting(tmp_path, monkeypatch):
+    """双视角全部 add 先提交，再等待；不得暗改成 pair 间同步 fine。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="locomo")
+    runtime = provider._require_runtime()
+    original_wait = runtime.tracker.wait_for_business_task
+    request_counts_at_wait: list[int] = []
+
+    def _wait(**kwargs):
+        """记录首次 wait 时已提交的 add 数量。"""
+        request_counts_at_wait.append(len(runtime.add_handler.requests))
+        return original_wait(**kwargs)
+
+    monkeypatch.setattr(runtime.tracker, "wait_for_business_task", _wait)
+    _ingest_all(provider, _locomo_conversation(), "run1_locomo1")
+
+    assert request_counts_at_wait == [4, 4, 4, 4]
 
 
 def test_locomo_undeclared_third_speaker_fails_fast(tmp_path):
@@ -937,7 +1348,7 @@ def test_halumem_sends_one_batch_per_session_with_session_local_task(tmp_path):
 def test_every_canonical_event_is_sent_exactly_once_without_leakage(
     tmp_path, conversation_factory, benchmark_name, isolation_key
 ):
-    """五格共同契约：每个非空 canonical event 恰好一次、无跨 session、无私有 key。"""
+    """五格共同契约：按声明视角精确投递、无跨 session、无私有 key。"""
 
     conversation = conversation_factory()
     provider = _make_provider(tmp_path, benchmark_name=benchmark_name)
@@ -947,16 +1358,29 @@ def test_every_canonical_event_is_sent_exactly_once_without_leakage(
         turn.turn_id for session in conversation.sessions for turn in session.turns
     ]
     sent_ids = [m["message_id"] for request in requests for m in request.messages]
-    assert sent_ids == expected_ids
+    if benchmark_name == "locomo":
+        # 官方双视角：每个真实 event 在每个 namespace 各出现一次。
+        assert sent_ids == expected_ids + expected_ids
+        assert len({request.user_id for request in requests}) == 2
+        assert all(len(request.messages) <= 2 for request in requests)
+    else:
+        assert sent_ids == expected_ids
+        # 其余四格每个 session 恰好一个 request。
+        for request, session in zip(requests, conversation.sessions, strict=True):
+            assert [m["message_id"] for m in request.messages] == [
+                turn.turn_id for turn in session.turns
+            ]
+            assert request.session_id == session.session_id
 
-    # 每个 request 只携带自己 session 的 turn。
-    for request, session in zip(requests, conversation.sessions, strict=True):
-        assert [m["message_id"] for m in request.messages] == [
-            turn.turn_id for turn in session.turns
-        ]
-        assert request.session_id == session.session_id
-        # chat_time key 始终存在。
-        assert all("chat_time" in m for m in request.messages)
+    assert all(
+        request.session_id in {session.session_id for session in conversation.sessions}
+        for request in requests
+    )
+    assert all(
+        "chat_time" in message
+        for request in requests
+        for message in request.messages
+    )
 
     forbidden = {"gold_answers", "evidence", "answer", "answer_session_ids"}
     for request in requests:
@@ -1139,6 +1563,122 @@ def test_search_request_locks_all_product_switches(tmp_path):
     assert request.filter is None
     assert request.session_id is None
     assert request.reference_time == "2024-05-05T00:00:00"
+
+
+def test_locomo_retrieve_searches_both_views_and_merges_official_speaker_slots(
+    tmp_path,
+):
+    """LoCoMo 双路各取 top_k，按 A/B speaker 槽位合并且不伪造全局 rank。"""
+
+    provider = _make_provider(tmp_path, benchmark_name="locomo")
+    _ingest_all(provider, _locomo_conversation(), "run1_locomo1")
+    runtime = provider._require_runtime()
+    responses = [
+        {
+            "text_mem": [
+                {
+                    "cube_id": "a",
+                    "memories": [
+                        {
+                            "id": "a1",
+                            "memory": "Caroline likes cycling",
+                            "metadata": {"relativity": 0.9, "sources": []},
+                        }
+                    ],
+                }
+            ]
+        },
+        {
+            "text_mem": [
+                {
+                    "cube_id": "b",
+                    "memories": [
+                        {
+                            "id": "b1",
+                            "memory": "Melanie saw the blue car",
+                            "metadata": {"relativity": 0.8, "sources": []},
+                        }
+                    ],
+                }
+            ]
+        },
+    ]
+
+    def _search(search_req):
+        """按调用顺序返回 A/B 两路产品结果。"""
+        runtime.search_handler.requests.append(search_req)
+        return types.SimpleNamespace(data=responses.pop(0))
+
+    runtime.search_handler.requests.clear()
+    runtime.search_handler.handle_search_memories = _search
+    result = provider.retrieve(
+        RetrievalQuery(
+            query_text="What do they remember?",
+            isolation_key="run1_locomo1",
+            question_time=None,
+            top_k=7,
+            purpose="qa",
+        )
+    )
+
+    namespace_a = provider._namespace("run1_locomo1", locomo_view="speaker_a")
+    namespace_b = provider._namespace("run1_locomo1", locomo_view="speaker_b")
+    assert [request.user_id for request in runtime.search_handler.requests] == [
+        namespace_a,
+        namespace_b,
+    ]
+    assert [request.readable_cube_ids for request in runtime.search_handler.requests] == [
+        [namespace_a],
+        [namespace_b],
+    ]
+    assert [request.top_k for request in runtime.search_handler.requests] == [7, 7]
+    assert [item.item_id for item in result.items] == ["a1", "b1"]
+    assert [item.metadata["memos_locomo_view"] for item in result.items] == [
+        "speaker_a",
+        "speaker_b",
+    ]
+    assert result.formatted_memory == (
+        "Memories for user Caroline:\n\n"
+        "    Caroline likes cycling\n\n"
+        "Memories for user Melanie:\n\n"
+        "    Melanie saw the blue car"
+    )
+    assert result.metadata["retrieval_top_k_semantics"] == "per_locomo_speaker_view"
+
+
+def test_locomo_resume_requires_persisted_speaker_sidecar(tmp_path):
+    """resume 后新 provider 必须从 sidecar 恢复真实 speaker，缺失不能猜。"""
+
+    first = _make_provider(tmp_path, benchmark_name="locomo")
+    _ingest_all(first, _locomo_conversation(), "run1_locomo1")
+
+    resumed = _make_provider(tmp_path, benchmark_name="locomo")
+    resumed._require_runtime().search_handler.response_data = {"text_mem": []}
+    result = resumed.retrieve(
+        RetrievalQuery(
+            query_text="q",
+            isolation_key="run1_locomo1",
+            question_time=None,
+            top_k=2,
+            purpose="qa",
+        )
+    )
+    assert result.formatted_memory == MEMOS_EMPTY_MEMORY_SENTINEL
+    assert len(resumed._require_runtime().search_handler.requests) == 2
+
+    resumed._locomo_view_sidecar_path("run1_locomo1").unlink()
+    missing = _make_provider(tmp_path, benchmark_name="locomo")
+    missing._require_runtime().search_handler.response_data = {"text_mem": []}
+    with pytest.raises(ConfigurationError, match="missing its speaker sidecar"):
+        missing.retrieve(
+            RetrievalQuery(
+                query_text="q",
+                isolation_key="run1_locomo1",
+                question_time=None,
+                top_k=2,
+                purpose="qa",
+            )
+        )
 
 
 def test_retrieve_flattens_buckets_in_product_order_without_resorting(tmp_path):
@@ -1412,6 +1952,58 @@ def test_clean_deletes_only_target_namespace_and_verifies_empty(
     assert get_request.include_skill_memory is False
 
 
+def test_locomo_clean_deletes_both_views_after_global_pending_preflight(
+    tmp_path,
+    memos_product_models,
+    monkeypatch,
+):
+    """LoCoMo clean 必须覆盖双 namespace，并在首个 delete 前检查完两路 pending。"""
+
+    probe = _CleanProbe()
+    _install_clean_probe(monkeypatch, probe)
+    provider = _make_provider(tmp_path, benchmark_name="locomo")
+    batch = _session_batches(_locomo_conversation(), "run1_locomo1")[0]
+    provider._register_locomo_view_sidecar(batch)
+    sidecar = provider._locomo_view_sidecar_path("run1_locomo1")
+    assert sidecar.is_file()
+
+    namespace_a = provider._namespace("run1_locomo1", locomo_view="speaker_a")
+    namespace_b = provider._namespace("run1_locomo1", locomo_view="speaker_b")
+    clean_memos_conversation_state(
+        provider=provider,
+        isolation_key="run1_locomo1",
+    )
+
+    assert [request.user_id for request in probe.delete_requests] == [
+        namespace_a,
+        namespace_b,
+    ]
+    assert [request.mem_cube_id for request in probe.get_requests] == [
+        namespace_a,
+        namespace_b,
+    ]
+    assert not sidecar.exists()
+
+    blocked = _make_provider(tmp_path, benchmark_name="locomo")
+    blocked._register_locomo_view_sidecar(batch)
+    blocked._require_runtime().tracker.task_submitted(
+        task_id="pending-b",
+        user_id=namespace_b,
+        task_type="mem_read",
+        business_task_id="biz-b",
+        mem_cube_id=namespace_b,
+    )
+    probe.delete_requests.clear()
+    probe.get_requests.clear()
+    with pytest.raises(ConfigurationError, match="still pending"):
+        clean_memos_conversation_state(
+            provider=blocked,
+            isolation_key="run1_locomo1",
+        )
+    assert probe.delete_requests == []
+    assert probe.get_requests == []
+
+
 def test_clean_rejects_handler_failure(tmp_path, memos_product_models, monkeypatch):
     """handler 返回 failure 不得当成功。"""
 
@@ -1523,6 +2115,7 @@ def test_source_identity_declares_upstream_patch_and_implementation():
     assert identity["wrapper_path"] == "src/memory_benchmark/methods/memos_adapter.py"
     assert len(identity["wrapper_sha256"]) == 64
     assert identity["implementation_identity"] == "typed-product-handler"
+    assert "src/memos/llms/openai.py" in identity["files"]
     # 不得声称 native LoCoMo harness。
     assert "locomo" not in identity["source_mode"].lower()
 
@@ -1560,6 +2153,12 @@ def test_manifest_never_leaks_secrets_or_absolute_paths():
 
     manifest = _make_config().to_manifest()
 
+    assert manifest["adapter_version"] == "memos-v2.0.25-product-v4"
+    assert manifest["build_llm_response_contract"] == (
+        "provider-aware-v1:"
+        "opencodego=json_object+thinking_disabled;"
+        "primary=provider_default"
+    )
     assert manifest["graph_db_credential_env"] == "MEMOS_NEO4J_PASSWORD"
     assert manifest["vector_db_credential_env"] == "MEMOS_QDRANT_API_KEY"
     assert "graph_db_password" not in manifest
@@ -1843,6 +2442,10 @@ def _install_fake_init_server(monkeypatch, observer, *, boom=False):
                     "ENABLE_CHAT_API",
                     "NACOS_ENABLE_WATCH",
                     "OPENAI_API_KEY",
+                    "MEMRADER_MODEL",
+                    "MEMRADER_API_KEY",
+                    "MEMRADER_API_BASE",
+                    "MEMRADER_PROVIDER_COMPATIBILITY",
                     "NEO4J_PASSWORD",
                     "MEMOS_ONLY_PREEXISTING",
                 )
@@ -1873,6 +2476,7 @@ def test_scoped_environment_restores_exactly_on_success_and_failure(
     monkeypatch.delenv("MOS_EMBEDDER_DIMS", raising=False)
     monkeypatch.delenv("NACOS_ENABLE_WATCH", raising=False)
     monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
+    monkeypatch.delenv("MEMRADER_PROVIDER_COMPATIBILITY", raising=False)
 
     before = dict(os.environ)
     observed: dict[str, str | None] = {}
@@ -1904,6 +2508,10 @@ def test_scoped_environment_restores_exactly_on_success_and_failure(
     assert observed["ENABLE_CHAT_API"] == "false"
     assert observed["NACOS_ENABLE_WATCH"] == "false"
     assert observed["OPENAI_API_KEY"] == "sk-super-secret"
+    assert observed["MEMRADER_MODEL"] == "gpt-4o-mini"
+    assert observed["MEMRADER_API_KEY"] == "sk-super-secret"
+    assert observed["MEMRADER_API_BASE"] == "https://api.openai.com/v1"
+    assert observed["MEMRADER_PROVIDER_COMPATIBILITY"] is None
     assert observed["NEO4J_PASSWORD"] == "super-secret-neo4j"
     # 与本 config 无关的预置键不受影响。
     assert observed["MEMOS_ONLY_PREEXISTING"] == "keep-me"
@@ -1933,6 +2541,38 @@ def test_memos_environment_reads_secrets_only_from_declared_env_names(tmp_path):
     finally:
         if saved is not None:
             os.environ[config.graph_db_credential_env] = saved
+
+
+def test_memos_environment_selects_opencodego_reader_contract(
+    tmp_path, monkeypatch
+):
+    """smoke provider 只在初始化作用域内选择对应 reader 请求契约。"""
+
+    from memory_benchmark.config import OpenAISettings, load_path_settings
+    from memory_benchmark.methods.memos_adapter import _memos_environment
+
+    config = _make_config()
+    monkeypatch.setenv(config.graph_db_credential_env, "unit-test-password")
+    openai = OpenAISettings(
+        api_key="sk-opencodego-unit-test",
+        base_url="https://example.invalid/v1",
+        model="deepseek-v4-flash",
+        provider="opencodego",
+        judge_transport="chat_completions",
+    )
+
+    values = _memos_environment(config, openai, load_path_settings())
+
+    assert (
+        values["MEMRADER_PROVIDER_COMPATIBILITY"]
+        == "opencodego_json_non_thinking_v1"
+    )
+    assert "sk-opencodego-unit-test" not in repr(
+        {
+            "compatibility": values["MEMRADER_PROVIDER_COMPATIBILITY"],
+            "model": values["MEMRADER_MODEL"],
+        }
+    )
 
 
 # --------------------------------------------------------------------------------------
@@ -1984,7 +2624,7 @@ def test_real_runtime_inits_once_and_shares_one_dependencies_bundle(
     assert isinstance(runtime.tracker, MemosLocalTaskTracker)
     # 仍然不得触发 server_router。
     assert "memos.api.routers.server_router" not in sys.modules
-    assert adapter_module.MEMOS_ADAPTER_VERSION == "memos-v2.0.25-product-v1"
+    assert adapter_module.MEMOS_ADAPTER_VERSION == "memos-v2.0.25-product-v4"
 
 
 # --------------------------------------------------------------------------------------

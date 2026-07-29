@@ -211,6 +211,60 @@ def test_fetch_script_applies_memos_patch_exactly_once():
     )
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_internet_retriever_construction_obeys_disabled_gate(
+    memos_modules, monkeypatch, enabled
+):
+    """互联网关闭时不得构造配置/实例；开启时两步都恰好执行一次。"""
+
+    from memos.api.handlers import component_init
+
+    config_sentinel = object()
+    embedder_sentinel = object()
+    retriever_sentinel = object()
+    build_calls: list[int] = []
+    create_calls: list[tuple[object, object]] = []
+
+    def _build_config():
+        """记录 internet config 构造并返回唯一哨兵。"""
+        build_calls.append(1)
+        return config_sentinel
+
+    def _create_retriever(config, *, embedder):
+        """记录 retriever 构造参数并返回唯一哨兵。"""
+        create_calls.append((config, embedder))
+        return retriever_sentinel
+
+    monkeypatch.setenv("ENABLE_INTERNET", "true" if enabled else "false")
+    monkeypatch.setattr(
+        component_init,
+        "build_internet_retriever_config",
+        _build_config,
+    )
+    monkeypatch.setattr(
+        component_init.InternetRetrieverFactory,
+        "from_config",
+        staticmethod(_create_retriever),
+    )
+
+    config = component_init._build_internet_retriever_config_if_enabled()
+    retriever = component_init._create_internet_retriever_if_enabled(
+        config,
+        embedder=embedder_sentinel,
+    )
+
+    if enabled:
+        assert config is config_sentinel
+        assert retriever is retriever_sentinel
+        assert build_calls == [1]
+        assert create_calls == [(config_sentinel, embedder_sentinel)]
+    else:
+        assert config is None
+        assert retriever is None
+        assert build_calls == []
+        assert create_calls == []
+
+
 def test_manifest_records_patched_source_identity():
     """MANIFEST 把 MemOS 身份写成 tag + 本项目 patch。"""
     manifest = (REPO_ROOT / "third_party" / "methods" / "MANIFEST.md").read_text(
@@ -1058,10 +1112,12 @@ def _build_chain_reader(trace, outcome="ok"):
         """记录型 LLM，写入共享 trace。"""
 
         def generate(self, messages, **kwargs):
-            """返回一条固定抽取结果，或按 outcome 抛错/返回空。"""
+            """返回固定抽取结果，或按 outcome 抛错/返回空/返回非法结构。"""
             trace.append("llm.generate")
             if outcome == "llm_raise":
                 raise RuntimeError("PROBE_LLM_FAILURE")
+            if outcome == "invalid_json":
+                return "not a JSON object"
             if outcome == "empty":
                 return json.dumps({"memory list": [], "summary": ""})
             return json.dumps(
@@ -1273,6 +1329,28 @@ def test_llm_generation_failure_no_raw_fallback(memos_modules):
 
     # 且 raw memory 不得被删除（失败任务不能留下“既没 fine 也没 raw”的空洞）
     assert chain.store.nodes, "任务失败时 raw memory 必须保留，便于 clean retry"
+
+
+def test_invalid_llm_json_contract_fails_task_and_keeps_raw_memory(memos_modules):
+    """不可解析/缺少 memory list 的响应不得伪装成合法零抽取。"""
+
+    trace: list[str] = []
+    chain, err = _chain_fail(
+        memos_modules,
+        trace,
+        reader_outcome="invalid_json",
+    )
+
+    assert err is not None, "非法抽取响应必须让 MEM_READ task 失败"
+    assert "invalid JSON contract" in str(err)
+    i_returned = trace.index("== add:returned ==")
+    fine_writes = [
+        item
+        for item in trace[i_returned:]
+        if item.startswith("graph.add_nodes_batch")
+    ]
+    assert fine_writes == []
+    assert chain.store.nodes, "非法响应失败后 raw memory 必须保留，便于 clean retry"
 
 
 def test_successful_empty_llm_result_still_completes(memos_modules):

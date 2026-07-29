@@ -14,16 +14,23 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
 import sys
 import threading
+from time import perf_counter_ns
 from typing import Any
 
-from memory_benchmark.config import OpenAISettings, PathSettings, load_path_settings
+from memory_benchmark.config import (
+    OPENCODEGO_API_PROVIDER,
+    OpenAISettings,
+    PathSettings,
+    load_path_settings,
+)
 from memory_benchmark.core import ConfigurationError, ImageRef, Turn
 from memory_benchmark.core.provider_protocol import (
     EvidenceAssertion,
@@ -44,10 +51,17 @@ from memory_benchmark.methods.memos_lifecycle import (
     MemosLocalTaskTracker,
     install_local_tracker,
 )
-from memory_benchmark.observability.efficiency import EfficiencyCollector
+from memory_benchmark.observability.efficiency import (
+    EfficiencyCollector,
+    EfficiencyStage,
+    MeasurementSource,
+    extract_api_token_usage,
+    resolve_token_usage,
+)
+from memory_benchmark.storage import atomic_write_json
 
 
-MEMOS_ADAPTER_VERSION = "memos-v2.0.25-product-v1"
+MEMOS_ADAPTER_VERSION = "memos-v2.0.25-product-v4"
 MEMOS_METHOD_DIRECTORY = "MemOS"
 MEMOS_UPSTREAM_URL = "https://github.com/MemTensor/MemOS.git"
 MEMOS_RELEASE_TAG = "v2.0.25"
@@ -66,7 +80,16 @@ MEMOS_EMPTY_MEMORY_SENTINEL = "(No relevant memories found)"
 # 代码零消费（全仓仅 product_models.py 一处出现）。仍忠实传入 question time，但
 # 公开 metadata 必须显式声明该字段尚未接线，不得宣称时间过滤已生效。
 MEMOS_REFERENCE_TIME_EFFECT = "declared_but_unwired_v2.0.25"
+MEMOS_BUILD_LLM_RESPONSE_CONTRACT = (
+    "provider-aware-v1:"
+    "opencodego=json_object+thinking_disabled;"
+    "primary=provider_default"
+)
+MEMOS_OPENCODEGO_READER_COMPATIBILITY = "opencodego_json_non_thinking_v1"
 MEMOS_NAMESPACE_ALGORITHM = "sha256(storage_root_relative|isolation_key)[:32]"
+MEMOS_LOCOMO_VIEW_SIDECAR_SCHEMA_VERSION = "v1"
+MEMOS_LOCOMO_OFFICIAL_BATCH_SIZE = 2
+MEMOS_LOCOMO_VIEW_NAMES = ("speaker_a", "speaker_b")
 _NAMESPACE_SAFE_PATTERN = re.compile(r"[^0-9a-z]+")
 # MemOS product 只按 `role` 分流 chat message，benchmark canonical 也只保证这两种。
 _ALLOWED_ROLES = frozenset({"user", "assistant"})
@@ -83,11 +106,39 @@ MEMOS_SOURCE_FILES = (
     "src/memos/multi_mem_cube/single_cube.py",
     "src/memos/mem_reader/multi_modal_struct.py",
     "src/memos/mem_scheduler/task_schedule_modules/handlers/mem_read_handler.py",
+    "src/memos/llms/openai.py",
     "src/memos/memories/textual/tree.py",
     "src/memos/memories/textual/tree_text_memory/organize/manager.py",
     "src/memos/graph_dbs/neo4j_community.py",
     "src/memos/embedders/sentence_transformer.py",
 )
+
+
+@dataclass(frozen=True)
+class _MemosRawLLMCall:
+    """后台线程完成的一次 MemOS LLM 调用原始观测。"""
+
+    messages: Any
+    output_text: str
+    usage: Any
+
+
+@dataclass(frozen=True)
+class _MemosRawEmbeddingCall:
+    """后台线程完成的一次 MemOS embedding 调用原始观测。"""
+
+    embedder: Any
+    texts: tuple[str, ...]
+    latency_ms: float
+
+
+@dataclass
+class _MemosEfficiencyCapture:
+    """一次 adapter 操作期间跨线程收集的原始调用缓冲。"""
+
+    stage: EfficiencyStage
+    llm_calls: list[_MemosRawLLMCall] = field(default_factory=list)
+    embedding_calls: list[_MemosRawEmbeddingCall] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -245,10 +296,23 @@ class MemOSConfig:
             **asdict(self),
             "adapter_version": MEMOS_ADAPTER_VERSION,
             "implementation_identity": MEMOS_IMPLEMENTATION_IDENTITY,
+            "build_llm_response_contract": MEMOS_BUILD_LLM_RESPONSE_CONTRACT,
             "llm_provider": "openai-compatible",
             "embedding_provider": "sentence-transformers-local",
             "namespace_algorithm": MEMOS_NAMESPACE_ALGORITHM,
-            "cube_topology": "one_namespace_one_cube_per_conversation",
+            "cube_topology": (
+                "one_namespace_one_cube_per_conversation_except_"
+                "locomo_dual_speaker_view"
+            ),
+            "locomo_ingest_strategy": (
+                "official_dual_namespace_reverse_roles_batch_size_2"
+            ),
+            "locomo_retrieval_strategy": (
+                "official_dual_search_per_view_top_k_then_speaker_partition_merge"
+            ),
+            "longmemeval_ingest_strategy": (
+                "product_full_session_preserve_order_no_truncation"
+            ),
             "reference_time_effect": MEMOS_REFERENCE_TIME_EFFECT,
             "answer_builder": "framework_benchmark_unified",
         }
@@ -325,6 +389,14 @@ def _memos_environment(
         # ---- build LLM（唯一真实 API 模型） ----
         "MOS_CHAT_MODEL": config.llm_model,
         "OPENAI_API_KEY": openai_settings.api_key,
+        # `init_server()` 即使在 `ENABLE_INTERNET=false` 时也会无条件构造
+        # internet retriever config；其嵌套 reader 的 Pydantic schema 要求这三项。
+        # 这里只复用同一 build LLM 身份以通过产品初始化，internet 能力仍在下方关闭。
+        "MEMRADER_MODEL": config.llm_model,
+        "MEMRADER_API_KEY": openai_settings.api_key,
+        "MEMRADER_API_BASE": (
+            openai_settings.base_url or "https://api.openai.com/v1"
+        ),
         # ---- 受控本地 embedding ----
         "MOS_EMBEDDER_BACKEND": config.embedding_backend,
         "MOS_EMBEDDER_MODEL": str(model_path or config.embedding_model_path),
@@ -361,6 +433,10 @@ def _memos_environment(
         values["QDRANT_API_KEY"] = qdrant_api_key
     if openai_settings.base_url:
         values["OPENAI_API_BASE"] = openai_settings.base_url
+    if openai_settings.provider == OPENCODEGO_API_PROVIDER:
+        values["MEMRADER_PROVIDER_COMPATIBILITY"] = (
+            MEMOS_OPENCODEGO_READER_COMPATIBILITY
+        )
     return values
 
 
@@ -638,6 +714,12 @@ class MemOS(MemoryProvider):
         self._cleaned = False
         self._task_sequence = 0
         self._sequence_lock = threading.Lock()
+        # MemOS async worker 不传播 Python ContextVar。后台 callback 只能先写入
+        # 线程安全原始缓冲，待精确 business task 完成后再由调用线程回放到
+        # framework collector 的 conversation/question scope。
+        self._efficiency_lock = threading.RLock()
+        self._efficiency_capture: _MemosEfficiencyCapture | None = None
+        self._efficiency_observer_runtime_id: int | None = None
 
     # ------------------------------------------------------------------
     # runtime / namespace
@@ -646,6 +728,7 @@ class MemOS(MemoryProvider):
         """返回本 provider 的 runtime，必要时构造一次。"""
 
         if self._runtime is not None:
+            self._install_efficiency_observers(self._runtime)
             return self._runtime
         if self._openai_settings is None:
             raise ConfigurationError("MemOS runtime requires OpenAI settings")
@@ -655,15 +738,282 @@ class MemOS(MemoryProvider):
             path_settings=self.path_settings,
             runtime_factory=self._runtime_factory,
         )
+        self._install_efficiency_observers(self._runtime)
         return self._runtime
 
-    def _namespace(self, isolation_key: str) -> str:
-        """返回该 isolation 的确定性 namespace。"""
+    def _install_efficiency_observers(self, runtime: Any) -> None:
+        """给 MemOS runtime 安装 LLM/embedding 纯观测钩子。
 
+        MemOS 的 scheduler/reader 会跨多层线程池执行。钩子本身只把成功调用的
+        原始事实写入本 provider 的锁保护缓冲，不触碰 framework collector；
+        collector 回放由发起 ingest/retrieve 的原线程在精确完成门之后执行。
+        """
+
+        collector = self._efficiency_collector
+        if collector is None or not collector.enabled:
+            return
+        if self._efficiency_observer_runtime_id == id(runtime):
+            return
+        components = getattr(runtime, "components", None)
+        if not isinstance(components, dict):
+            # 测试替身 runtime 没有产品 component graph；其算法出口测试不需要
+            # 伪造模型调用。真实 MemosRuntime 必有 components。
+            return
+
+        mem_reader = components.get("mem_reader")
+        llm_candidates = [
+            components.get("llm"),
+            getattr(mem_reader, "llm", None),
+            getattr(mem_reader, "general_llm", None),
+            getattr(mem_reader, "image_parser_llm", None),
+            getattr(mem_reader, "document_parser_llm", None),
+            getattr(mem_reader, "preference_extractor_llm", None),
+        ]
+        wrapped_llms = 0
+        seen: set[int] = set()
+        for llm in llm_candidates:
+            if llm is None or id(llm) in seen:
+                continue
+            seen.add(id(llm))
+            if not hasattr(llm, "response_callback"):
+                continue
+            if not getattr(llm, "_memory_benchmark_response_wrapped", False):
+                previous_callback = llm.response_callback
+
+                def _response_callback(
+                    owner: Any,
+                    response: Any,
+                    request_body: dict[str, Any],
+                    result: Any,
+                    *,
+                    _previous: Any = previous_callback,
+                ) -> None:
+                    """保留既有 callback，再把成功响应投递给当前 adapter sink。"""
+
+                    if _previous is not None:
+                        _previous(owner, response, request_body, result)
+                    sink = getattr(owner, "_memory_benchmark_response_sink", None)
+                    if callable(sink):
+                        sink(response, request_body, result)
+
+                llm.response_callback = _response_callback
+                llm._memory_benchmark_response_wrapped = True
+            llm._memory_benchmark_response_sink = self._capture_llm_call
+            wrapped_llms += 1
+
+        embedder_candidates = [
+            components.get("embedder"),
+            getattr(mem_reader, "embedder", None),
+            getattr(components.get("searcher"), "embedder", None),
+            getattr(components.get("memory_manager"), "embedder", None),
+        ]
+        wrapped_embedders = 0
+        seen.clear()
+        for embedder in embedder_candidates:
+            if embedder is None or id(embedder) in seen:
+                continue
+            seen.add(id(embedder))
+            original_embed = getattr(embedder, "embed", None)
+            if not callable(original_embed):
+                continue
+            if not getattr(embedder, "_memory_benchmark_embedding_wrapped", False):
+
+                def _wrapped_embed(
+                    texts: Any,
+                    *args: Any,
+                    _owner: Any = embedder,
+                    _original: Any = original_embed,
+                    **kwargs: Any,
+                ) -> Any:
+                    """原样调用 embedding，成功后仅投递输入与真实 wall latency。"""
+
+                    started_ns = perf_counter_ns()
+                    result = _original(texts, *args, **kwargs)
+                    latency_ms = _elapsed_ms(started_ns)
+                    normalized = (
+                        [texts]
+                        if isinstance(texts, str)
+                        else list(texts or [])
+                    )
+                    sink = getattr(
+                        _owner,
+                        "_memory_benchmark_embedding_sink",
+                        None,
+                    )
+                    if callable(sink):
+                        sink(_owner, normalized, latency_ms)
+                    return result
+
+                embedder.embed = _wrapped_embed
+                embedder._memory_benchmark_embedding_wrapped = True
+            embedder._memory_benchmark_embedding_sink = (
+                self._capture_embedding_call
+            )
+            wrapped_embedders += 1
+
+        if wrapped_llms == 0:
+            raise ConfigurationError(
+                "MemOS efficiency observation requires patched OpenAILLM "
+                "response_callback support"
+            )
+        if wrapped_embedders == 0:
+            raise ConfigurationError(
+                "MemOS efficiency observation requires at least one product "
+                "embedder"
+            )
+        self._efficiency_observer_runtime_id = id(runtime)
+
+    def _begin_efficiency_capture(self, stage: EfficiencyStage) -> bool:
+        """在有匹配 framework scope 时开启一次跨线程原始调用缓冲。"""
+
+        collector = self._efficiency_collector
+        if collector is None or not collector.enabled:
+            return False
+        scope_type = collector.active_scope_type()
+        if stage is EfficiencyStage.MEMORY_BUILD:
+            if scope_type != "conversation":
+                return False
+        elif stage is EfficiencyStage.RETRIEVAL:
+            if scope_type not in {"conversation", "question"}:
+                return False
+        else:  # pragma: no cover - 本 adapter 只负责 build/retrieval
+            raise ConfigurationError(
+                f"MemOS efficiency capture stage is unsupported: {stage.value}"
+            )
+        with self._efficiency_lock:
+            if self._efficiency_capture is not None:
+                raise ConfigurationError(
+                    "MemOS efficiency capture cannot overlap another operation"
+                )
+            self._efficiency_capture = _MemosEfficiencyCapture(stage=stage)
+        return True
+
+    def _capture_llm_call(
+        self,
+        response: Any,
+        request_body: dict[str, Any],
+        result: Any,
+    ) -> None:
+        """由任意 MemOS 后台线程追加一次成功 LLM 调用。"""
+
+        with self._efficiency_lock:
+            capture = self._efficiency_capture
+            if capture is None:
+                return
+            capture.llm_calls.append(
+                _MemosRawLLMCall(
+                    messages=request_body.get("messages"),
+                    output_text=str(result or ""),
+                    usage=getattr(response, "usage", None),
+                )
+            )
+
+    def _capture_embedding_call(
+        self,
+        embedder: Any,
+        texts: list[Any],
+        latency_ms: float,
+    ) -> None:
+        """由任意 MemOS 后台线程追加一次成功 embedding 调用。"""
+
+        with self._efficiency_lock:
+            capture = self._efficiency_capture
+            if capture is None:
+                return
+            capture.embedding_calls.append(
+                _MemosRawEmbeddingCall(
+                    embedder=embedder,
+                    texts=tuple(str(text) for text in texts),
+                    latency_ms=latency_ms,
+                )
+            )
+
+    def _discard_efficiency_capture(self, stage: EfficiencyStage) -> None:
+        """算法操作失败时丢弃本操作的未提交观测，避免污染下一 scope。"""
+
+        with self._efficiency_lock:
+            capture = self._efficiency_capture
+            if capture is None:
+                return
+            if capture.stage is not stage:
+                raise ConfigurationError(
+                    "MemOS efficiency capture stage changed before discard"
+                )
+            self._efficiency_capture = None
+
+    def _finish_efficiency_capture(self, stage: EfficiencyStage) -> None:
+        """弹出原始缓冲，并在当前调用线程的 framework scope 中精确回放。"""
+
+        collector = self._efficiency_collector
+        if collector is None or not collector.enabled:
+            return
+        with self._efficiency_lock:
+            capture = self._efficiency_capture
+            if capture is None or capture.stage is not stage:
+                raise ConfigurationError(
+                    "MemOS efficiency capture is missing or has the wrong stage"
+                )
+            self._efficiency_capture = None
+
+        with collector.operation_stage(stage):
+            for call in capture.llm_calls:
+                api_input, api_output = extract_api_token_usage(call.usage)
+                usage = resolve_token_usage(
+                    api_input_tokens=api_input,
+                    api_output_tokens=api_output,
+                    prompt_text=_memos_messages_to_text(call.messages),
+                    output_text=call.output_text,
+                    tokenizer=_TiktokenCounter(self.config.llm_model),
+                )
+                collector.record_llm_call(
+                    model_id=MEMOS_LLM_MODEL_ID,
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    token_measurement_source=usage.source,
+                )
+            for call in capture.embedding_calls:
+                collector.record_embedding_call(
+                    model_id=MEMOS_EMBEDDING_MODEL_ID,
+                    input_tokens=_count_memos_embedding_tokens(
+                        call.embedder,
+                        call.texts,
+                    ),
+                    latency_ms=call.latency_ms,
+                    token_measurement_source=MeasurementSource.TOKENIZER_ESTIMATE,
+                    latency_measurement_source=MeasurementSource.FRAMEWORK_TIMER,
+                )
+
+    def _namespace(self, isolation_key: str, *, locomo_view: str | None = None) -> str:
+        """返回该 isolation（及可选 LoCoMo speaker 视角）的确定性 namespace。"""
+
+        namespace_isolation_key = isolation_key
+        if locomo_view is not None:
+            if locomo_view not in MEMOS_LOCOMO_VIEW_NAMES:
+                raise ConfigurationError(
+                    f"Unknown MemOS LoCoMo view: {locomo_view!r}"
+                )
+            namespace_isolation_key = f"{isolation_key}|memos-locomo-{locomo_view}"
         return build_memos_namespace(
             storage_root_relative=self._storage_root_relative(),
-            isolation_key=isolation_key,
+            isolation_key=namespace_isolation_key,
         )
+
+    def _conversation_namespaces(self, isolation_key: str) -> tuple[tuple[str, str], ...]:
+        """返回本 benchmark 的全部逻辑 namespace。
+
+        LoCoMo 按官方 harness 建两个 speaker 视角；其余四格仍是一
+        conversation 一 namespace。
+        """
+
+        if self.benchmark_name == "locomo":
+            return tuple(
+                (
+                    view,
+                    self._namespace(isolation_key, locomo_view=view),
+                )
+                for view in MEMOS_LOCOMO_VIEW_NAMES
+            )
+        return (("default", self._namespace(isolation_key)),)
 
     def _storage_root_relative(self) -> str:
         """返回 run 独占 storage_root 的项目相对稳定身份，不含绝对机器路径。"""
@@ -691,37 +1041,105 @@ class MemOS(MemoryProvider):
     # ingest
     # ------------------------------------------------------------------
     def ingest(self, unit: IngestUnit) -> IngestResult | None:
-        """把一个 session batch 写入 typed `AddHandler`，并等待其精确终态。"""
+        """把一个 session batch 写入 typed `AddHandler`，并等待全部精确终态。
+
+        LoCoMo 忠实复刻官方 product harness 的数据面：同一公开 session 写入
+        speaker_a / speaker_b 两个 namespace，两个视角 role 互换；每个视角
+        按位置每 2 条发一个 add，奇数尾保持 singleton。全部 add 先提交，再按
+        business task 精确等待，避免把官方 async 请求误串行化成
+        “上一 pair fine 完成后才提交下一 pair”。
+
+        其余 benchmark 仍以完整 session 发一个 add。尤其 LongMemEval 主轨
+        不采用当前官方 evaluation wrapper 的 `batch_size=2` 与 `[:8000]`
+        截断；该 wrapper 只属于后续 `author_longmemeval` 校准身份。
+        """
 
         if not isinstance(unit, SessionBatch):
             raise ConfigurationError("MemOS provider only accepts SessionBatch")
-        messages = self._build_messages(unit)
-        if not messages:
-            raise ConfigurationError(
-                "MemOS session batch produced no message: "
-                f"{unit.isolation_key}/{unit.session_id}"
-            )
-        runtime = self._require_runtime()
-        namespace = self._namespace(unit.isolation_key)
-        business_task_id = self._next_business_task_id(namespace, unit.session_id)
 
+        submitted: list[tuple[str, str]] = []
+        source_message_count = len(unit.events)
+        written_message_count = 0
+
+        if self.benchmark_name == "locomo":
+            speaker_identity = self._register_locomo_view_sidecar(unit)
+            view_plans = [
+                (
+                    view,
+                    self._namespace(unit.isolation_key, locomo_view=view),
+                    self._build_messages(
+                        unit,
+                        speaker_roles=self._locomo_speaker_roles(
+                            speaker_identity,
+                            view=view,
+                        ),
+                    ),
+                )
+                for view in MEMOS_LOCOMO_VIEW_NAMES
+            ]
+        else:
+            view_plans = [
+                (
+                    "default",
+                    self._namespace(unit.isolation_key),
+                    self._build_messages(unit, speaker_roles=None),
+                )
+            ]
+
+        for view, _, messages in view_plans:
+            if not messages:
+                raise ConfigurationError(
+                    "MemOS session batch produced no message: "
+                    f"{unit.isolation_key}/{unit.session_id}/{view}"
+                )
+
+        runtime = self._require_runtime()
         from memos.api.product_models import APIADDRequest
 
-        add_request = APIADDRequest(
-            user_id=namespace,
-            writable_cube_ids=[namespace],
-            session_id=unit.session_id,
-            task_id=business_task_id,
-            messages=messages,
-            async_mode=self.config.add_async_mode,
-            mode=self.config.add_mode,
+        capture_started = self._begin_efficiency_capture(
+            EfficiencyStage.MEMORY_BUILD
         )
-        runtime.add_handler.handle_add_memories(add_request)
-        terminal = runtime.tracker.wait_for_business_task(
-            user_id=namespace,
-            business_task_id=business_task_id,
-            timeout_seconds=self.config.task_timeout_seconds,
-        )
+        try:
+            for view, namespace, messages in view_plans:
+                chunks = (
+                    _message_chunks(messages, MEMOS_LOCOMO_OFFICIAL_BATCH_SIZE)
+                    if self.benchmark_name == "locomo"
+                    else (messages,)
+                )
+                for chunk in chunks:
+                    business_task_id = self._next_business_task_id(
+                        namespace,
+                        unit.session_id,
+                    )
+                    add_request = APIADDRequest(
+                        user_id=namespace,
+                        writable_cube_ids=[namespace],
+                        session_id=unit.session_id,
+                        task_id=business_task_id,
+                        messages=chunk,
+                        async_mode=self.config.add_async_mode,
+                        mode=self.config.add_mode,
+                    )
+                    runtime.add_handler.handle_add_memories(add_request)
+                    submitted.append((namespace, business_task_id))
+                    written_message_count += len(chunk)
+
+            terminal_task_count = 0
+            for namespace, business_task_id in submitted:
+                terminal = runtime.tracker.wait_for_business_task(
+                    user_id=namespace,
+                    business_task_id=business_task_id,
+                    timeout_seconds=self.config.task_timeout_seconds,
+                )
+                terminal_task_count += len(terminal)
+        except BaseException:
+            if capture_started:
+                self._discard_efficiency_capture(EfficiencyStage.MEMORY_BUILD)
+            raise
+        else:
+            if capture_started:
+                self._finish_efficiency_capture(EfficiencyStage.MEMORY_BUILD)
+
         return IngestResult(
             unit_ref=SessionRef(
                 isolation_key=unit.isolation_key,
@@ -729,23 +1147,31 @@ class MemOS(MemoryProvider):
             ),
             metadata={
                 "method": "memos",
-                "namespace": namespace,
-                "business_task_id": business_task_id,
-                "message_count": len(messages),
-                "terminal_task_count": len(terminal),
+                "namespaces": [namespace for _, namespace in self._conversation_namespaces(
+                    unit.isolation_key
+                )],
+                "business_task_ids": [
+                    business_task_id for _, business_task_id in submitted
+                ],
+                "source_message_count": source_message_count,
+                "written_message_count": written_message_count,
+                "add_request_count": len(submitted),
+                "terminal_task_count": terminal_task_count,
             },
         )
 
-    def _build_messages(self, unit: SessionBatch) -> list[dict[str, Any]]:
+    def _build_messages(
+        self,
+        unit: SessionBatch,
+        *,
+        speaker_roles: dict[str, str] | None,
+    ) -> list[dict[str, Any]]:
         """把 session batch 的每个保留 event 渲染成恰好一条 MemOS message。
 
         `chat_time` key 始终存在：canonical 契约已是 `turn → session → None`，
         无时间时写显式 `None`，不用 question time、兄弟 turn 或 wall clock 补值。
         """
 
-        speaker_roles = (
-            self._locomo_speaker_roles(unit) if self.benchmark_name == "locomo" else None
-        )
         messages: list[dict[str, Any]] = []
         for event in unit.events:
             content = self._render_content(event, speaker_roles)
@@ -819,8 +1245,8 @@ class MemOS(MemoryProvider):
         return f"{speaker}: {rendered}"
 
     @staticmethod
-    def _locomo_speaker_roles(unit: SessionBatch) -> dict[str, str]:
-        """从 LoCoMo 公开 conversation metadata 构造显式 speaker→role 映射。"""
+    def _locomo_speaker_identity(unit: SessionBatch) -> dict[str, str]:
+        """从 LoCoMo 公开 conversation metadata 读取两个真实 speaker。"""
 
         metadata: dict[str, Any] = {}
         for event in unit.events:
@@ -841,20 +1267,186 @@ class MemOS(MemoryProvider):
             raise ConfigurationError(
                 "MemOS LoCoMo speaker_a and speaker_b must be distinct"
             )
-        return {speaker_a: "user", speaker_b: "assistant"}
+        return {"speaker_a": speaker_a, "speaker_b": speaker_b}
+
+    @staticmethod
+    def _locomo_speaker_roles(
+        speaker_identity: dict[str, str],
+        *,
+        view: str,
+    ) -> dict[str, str]:
+        """按官方正/反视角构造真实 speaker→MemOS role 映射。"""
+
+        speaker_a = speaker_identity["speaker_a"]
+        speaker_b = speaker_identity["speaker_b"]
+        if view == "speaker_a":
+            return {speaker_a: "user", speaker_b: "assistant"}
+        if view == "speaker_b":
+            return {speaker_a: "assistant", speaker_b: "user"}
+        raise ConfigurationError(f"Unknown MemOS LoCoMo view: {view!r}")
+
+    def _locomo_view_sidecar_path(self, isolation_key: str) -> Path:
+        """返回 LoCoMo 双视角 speaker identity 的持久化 sidecar 路径。"""
+
+        digest = hashlib.sha256(isolation_key.encode("utf-8")).hexdigest()
+        return self.storage_root / "locomo-view-sidecars" / f"{digest}.json"
+
+    def _register_locomo_view_sidecar(self, unit: SessionBatch) -> dict[str, str]:
+        """创建或验证 LoCoMo speaker sidecar，供 resume 后双路 readout 使用。"""
+
+        speaker_identity = self._locomo_speaker_identity(unit)
+        payload = {
+            "schema_version": MEMOS_LOCOMO_VIEW_SIDECAR_SCHEMA_VERSION,
+            "isolation_key": unit.isolation_key,
+            **speaker_identity,
+        }
+        path = self._locomo_view_sidecar_path(unit.isolation_key)
+        if path.is_file():
+            existing = self._read_locomo_view_sidecar(path)
+            if existing != payload:
+                raise ConfigurationError(
+                    "MemOS LoCoMo speaker identity conflicts with persisted "
+                    f"dual-view sidecar: {unit.isolation_key}"
+                )
+        else:
+            atomic_write_json(path, payload)
+        return speaker_identity
+
+    def _load_locomo_view_sidecar(self, isolation_key: str) -> dict[str, str]:
+        """读取 resume 必需的 LoCoMo 双视角 sidecar，缺失时 fail-fast。"""
+
+        path = self._locomo_view_sidecar_path(isolation_key)
+        if not path.is_file():
+            raise ConfigurationError(
+                "MemOS LoCoMo dual-view state is missing its speaker sidecar; "
+                "start a new run instead of silently guessing speaker identity"
+            )
+        payload = self._read_locomo_view_sidecar(path)
+        if payload["isolation_key"] != isolation_key:
+            raise ConfigurationError(
+                f"MemOS LoCoMo sidecar isolation mismatch: {path}"
+            )
+        return {
+            "speaker_a": payload["speaker_a"],
+            "speaker_b": payload["speaker_b"],
+        }
+
+    @staticmethod
+    def _read_locomo_view_sidecar(path: Path) -> dict[str, str]:
+        """读取并强校验 LoCoMo 双视角 sidecar。"""
+
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ConfigurationError(
+                f"Invalid MemOS LoCoMo dual-view sidecar: {path}"
+            ) from exc
+        if (
+            not isinstance(payload, dict)
+            or payload.get("schema_version")
+            != MEMOS_LOCOMO_VIEW_SIDECAR_SCHEMA_VERSION
+            or not all(
+                isinstance(payload.get(key), str) and payload[key].strip()
+                for key in ("isolation_key", "speaker_a", "speaker_b")
+            )
+            or payload["speaker_a"] == payload["speaker_b"]
+        ):
+            raise ConfigurationError(
+                f"Invalid MemOS LoCoMo dual-view sidecar schema: {path}"
+            )
+        return payload
 
     # ------------------------------------------------------------------
     # retrieve
     # ------------------------------------------------------------------
     def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
-        """只调 typed `SearchHandler`，把产品返回顺序原样映射为 RetrievalResult。"""
+        """只调 typed `SearchHandler`，把产品返回顺序原样映射为 RetrievalResult。
 
+        LoCoMo 对两个 speaker namespace 各发一次同参数检索，保留每一路内部
+        产品顺序，再按官方 `speaker_a → speaker_b` 分区合并；不伪造跨 namespace
+        的全局 rank。其余 benchmark 仍为单路检索。
+        """
+
+        speaker_identity = (
+            self._load_locomo_view_sidecar(query.isolation_key)
+            if self.benchmark_name == "locomo"
+            else None
+        )
         runtime = self._require_runtime()
-        namespace = self._namespace(query.isolation_key)
+        namespaces = self._conversation_namespaces(query.isolation_key)
+        items_by_view: dict[str, tuple[RetrievedItem, ...]] = {}
+        all_items: list[RetrievedItem] = []
+        capture_started = self._begin_efficiency_capture(
+            EfficiencyStage.RETRIEVAL
+        )
+        try:
+            for view, namespace in namespaces:
+                response = runtime.search_handler.handle_search_memories(
+                    self._build_search_request(query, namespace)
+                )
+                view_items = _items_from_search_response(
+                    response,
+                    extra_metadata=(
+                        {"memos_locomo_view": view}
+                        if self.benchmark_name == "locomo"
+                        else None
+                    ),
+                )
+                items_by_view[view] = view_items
+                all_items.extend(view_items)
+        except BaseException:
+            if capture_started:
+                self._discard_efficiency_capture(EfficiencyStage.RETRIEVAL)
+            raise
+        else:
+            if capture_started:
+                self._finish_efficiency_capture(EfficiencyStage.RETRIEVAL)
+
+        items = tuple(all_items)
+        if self.benchmark_name == "locomo":
+            if speaker_identity is None:  # pragma: no cover - 上方同条件已强加载
+                raise ConfigurationError("MemOS LoCoMo speaker identity is unavailable")
+            formatted_memory = (
+                _format_locomo_dual_view_memory(
+                    speaker_identity=speaker_identity,
+                    speaker_a_items=items_by_view["speaker_a"],
+                    speaker_b_items=items_by_view["speaker_b"],
+                )
+                if items
+                else ""
+            )
+        else:
+            formatted_memory = "\n\n".join(item.content for item in items)
+        return RetrievalResult(
+            formatted_memory=formatted_memory or MEMOS_EMPTY_MEMORY_SENTINEL,
+            items=items,
+            metadata={
+                "method": "memos",
+                "prompt_track": "unified",
+                "namespaces": [namespace for _, namespace in namespaces],
+                "retrieval_path": "SearchHandler.handle_search_memories",
+                "search_mode": self.config.search_mode,
+                "retrieval_top_k_semantics": (
+                    "per_locomo_speaker_view"
+                    if self.benchmark_name == "locomo"
+                    else "single_namespace"
+                ),
+                "reference_time_effect": MEMOS_REFERENCE_TIME_EFFECT,
+                "provenance_granularity": "none",
+            },
+            evidence=_memos_retrieval_evidence(),
+        )
+
+    def _build_search_request(
+        self,
+        query: RetrievalQuery,
+        namespace: str,
+    ) -> Any:
+        """为一个确定 namespace 构造 typed `APISearchRequest`。"""
 
         from memos.api.product_models import APISearchRequest
 
-        search_request = APISearchRequest(
+        return APISearchRequest(
             query=query.query_text,
             user_id=namespace,
             readable_cube_ids=[namespace],
@@ -868,27 +1460,12 @@ class MemOS(MemoryProvider):
             include_skill_memory=self.config.include_skill_memory,
             neighbor_discovery=self.config.neighbor_discovery,
             internet_search=self.config.internet_search,
+            # 框架主轨故意不给 method 额外对话历史；官方 wrapper 的 None 口径
+            # 留给 author profile，不能暗中进入主表。
             chat_history=[],
             filter=None,
             session_id=None,
             reference_time=query.question_time,
-        )
-        response = runtime.search_handler.handle_search_memories(search_request)
-        items = _items_from_search_response(response)
-        formatted_memory = "\n\n".join(item.content for item in items)
-        return RetrievalResult(
-            formatted_memory=formatted_memory or MEMOS_EMPTY_MEMORY_SENTINEL,
-            items=items,
-            metadata={
-                "method": "memos",
-                "prompt_track": "unified",
-                "namespace": namespace,
-                "retrieval_path": "SearchHandler.handle_search_memories",
-                "search_mode": self.config.search_mode,
-                "reference_time_effect": MEMOS_REFERENCE_TIME_EFFECT,
-                "provenance_granularity": "none",
-            },
-            evidence=_memos_retrieval_evidence(),
         )
 
     # ------------------------------------------------------------------
@@ -932,14 +1509,21 @@ def clean_memos_conversation_state(
     """namespace-scoped 清理一个 failed_ingest conversation 的 MemOS 状态。
 
     只走 `DeleteMemoryRequest(writable_cube_ids=[namespace], user_id=namespace)`；
+    LoCoMo 先对两个 namespace 做统一 pending preflight，再逐一删除并读回验空；
     绝不调用 `delete_by_memory_ids()`，绝不无 namespace 清全库，也绝不把 handler
     返回的 failure 当成功。删除前先确认本 process tracker 没有该 namespace 的
     pending task，删除后以重新读取为空作为完成后置条件。
     """
 
     runtime = provider._require_runtime()
-    namespace = provider._namespace(isolation_key)
-    _require_no_pending_tasks_for_namespace(runtime.tracker, namespace)
+    namespaces = [
+        namespace
+        for _, namespace in provider._conversation_namespaces(isolation_key)
+    ]
+    # 必须在第一次 delete 前把全部 namespace 都检查完；否则 view A 已删、
+    # view B 仍 pending 时会制造可避免的半清理。
+    for namespace in namespaces:
+        _require_no_pending_tasks_for_namespace(runtime.tracker, namespace)
 
     from memos.api.handlers.memory_handler import (
         handle_delete_memories,
@@ -947,29 +1531,34 @@ def clean_memos_conversation_state(
     )
     from memos.api.product_models import DeleteMemoryRequest, GetMemoryRequest
 
-    delete_response = handle_delete_memories(
-        DeleteMemoryRequest(
-            writable_cube_ids=[namespace],
-            user_id=namespace,
-        ),
-        runtime.naive_mem_cube,
-    )
-    status = (getattr(delete_response, "data", None) or {}).get("status")
-    if status != "success":
-        raise ConfigurationError(
-            f"MemOS namespace-scoped delete failed for {namespace}: status={status!r}"
+    for namespace in namespaces:
+        delete_response = handle_delete_memories(
+            DeleteMemoryRequest(
+                writable_cube_ids=[namespace],
+                user_id=namespace,
+            ),
+            runtime.naive_mem_cube,
         )
-    get_response = handle_get_memories(
-        GetMemoryRequest(
-            mem_cube_id=namespace,
-            user_id=namespace,
-            include_preference=False,
-            include_tool_memory=False,
-            include_skill_memory=False,
-        ),
-        runtime.naive_mem_cube,
-    )
-    _require_empty_text_memory(get_response, namespace)
+        status = (getattr(delete_response, "data", None) or {}).get("status")
+        if status != "success":
+            raise ConfigurationError(
+                f"MemOS namespace-scoped delete failed for {namespace}: "
+                f"status={status!r}"
+            )
+        get_response = handle_get_memories(
+            GetMemoryRequest(
+                mem_cube_id=namespace,
+                user_id=namespace,
+                include_preference=False,
+                include_tool_memory=False,
+                include_skill_memory=False,
+            ),
+            runtime.naive_mem_cube,
+        )
+        _require_empty_text_memory(get_response, namespace)
+
+    if provider.benchmark_name == "locomo":
+        provider._locomo_view_sidecar_path(isolation_key).unlink(missing_ok=True)
 
 
 def _require_no_pending_tasks_for_namespace(
@@ -1043,7 +1632,43 @@ def _memos_retrieval_evidence() -> RetrievalEvidence:
     )
 
 
-def _items_from_search_response(response: Any) -> tuple[RetrievedItem, ...]:
+def _message_chunks(
+    messages: list[dict[str, Any]],
+    chunk_size: int,
+) -> tuple[list[dict[str, Any]], ...]:
+    """按位置切分 message，奇数尾保持 singleton，不制造 placeholder。"""
+
+    if chunk_size < 1:
+        raise ConfigurationError("MemOS message chunk_size must be positive")
+    return tuple(
+        messages[index : index + chunk_size]
+        for index in range(0, len(messages), chunk_size)
+    )
+
+
+def _format_locomo_dual_view_memory(
+    *,
+    speaker_identity: dict[str, str],
+    speaker_a_items: tuple[RetrievedItem, ...],
+    speaker_b_items: tuple[RetrievedItem, ...],
+) -> str:
+    """按官方 LoCoMo MemOS readout 的双 speaker 槽位格式化检索结果。"""
+
+    speaker_a_memory = "\n".join(item.content for item in speaker_a_items)
+    speaker_b_memory = "\n".join(item.content for item in speaker_b_items)
+    return (
+        f"Memories for user {speaker_identity['speaker_a']}:\n\n"
+        f"    {speaker_a_memory}\n\n"
+        f"Memories for user {speaker_identity['speaker_b']}:\n\n"
+        f"    {speaker_b_memory}"
+    )
+
+
+def _items_from_search_response(
+    response: Any,
+    *,
+    extra_metadata: dict[str, Any] | None = None,
+) -> tuple[RetrievedItem, ...]:
     """按产品返回顺序扁平化 `data["text_mem"]` 的所有 bucket。
 
     不做二次排序、不 set 化、不再截断一次；id/content 缺失与非数值 score 一律
@@ -1073,11 +1698,20 @@ def _items_from_search_response(response: Any) -> tuple[RetrievedItem, ...]:
                 f"{type(memories).__name__}"
             )
         for memory in memories:
-            items.append(_retrieved_item_from_memory(memory))
+            items.append(
+                _retrieved_item_from_memory(
+                    memory,
+                    extra_metadata=extra_metadata,
+                )
+            )
     return tuple(items)
 
 
-def _retrieved_item_from_memory(memory: Any) -> RetrievedItem:
+def _retrieved_item_from_memory(
+    memory: Any,
+    *,
+    extra_metadata: dict[str, Any] | None = None,
+) -> RetrievedItem:
     """把一条产品 memory 映射为公开 RetrievedItem，剥离 embedding 等内部对象。"""
 
     if not isinstance(memory, dict):
@@ -1111,7 +1745,10 @@ def _retrieved_item_from_memory(memory: Any) -> RetrievedItem:
         # created_at 是 current metadata 里唯一一手定义的时间字段；其余不猜。
         timestamp=_optional_text(metadata.get("created_at")),
         source_turn_ids=_source_turn_ids(metadata),
-        metadata=_public_memory_metadata(metadata),
+        metadata={
+            **_public_memory_metadata(metadata),
+            **(extra_metadata or {}),
+        },
     )
 
 
@@ -1194,6 +1831,102 @@ def _images_from_event(event: TurnEvent) -> list[ImageRef]:
         for raw in raw_images
         if isinstance(raw, dict)
     ]
+
+
+def _elapsed_ms(started_ns: int) -> float:
+    """把 perf_counter_ns 起点转换为非负毫秒。"""
+
+    return max(0.0, (perf_counter_ns() - started_ns) / 1_000_000)
+
+
+def _memos_messages_to_text(messages: Any) -> str:
+    """把 MemOS/OpenAI message payload 稳定转成 tokenizer 输入文本。"""
+
+    if isinstance(messages, list):
+        parts: list[str] = []
+        for message in messages:
+            if isinstance(message, dict):
+                role = str(message.get("role") or "")
+                content = message.get("content")
+                if isinstance(content, str):
+                    parts.append(f"{role}: {content}")
+                else:
+                    parts.append(
+                        f"{role}: "
+                        + json.dumps(
+                            content,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            default=str,
+                        )
+                    )
+            else:
+                parts.append(str(message))
+        return "\n".join(parts)
+    return str(messages or "")
+
+
+def _count_memos_embedding_tokens(
+    embedder: Any,
+    texts: tuple[str, ...],
+) -> int:
+    """按 MemOS 实际 SentenceTransformer 截断链估算本批输入 token。
+
+    先复用 upstream `_truncate_texts()` 的字符上限，再按模型 tokenizer 与
+    `max_seq_length` 做和实际 encode 相同的 token 截断；因此来源只能标成
+    `tokenizer_estimate`，不能冒充 API usage。
+    """
+
+    truncated = list(texts)
+    truncate = getattr(embedder, "_truncate_texts", None)
+    if callable(truncate):
+        truncated = [str(text) for text in truncate(list(texts))]
+    model = getattr(embedder, "model", None)
+    tokenizer = getattr(model, "tokenizer", None)
+    if tokenizer is None or not hasattr(tokenizer, "encode"):
+        raise ConfigurationError(
+            "MemOS local embedding token counting requires "
+            "embedder.model.tokenizer.encode"
+        )
+    max_length = getattr(model, "max_seq_length", None)
+    total = 0
+    for text in truncated:
+        if isinstance(max_length, int) and max_length > 0:
+            encoded = tokenizer.encode(
+                text,
+                truncation=True,
+                max_length=max_length,
+            )
+        else:
+            encoded = tokenizer.encode(text)
+        total += len(encoded)
+    return total
+
+
+class _TiktokenCounter:
+    """按 OpenAI-compatible 模型名计数 token 的轻量 wrapper。"""
+
+    def __init__(self, model_name: str) -> None:
+        """保存模型名，encoding 懒加载以避免无观测路径额外开销。"""
+
+        self.model_name = model_name
+        self._encoding: Any | None = None
+
+    def count_tokens(self, text: str) -> int:
+        """返回文本 token 数；未知模型回退到 cl100k_base。"""
+
+        if self._encoding is None:
+            try:
+                import tiktoken
+            except Exception as exc:  # pragma: no cover - 依赖由项目锁定
+                raise ConfigurationError(
+                    "tiktoken is required for MemOS token estimation"
+                ) from exc
+            try:
+                self._encoding = tiktoken.encoding_for_model(self.model_name)
+            except KeyError:
+                self._encoding = tiktoken.get_encoding("cl100k_base")
+        return len(self._encoding.encode(text or "", disallowed_special=()))
 
 
 def build_memos_source_identity(

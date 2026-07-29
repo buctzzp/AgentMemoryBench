@@ -369,6 +369,7 @@ class LLMJudgeEvaluator:
                 model=model,
                 messages=_judge_chat_messages(api_input),
                 temperature=0,
+                **api_settings.chat_completions_request_overrides(),
             )
         else:  # pragma: no cover - OpenAISettings 已在构造期封闭枚举
             raise ConfigurationError(

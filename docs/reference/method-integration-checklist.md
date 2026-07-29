@@ -32,11 +32,41 @@
 一个 method 达到 `method-frozen-v1` = 以下全部有一手锚 + 架构师验收。
 **逐 method、逐项过；每项写明"支持/不支持/N/A + 一手出处"**。
 
+### B0. 官方评测 harness parity matrix（写 adapter 前的前置门）
+- 先查 method 官方 repo **实际跑过哪些 benchmark**；没跑过的格子明确写
+  `framework extension`，不得把另一个 benchmark 的 wrapper 猜成通用算法约束。
+- 对每个官方跑过的 benchmark，必须从**最终 payload**而非 README/CLI 默认值建立
+  parity matrix，至少逐项记录：
+  1. 产品 surface（本地 core / typed handler / HTTP / cloud）与版本；
+  2. 外层 wrapper 展开后的真实 add 次数与 message batching/chunking，而不只看
+     `client.add(messages)` 这一层调用；
+  3. role/speaker 映射、namespace/user/cube 数量、双写/镜像视角、时间/image/content；
+  4. sync/async、后台阶段与“何时算完成”；
+  5. build LLM、embedding、reader/chunk/window/update 等算法参数及环境开关；
+  6. search 的层、mode、top-k 口径（总量还是每路）、dedup/rerank、preference/tool/
+     skill/history/reference-time；
+  7. formatted context 与**完整 answer builder**、judge/decoding；
+  8. 当前 release 上已坏、字段被 schema 丢弃或 source 不足以证明的路径。
+- 每个差异必须在施工前归入且只归入一种身份：
+  `main smoke/official_full`、`author_<benchmark>`、有理由的 framework extension、
+  `upstream bug/pending`。作者 wrapper 不是自动高于产品接口的“圣旨”，但任何未裁差异
+  都会阻塞 B11；不能先写完 adapter、到 smoke 前才发现双 namespace、batch size 或
+  search flag。
+- **主轨与作者轨不得混称**：主轨可以因跨 benchmark 公平性、无损输入或 current
+  产品语义而有意偏离 harness；作者轨才承担论文/官方数字校准。若公开源码缺精确
+  server env、选优参数或实际 model revision，写 `paper parity unproven`，禁止用
+  “大体一致”盖章。
+- parity matrix 的稳定摘要回填 `docs/reference/integration/<method>.md`，完整
+  文件:行号、命令和争议留在 method workstream note；B11 对表时必须重读该矩阵。
+
 ### B1. 来源锁与接口选择
 - 官方 repo/commit（拿不到写"来源待溯"）、license、vendored 路径。
 - **产品接口选择**：用哪个 ingest/retrieve 接口，**为什么不用**它的
   chat/ask/eval 专用入口（公平性——只测记忆质量，见 AGENTS 运行主线）。
   附官方源码 `文件:行号`。
+- **lifecycle 调用图**：不要因为协议类声明了 `prepare/finalize/cleanup` 就假定
+  runner 会调用；对每个钩子从 runner 实际调用点反查一次。死钩子要么接线/删除，
+  要么 adapter 明确采用 lazy init，并把 no-work resume 与早失败 cleanup 行为锁进测试。
 
 ### B2. 注入粒度（consume_granularity）
 - method 原生接口支持的注入单元：turn / pair / session(list) / conversation。
@@ -196,6 +226,9 @@ B2/B5 及 HaluMem memory_point 这类**能力缺口**（method 接口不支持�
 ### B11. 主配置 smoke + 冻结
 - 5×10 主 smoke 只要求 `smoke` section；作者配置不属于冻结必填矩阵。首个作者校准 run 或
   真实效果 full run 前，再完成 author section、完整 builder 与旧 `config_track` 迁移。
+- 进入真实 smoke 前重读 B0 parity matrix：逐个官方 benchmark 核对 main/author/
+  extension/upstream-bug 四类归属仍与**当前 source lock**一致；任何“已记录但未裁”
+  的 namespace、batch、search layer/top-k、偏好开关或完整 builder 差异都会阻塞冻结。
 - **格子安全说明采用“每 method 一份 living dossier、五 benchmark 分章”，不制造 50 份顶层
   文档**（2026-07-18 用户要求固化）。每格至少写：benchmark 特殊/异常、canonical 层处置、
   method 最终 payload、adapter 差分、私有边界、metric valid/N/A/pending、离线/真实 smoke
@@ -217,9 +250,14 @@ B2/B5 及 HaluMem memory_point 这类**能力缺口**（method 接口不支持�
   ③ 效率观测落盘且可读（injected tokens / api_usage / latency 三类都在）；
   ④ **formatted_memory 内容抽查**：时间戳等应带字段确实带上（B4 口径）；
   空记忆哨兵是合法结果但要留痕原因（极小输入抽取 0 条属方法行为）；
-  ⑤ **并行冒烟**：workers>1 跑一次不崩（隔离等效性的最低验证）。作者配置若只换 answer
-  builder/decoding，可继承主配置的并行证据；若同时更改 build/ingest 参数，则必须另补并行
-  smoke，不能凭 section 名继承。
+  ⑤ **并行冒烟/资格裁决**：默认 workers>1 跑一次不崩（隔离等效性的最低验证）。
+  若 method 的 current product runtime 确实无法安全复制或并发，允许把 framework
+  conversation 并行判为 `N/A/unsupported`，但必须同时具备：真实 backend 反例或一手
+  产品硬约束、为何“isolated provider”仍共享资源的调用链、TOML 固定 W1、CLI 在
+  runtime/API 前拒绝 override、dossier/frozen note 披露。禁止为了填格子加全局锁、
+  复制 runtime 或换存储拓扑而偷偷形成新 implementation。一次 W2 偶然成功不能推翻另一次
+  确认竞态。作者配置若只换 answer builder/decoding，可继承主配置的并行资格；若同时更改
+  build/ingest 参数，则必须另裁并行，不能凭 section 名继承。
 - **resume 测试缓期**（用户 2026-07-13 拍板）：resume 仅 formal/full 支持，
   真实测试烧钱 → 离线测试先行（已有），真实 resume 验证等预算批复后随
   cost-probe/全量一起做，不阻塞 method-frozen-v1（作为已声明缺口记录）。

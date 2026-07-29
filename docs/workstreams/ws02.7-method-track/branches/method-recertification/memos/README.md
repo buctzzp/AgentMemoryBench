@@ -84,23 +84,40 @@ MemOS v2.0.25 product v3 adapter M4 已由 `a87353a + de29c4c + f6e725e` 完成�
 namespace-safe clean retry、stop failure 永久 fail-closed 与五格强反例成立；主树全量
 无 API 门为 `1863 passed, 3 deselected, 11 warnings, 29 subtests passed`。
 
-**当前唯一入口：M5 B11 前置与真实服务 smoke。**先闭合服务依赖、成本边界、run identity
-和开箱门；未经用户确认真实服务环境、预算、规模与 run_id，不启动 Neo4j/Qdrant/API。
+M5 又补做了官方 harness parity 门。架构师一手追到最终 payload 后确认：
+
+- LoCoMo 官方实际是双 namespace、正/反 role、每视角 `batch_size=2`、双路各取
+  top-k 再按 speaker 合并；用户裁定该拓扑进入主 profile；
+- LongMemEval 官方 wrapper 同样位置切 pair 并 `[:8000]`，但 current
+  `reference_time` 调用与 client 签名冲突；主 profile 继续完整 session、无损 content，
+  wrapper 只进入待实现 `author_longmemeval` 校准身份。
+
+完整裁决见
+[M5 harness parity ruling](notes/memos-v2.0.25-official-harness-parity-m5-ruling.md)。
+该中间版本 adapter 升级为 `product-v2`，离线强反例覆盖双库
+add/search/readout/resume/clean 与其余四格稳定特殊形状；当时定向门
+`390 passed, 10 warnings`，文档门 `5 passed`。
+
+M5 随后完成 product-v3 五格真实服务 smoke；product-v4 只增加成功 response usage
+callback 与 async completion-buffered observation replay，不改变 memory 算法/payload/
+search，因此以 LoCoMo 和 HaluMem 两条真实哨兵补证 B7，其余功能资产守恒继承。
+最终状态见 [method-frozen-v1](notes/memos-frozen-v1.md)。
 
 2026-07-27 已关闭 M5 的 API provider 前置：新 smoke 使用显式
 `opencodego/deepseek-v4-flash`，Chat Completions 普通、judge 与 JSON mode 均已最小真调用
 通过，Responses 明确不可用；provider/model/transport 已进入 manifest/resume，正式
 `official_full` 仍保持 primary。实现见
 [`../../api-runtime-smoke/README.md`](../../api-runtime-smoke/README.md)。
-这不等于 MemOS B11 已执行：Neo4j/Qdrant 服务、规模与 run_id 门仍保持。
+MemOS B11 已执行；这些 provider/runtime 身份均进入 manifest。
 
-## M4 保持 pending 的边界
+## 冻结边界
 
-- 真实 Neo4j/Qdrant 跨 namespace 隔离与 MMR/rerank stable-ranking；
+- MMR/rerank stable-ranking；
 - window-generated memory 的 semantic provenance 与 Recall/NDCG 资格；
 - async `MEM_READ` 未公开 task-scoped fine output，因此 HaluMem extraction 先诚实 N/A；
-- HaluMem update current-state 与 QA 的真实服务 smoke；
-- MemOS async worker 的精确 per-call token/cost 观测；
-- official LoCoMo 双 namespace reproduction harness；主 profile 仍是一 conversation 一 cube。
+- HaluMem update 非空命中哨兵；
+- author LoCoMo / LongMemEval 的 paper-number calibration；
+- framework W2：真实 LME 反例触发 shared tokenizer `Already borrowed`，已判
+  `N/A/unsupported`，不是待补；产品内部 async dispatcher 不变。
 
-这些由 M5 preflight/真实 smoke 分层关闭，不回头重造 M1/R2/M4 证据。
+下一家 method 不重造 MemOS 或 benchmark 调查；从父级恢复胶囊进入 Letta/MemGPT。

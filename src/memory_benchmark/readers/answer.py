@@ -248,6 +248,7 @@ class OpenAICompatibleAnswerLLMClient:
                 }
             ],
             **self.answer_settings.to_request_kwargs(),
+            **self.settings.chat_completions_request_overrides(),
         )
         content = response.choices[0].message.content
         return AnswerLLMResponse(
@@ -272,6 +273,7 @@ class OpenAICompatibleAnswerLLMClient:
             model=self.answer_settings.model,
             messages=[message.to_dict() for message in messages],
             **self.answer_settings.to_request_kwargs(),
+            **self.settings.chat_completions_request_overrides(),
         )
         content = response.choices[0].message.content
         return AnswerLLMResponse(

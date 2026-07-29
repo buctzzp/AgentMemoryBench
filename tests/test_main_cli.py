@@ -405,11 +405,12 @@ def test_execute_evaluate_uses_prediction_api_runtime_for_judge(
     manifest_path = run_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     runtime = {
-        "contract_version": "v1",
+        "contract_version": "v2",
         "provider": "opencodego",
         "model": "deepseek-v4-flash",
         "answer_transport": "chat_completions",
         "judge_transport": "chat_completions",
+        "thinking_mode": "disabled",
     }
     manifest["method"] = {
         "answer_reader": {
@@ -478,11 +479,12 @@ def test_execute_evaluate_rejects_api_runtime_environment_drift(
         "answer_reader": {
             "answer_model": "deepseek-v4-flash",
             "api_runtime": {
-                "contract_version": "v1",
+                "contract_version": "v2",
                 "provider": "opencodego",
                 "model": "deepseek-v4-flash",
                 "answer_transport": "chat_completions",
                 "judge_transport": "chat_completions",
+                "thinking_mode": "disabled",
             },
         }
     }
@@ -955,6 +957,76 @@ def test_execute_run_evaluates_each_child_independently(
     assert all(command.confirm_api is True for command in received)
 
 
+def test_execute_run_skips_evaluation_for_failed_prediction_child(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """部分失败 child 不得继续评分，command summary 必须保留失败计数。"""
+
+    failed_summary = PredictionRunSummary(
+        run_id="failed-child",
+        dataset_name="longmemeval",
+        completed_conversations=1,
+        total_conversations=2,
+        completed_questions=1,
+        total_questions=2,
+        prediction_path=str(tmp_path / "failed" / "predictions.jsonl"),
+        private_label_path=str(tmp_path / "failed" / "labels.jsonl"),
+        summary_path=str(tmp_path / "failed" / "summary.json"),
+        failed_conversations=1,
+    )
+    successful_summary = PredictionRunSummary(
+        run_id="successful-child",
+        dataset_name="longmemeval",
+        completed_conversations=1,
+        total_conversations=1,
+        completed_questions=1,
+        total_questions=1,
+        prediction_path=str(tmp_path / "success" / "predictions.jsonl"),
+        private_label_path=str(tmp_path / "success" / "labels.jsonl"),
+        summary_path=str(tmp_path / "success" / "summary.json"),
+    )
+    prediction_batch = PredictionBatchResult(
+        benchmark="longmemeval",
+        selector="all",
+        runs=(
+            PredictionVariantResult(
+                variant="s_cleaned",
+                run_id="failed-child",
+                summary=failed_summary,
+            ),
+            PredictionVariantResult(
+                variant="m_cleaned",
+                run_id="successful-child",
+                summary=successful_summary,
+            ),
+        ),
+    )
+    evaluated_run_ids: list[str] = []
+    monkeypatch.setattr(commands, "execute_predict", lambda command: prediction_batch)
+    monkeypatch.setattr(
+        commands,
+        "execute_evaluate",
+        lambda command: evaluated_run_ids.append(command.run_id) or (),
+    )
+
+    result = execute_run(
+        RunCommand(
+            prediction=_predict_command(
+                tmp_path,
+                benchmark="longmemeval",
+                run_id=None,
+                variant="all",
+            ),
+            metrics=("longmemeval-judge",),
+        )
+    )
+
+    assert evaluated_run_ids == ["successful-child"]
+    assert result.runs[0].evaluations == ()
+    assert result.failed_count == 1
+
+
 def test_main_help_lists_predict_evaluate_and_run(capsys) -> None:
     """统一入口 help 应明确显示三个子命令。"""
 
@@ -1026,6 +1098,90 @@ def test_predict_accepts_custom_method_class_without_builtin_method(
     assert exit_code == 0
     assert captured["command"].method is None
     assert captured["command"].method_class == "my_pkg.adapter:MyMemory"
+
+
+def test_predict_partial_failure_returns_nonzero_exit_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """child 内 isolated failure 即使返回 summary，shell 也必须得到 exit 1。"""
+
+    summary = PredictionRunSummary(
+        run_id="partial-run",
+        dataset_name="longmemeval",
+        completed_conversations=1,
+        total_conversations=2,
+        completed_questions=1,
+        total_questions=2,
+        prediction_path=str(tmp_path / "predictions.jsonl"),
+        private_label_path=str(tmp_path / "labels.jsonl"),
+        summary_path=str(tmp_path / "summary.json"),
+        failed_conversations=1,
+    )
+    monkeypatch.setattr(
+        main_cli,
+        "execute_predict",
+        lambda command: PredictionBatchResult(
+            benchmark="longmemeval",
+            selector="s_cleaned",
+            runs=(
+                PredictionVariantResult(
+                    variant="s_cleaned",
+                    run_id="partial-run",
+                    summary=summary,
+                ),
+            ),
+        ),
+    )
+
+    exit_code = main_cli.main(
+        [
+            "predict",
+            "smoke",
+            "--root",
+            ".",
+            "--method",
+            "memos",
+            "--benchmark",
+            "longmemeval",
+            "--allow-api",
+        ]
+    )
+
+    assert exit_code == 1
+
+
+def test_prediction_budget_gap_without_failure_keeps_zero_exit_code(
+    tmp_path: Path,
+) -> None:
+    """conversation budget 留下 pending 不等于运行失败。"""
+
+    summary = PredictionRunSummary(
+        run_id="budgeted-run",
+        dataset_name="longmemeval",
+        completed_conversations=1,
+        total_conversations=2,
+        completed_questions=1,
+        total_questions=2,
+        prediction_path=str(tmp_path / "predictions.jsonl"),
+        private_label_path=str(tmp_path / "labels.jsonl"),
+        summary_path=str(tmp_path / "summary.json"),
+        metadata={"run_control": {"budget_exhausted": True}},
+    )
+    result = PredictionBatchResult(
+        benchmark="longmemeval",
+        selector="s_cleaned",
+        runs=(
+            PredictionVariantResult(
+                variant="s_cleaned",
+                run_id="budgeted-run",
+                summary=summary,
+            ),
+        ),
+    )
+
+    assert result.failed_count == 0
+    assert main_cli._exit_code_for_result(result) == 0
 
 
 def test_predict_rejects_method_and_method_class_together() -> None:

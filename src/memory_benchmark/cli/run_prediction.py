@@ -106,6 +106,12 @@ class PredictionBatchResult:
     selector: str
     runs: tuple[PredictionVariantResult, ...]
 
+    @property
+    def failed_count(self) -> int:
+        """汇总所有 concrete child run 的失败 conversation 数。"""
+
+        return sum(run.summary.failed_count for run in self.runs)
+
 
 def _bind_clean_failed_ingest_conversation(
     *,
@@ -1776,7 +1782,7 @@ def _apply_provider_answer_compatibility(
     ):
         return (
             replace(answer_settings, max_tokens=128),
-            "opencodego_reasoning_completion_floor_128_v1",
+            "opencodego_non_thinking_completion_floor_128_v2",
         )
     return answer_settings, None
 

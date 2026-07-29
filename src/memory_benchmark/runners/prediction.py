@@ -162,11 +162,18 @@ class PredictionRunSummary:
     private_label_path: str
     summary_path: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    failed_conversations: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """返回 JSON 可序列化摘要。"""
 
         return asdict(self)
+
+    @property
+    def failed_count(self) -> int:
+        """返回 shell/上层 command 可消费的失败 conversation 数。"""
+
+        return self.failed_conversations
 
 
 @dataclass(frozen=True)
@@ -695,6 +702,17 @@ def run_predictions(
                         paths.answer_prompts_path
                     ),
                 },
+                failed_conversations=sum(
+                    1
+                    for conversation in selected_conversations
+                    if _conversation_state_status(
+                        conversation_status.get(
+                            conversation.conversation_id,
+                            {},
+                        )
+                    )
+                    in {_STATUS_FAILED_INGEST, _STATUS_FAILED_ANSWER}
+                ),
             )
             atomic_write_json(paths.summary_path, summary.to_dict())
             logger.log_event("run_completed", summary.to_dict())

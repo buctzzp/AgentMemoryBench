@@ -1,7 +1,7 @@
 ---
 id: ws02.7
 parent: ws02
-status: in-progress（首批 5 method frozen；下一家 MemOS）
+status: in-progress（首批 6 method frozen；下一家 Letta/MemGPT）
 created: 2026-07-12
 ---
 # ws02.7 Method Track M0
@@ -27,13 +27,14 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 禁止为恢复全局而全文读取历史账、全部 workstream 或两本经验手册。若本节与 Git
 冲突，以 Git 和最新 ruling 为准。
 
-- **稳定基线（2026-07-23）**：5 benchmark × 首批 5 method 的真实 smoke 与
+- **稳定基线（2026-07-29）**：5 benchmark × 首批 6 method 的真实 smoke 与
   B1-B11 已关闭；ws03
   [结构归一 M0](../ws03-architecture-slimming/notes/2026-07-23-structural-normalization-m0-ruling.md)
   已通过守恒门。无 API 全量：
   `1685 passed, 3 deselected, 1 warning, 29 subtests passed in 128.11s`；
   compileall exit 0。唯一 warning 是既有 vendored LightMem Pydantic deprecation。
-- **当前动作**：按新结构接入 **MemOS**；source lock 为官方稳定版
+- **当前动作**：**MemOS 已冻结，关闭机器化 smoke plan/preflight 与新 method
+  强制接入清单后转 Letta/MemGPT**。MemOS source lock 为官方稳定版
   `v2.0.25@e820406`。架构师
   [最终裁定](branches/method-recertification/memos/notes/memos-v2.0.25-m1-final-ruling.md)
   锁定的 `tree_text + MultiModalStruct + typed handlers +
@@ -57,8 +58,21 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   已最小真调用证实；manifest/resume/evaluate 身份与离线 metric 免 secret 读取已锁强反例，
   无 API 全量为
   `1879 passed, 3 deselected, 11 warnings, 29 subtests passed in 132.87s`，compileall
-  exit 0。当前仍处于 **M5 B11 前置**；未经用户确认真实服务环境、预算、规模与
-  run_id，不启动 Neo4j/Qdrant/API smoke。
+  exit 0。M5 官方 harness 复核随后推翻了 M4 的 LoCoMo 单视角局部口径：
+  [M5 harness 裁决](branches/method-recertification/memos/notes/memos-v2.0.25-official-harness-parity-m5-ruling.md)
+  锁定主轨双 namespace、正/反 role、每视角 batch=2 与双路检索合并；
+  LongMemEval 主轨仍是完整 session，官方 pair/truncate wrapper 留在 author 校准。
+  current adapter 已升 `product-v4`，完成 product-v3 五格真实服务 smoke，并以
+  LoCoMo/HaluMem 两条 v4 真实哨兵补齐 async build LLM `api_usage` 与本地 embedding
+  tokenizer observation；见
+  [frozen-v1](branches/method-recertification/memos/notes/memos-frozen-v1.md)。
+  framework W2 的两个 provider 仍共享进程级 runtime/embedder，LongMemEval 实测
+  `RuntimeError: Already borrowed`，故并行资格明确为 N/A：两主 profile 固定 W1、
+  CLI 在 API/runtime 前拒绝 override。最终无 API 全量：
+  `1902 passed, 3 deselected, 13 warnings, 29 subtests passed in 129.84s`，
+  compileall 与 patch reverse-check 均为 exit 0。当前动作转为
+  **机器化 smoke plan/preflight +
+  新 method 强制接入清单**，随后接 Letta/MemGPT。
   复用五个 benchmark 稳定事实，不重开 raw census，也不把真实 DB/image/HaluMem
   fine-output 等 pending 能力提前写成 valid。
 - **不可顺手重开**：benchmark raw/canonical/gold 调查、已冻结 25 格、旧
@@ -76,14 +90,15 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 | MemoryOS | `method-frozen-v1` | [frozen-v1](branches/method-recertification/memoryos/notes/memoryos-frozen-v1.md) | STM + ranked MTM Recall；HaluMem extraction N/A |
 | A-Mem | `method-frozen-v1` | [frozen-v1](branches/method-recertification/amem/notes/amem-frozen-v1.md) | evolution 后 current memory；Recall/Precision/NDCG N/A |
 | SimpleMem | `method-frozen-v1` | [frozen-v1](branches/method-recertification/simplemem/notes/simplemem-frozen-v1.md) | 合成 MemoryEntry；provenance N/A；build 串行 |
+| MemOS | `method-frozen-v1` | [frozen-v1](branches/method-recertification/memos/notes/memos-frozen-v1.md) | typed product handlers；LoCoMo 双视角；framework W2 N/A |
 
-未接入：MemOS、Letta/MemGPT、EverOS、LangMem、Supermemory。EverOS 仍排最后。
+未接入：Letta/MemGPT、EverOS、LangMem、Supermemory。EverOS 仍排最后。
 
 ## 现行长期裁决
 
 ### 数据与输入
 
-- benchmark 稳定事实从 `docs/survey/` 与五家 frozen note 复用；只有 source lock/
+- benchmark 稳定事实从 `docs/survey/` 与五家 benchmark frozen note 复用；只有 source lock/
   official asset 变化或新一手反证才重开 census。
 - role/content/time/place/image 必须沿 canonical event → method ingest → backend
   payload 一手验证；不从 prompt 文案反推接口硬约束。
@@ -116,7 +131,9 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 2. [x] **ws03 M0-B**：pure metric 归位、retrieval evaluator 共壳；
 3. [x] **ws03 M0-C**：benchmark/author prompt ownership；
 4. [x] 定向测试、文档门、compileall、无 API 全量 pytest；
-5. [ ] 按新结构接入 MemOS。
+5. [x] 按新结构接入 MemOS；
+6. [ ] 机器化 smoke 规划/预检与新 method 强制接入清单；
+7. [ ] 接入 Letta/MemGPT。
 
 M0 红线：零真实 API、零 third-party 算法改动、零 metric/prompt/artifact 语义变化；
 旧 import path 在迁移期保留薄兼容层。
@@ -136,7 +153,7 @@ M0 红线：零真实 API、零 third-party 算法改动、零 metric/prompt/art
 - [x] 五个 benchmark frozen-v1
 - [x] 首批 5 method × 5 benchmark 真实 smoke 与 B1-B11
 - [x] 结构归一 M0
-- [ ] MemOS
+- [x] MemOS
 - [ ] Letta/MemGPT
 - [ ] LangMem
 - [ ] Supermemory

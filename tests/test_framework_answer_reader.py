@@ -245,6 +245,54 @@ def test_openai_compatible_answer_client_uses_configured_model(
     }
     assert captured["model"] == "gpt-4o-mini"
     assert captured["messages"] == [{"role": "user", "content": "hello"}]
+    assert "extra_body" not in captured
+
+
+def test_opencodego_answer_client_disables_thinking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """opencodego smoke 必须显式关闭 thinking，避免隐藏推理吞掉短答案预算。"""
+
+    from memory_benchmark.readers.answer import (  # noqa: PLC0415
+        OpenAICompatibleAnswerLLMClient,
+    )
+
+    captured: dict[str, object] = {}
+
+    class FakeCompletions:
+        """记录 Chat Completions 请求。"""
+
+        def create(self, **kwargs: object) -> object:
+            """返回一个带可见短答案的最小响应。"""
+            captured.update(kwargs)
+            message = type("Message", (), {"content": "May 7, 2023"})()
+            choice = type("Choice", (), {"message": message})()
+            return type("Response", (), {"choices": [choice], "usage": None})()
+
+    class FakeOpenAI:
+        """不触网的 OpenAI client 替身。"""
+
+        def __init__(self, **kwargs: object) -> None:
+            """只装配 fake chat client。"""
+            self.chat = type("Chat", (), {"completions": FakeCompletions()})()
+
+    monkeypatch.setattr("memory_benchmark.readers.answer.OpenAI", FakeOpenAI)
+    client = OpenAICompatibleAnswerLLMClient(
+        settings=OpenAISettings(
+            api_key="sk-test",
+            base_url="https://opencode.example/v1",
+            model="deepseek-v4-flash",
+            provider="opencodego",
+            judge_transport="chat_completions",
+        ),
+        answer_settings=AnswerLLMSettings(
+            model="deepseek-v4-flash",
+            max_tokens=128,
+        ),
+    )
+
+    assert client.complete(prompt="short answer") == "May 7, 2023"
+    assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
 def test_openai_compatible_answer_client_passes_explicit_answer_llm_settings(

@@ -272,6 +272,16 @@ def run_operation_level_predictions(
             private_label_path=str(paths.evaluator_private_labels_path),
             summary_path=str(paths.summary_path),
             metadata={"runner": "operation_level_prediction"},
+            failed_conversations=sum(
+                1
+                for conversation in selected_conversations
+                if str(
+                    conversation_status.get(
+                        conversation.conversation_id,
+                        {},
+                    ).get("status", "")
+                ).startswith("failed")
+            ),
         )
         atomic_write_json(paths.summary_path, summary.to_dict())
         return summary

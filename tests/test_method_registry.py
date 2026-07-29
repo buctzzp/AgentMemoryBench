@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from memory_benchmark.config import load_path_settings
 from memory_benchmark.core import (
     ConfigurationError,
     Conversation,
@@ -500,7 +501,7 @@ def test_memos_registration_declares_product_typed_handler_contract() -> None:
     assert registration.requires_api is True
     assert registration.provenance_granularity == "none"
     assert registration.retrieval_evidence_contract_version == "v1"
-    # 首版不声明跨 conversation 并行资格，也不允许 smoke 覆盖 worker 数。
+    # isolated provider 仍共享进程级 runtime/embedder，真实 W2 已证不安全。
     assert registration.allow_smoke_worker_override is False
     assert registration.supports_shared_instance_parallelism is False
     assert registration.max_workers_getter(_memos_registry_config()) == 1
@@ -525,6 +526,25 @@ def test_memos_model_inventory_separates_llm_embedding_and_local_reranker() -> N
     # cosine_local reranker 是本地算法，不得伪装成 LLM。
     assert by_id["memos-reranker"].execution_mode == "local"
     assert by_id["memos-reranker"].model_role == "reranker"
+
+
+def test_memos_instrumentation_identity_declares_async_usage_bridge() -> None:
+    """B7 身份必须声明 API usage 拦截层与跨 async scope 的回放协议。"""
+
+    registration = get_method_registration("memos")
+    identity = registration.efficiency_instrumentation_identity_getter(
+        load_path_settings(),
+        _memos_registry_config(),
+        {"source_sha256": "source-lock"},
+    )
+
+    assert identity["exact_api_usage"] == "patched_response_callback"
+    assert identity["async_scope_bridge"] == "completion_buffered_replay_v1"
+    assert (
+        identity["embedding_token_source"]
+        == "sentence_transformer_tokenizer_estimate"
+    )
+    assert identity["method_source_sha256"] == "source-lock"
 
 
 def test_memos_build_identity_declares_source_proven_normalization() -> None:
@@ -590,8 +610,13 @@ def test_memos_manifest_carries_adapter_version_and_no_absolute_paths() -> None:
 
     manifest = _memos_registry_config().to_manifest()
 
-    assert manifest["adapter_version"] == "memos-v2.0.25-product-v1"
+    assert manifest["adapter_version"] == "memos-v2.0.25-product-v4"
     assert manifest["implementation_identity"] == "typed-product-handler"
+    assert manifest["build_llm_response_contract"] == (
+        "provider-aware-v1:"
+        "opencodego=json_object+thinking_disabled;"
+        "primary=provider_default"
+    )
     assert manifest["reference_time_effect"] == "declared_but_unwired_v2.0.25"
     for key, value in manifest.items():
         assert "password" not in key or key.endswith("_env")

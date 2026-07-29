@@ -246,7 +246,8 @@ def test_halumem_extraction_na_summary_when_session_reports_are_na(
     payload = json.loads(Path(summary.summary_path).read_text(encoding="utf-8"))
 
     assert summary.total_questions == 0
-    assert summary.mean_score == 0.0
+    assert summary.mean_score is None
+    assert payload["mean_score"] is None
     assert payload["status"] == "n/a"
     assert payload["overall_score"]["memory_integrity"]["memory_num"] == 0
     assert payload["overall_score"]["memory_integrity"]["recall(all)"] is None
@@ -290,8 +291,14 @@ def test_halumem_empty_denominators_are_none_with_explicit_counts(
 
     assert extraction_payload["overall_score"]["memory_integrity"]["recall(all)"] is None
     assert extraction_payload["overall_score"]["memory_integrity"]["memory_num"] == 0
+    assert extraction_payload["mean_score"] is None
+    assert extraction_payload["status"] == "n/a"
     assert update_payload["overall_score"]["memory_update"]["correct_update_memory_ratio(all)"] is None
     assert update_payload["overall_score"]["memory_update"]["update_memory_num"] == 0
+    assert update_payload["mean_score"] is None
+    assert update_payload["correct_count"] is None
+    assert update_payload["status"] == "n/a"
+    assert update_payload["reason_code"] == "no_nonempty_retrieval"
     assert qa_payload["overall_score"]["question_answering"]["correct_qa_ratio(all)"] is None
     assert qa_payload["overall_score"]["question_answering"]["qa_num"] == 0
 
@@ -756,6 +763,10 @@ def test_halumem_update_skips_empty_retrieval_per_official_routing(
     ratios = payload["overall_score"]["memory_update"]
     assert ratios["update_memory_num"] == 0
     assert ratios["correct_update_memory_ratio(all)"] is None
+    assert summary.mean_score is None
+    assert summary.correct_count is None
+    assert payload["status"] == "n/a"
+    assert payload["reason_code"] == "no_nonempty_retrieval"
     assert payload["skipped_empty_retrieval_count"] == 1
 
 
@@ -898,6 +909,9 @@ def test_halumem_update_empty_retrieval_creates_no_observation(tmp_path: Path) -
 
     assert client.calls == []
     assert observations == []
+    assert summary.mean_score is None
+    assert payload["status"] == "n/a"
+    assert payload["reason_code"] == "no_nonempty_retrieval"
     assert payload["skipped_empty_retrieval_count"] == 1
 
 

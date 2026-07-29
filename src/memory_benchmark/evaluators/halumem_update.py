@@ -110,21 +110,36 @@ class HalumemUpdateEvaluator(HalumemJudgeEvaluatorBase):
                 count_name="update_memory",
             )
         }
+        has_evaluable_update = bool(score_records)
         return self._finalize_artifact_payload(
             {
                 "metric_name": self.metric_name,
                 "score_records": score_records,
                 "total_questions": len(score_records),
-                "mean_score": safe_div(
-                    sum(float(record["score"]) for record in score_records),
-                    len(score_records),
-                ) or 0.0,
-                "correct_count": sum(
-                    1
-                    for record in score_records
-                    if record.get("memory_update_type") == "Correct"
+                "mean_score": (
+                    safe_div(
+                        sum(float(record["score"]) for record in score_records),
+                        len(score_records),
+                    )
+                    if has_evaluable_update
+                    else None
+                ),
+                "correct_count": (
+                    sum(
+                        1
+                        for record in score_records
+                        if record.get("memory_update_type") == "Correct"
+                    )
+                    if has_evaluable_update
+                    else None
                 ),
                 "summary": {
+                    "status": "ok" if has_evaluable_update else "n/a",
+                    "reason_code": (
+                        None
+                        if has_evaluable_update
+                        else "no_nonempty_retrieval"
+                    ),
                     "overall_score": overall,
                     "category_breakdown": _memory_type_breakdown(score_records),
                     "skipped_empty_retrieval_count": skipped_empty_retrieval_count,

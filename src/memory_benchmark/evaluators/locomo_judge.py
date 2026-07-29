@@ -171,12 +171,14 @@ class LoCoMoJudgeEvaluator(LLMJudgeEvaluator):
         """
 
         client = self._get_client()
-        model = self.model or self._get_openai_settings().model
+        api_settings = self._resolve_invocation_settings()
+        model = self.model or api_settings.model
         kwargs: dict[str, Any] = dict(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
         )
+        kwargs.update(api_settings.chat_completions_request_overrides())
         if self.mode.strip().lower() == "compact":
             kwargs["response_format"] = {"type": "json_object"}
         response = client.chat.completions.create(**kwargs)

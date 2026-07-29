@@ -180,7 +180,18 @@ def test_memos_registered_prediction_runs_five_benchmarks_through_generic_runner
     assert manifest["method"]["consume_granularity"] == "session"
     assert manifest["method"]["provenance_granularity"] == "none"
     assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"
-    assert manifest["method"]["config"]["adapter_version"] == "memos-v2.0.25-product-v1"
+    assert manifest["method"]["config"]["adapter_version"] == "memos-v2.0.25-product-v4"
+    assert manifest["method"]["config"]["build_llm_response_contract"] == (
+        "provider-aware-v1:"
+        "opencodego=json_object+thinking_disabled;"
+        "primary=provider_default"
+    )
+    assert manifest["method"]["config"]["locomo_ingest_strategy"] == (
+        "official_dual_namespace_reverse_roles_batch_size_2"
+    )
+    assert manifest["method"]["config"]["longmemeval_ingest_strategy"] == (
+        "product_full_session_preserve_order_no_truncation"
+    )
     assert predictions[0]["answer"] == "framework fake answer"
     assert prompts[0]["formatted_memory"] == "fake memos memory"
 

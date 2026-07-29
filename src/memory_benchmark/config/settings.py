@@ -192,6 +192,13 @@ class OpenAISettings:
             "max_retries": self.max_retries,
         }
 
+    def chat_completions_request_overrides(self) -> dict[str, object]:
+        """返回 provider 专属、且必须进入实验身份的 Chat Completions 参数。"""
+
+        if self.provider == OPENCODEGO_API_PROVIDER:
+            return {"extra_body": {"thinking": {"type": "disabled"}}}
+        return {}
+
     def to_runtime_manifest_dict(self) -> dict[str, object]:
         """返回不含 key/base URL 明文、可参与 resume 的 runtime 身份。"""
 
@@ -222,11 +229,16 @@ def build_api_runtime_manifest(
         else RESPONSES_JUDGE_TRANSPORT
     )
     return {
-        "contract_version": "v1",
+        "contract_version": "v2",
         "provider": normalized_provider,
         "model": normalized_model,
         "answer_transport": CHAT_COMPLETIONS_JUDGE_TRANSPORT,
         "judge_transport": judge_transport,
+        "thinking_mode": (
+            "disabled"
+            if normalized_provider == OPENCODEGO_API_PROVIDER
+            else "provider_default"
+        ),
     }
 
 

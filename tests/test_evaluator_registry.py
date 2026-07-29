@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from memory_benchmark.config import OpenAISettings
 from memory_benchmark.core import ConfigurationError
 from memory_benchmark.evaluators.answer_metrics import (
     NormalizedExactMatchEvaluator,
@@ -277,16 +278,25 @@ def test_locomo_judge_registration_requires_api_and_valid_profile() -> None:
     assert registration.profile_names == frozenset({"compact", "detailed"})
     assert registration.profile_relative_path is not None
 
+    settings = OpenAISettings(
+        api_key="sk-test",
+        base_url="https://opencode.example/v1",
+        model="deepseek-v4-flash",
+        provider="opencodego",
+        judge_transport="chat_completions",
+    )
     evaluator = create_evaluator(
         "locomo-judge",
         benchmark_name="locomo",
         profile_name="compact",
-        model="gpt-4o-mini",
+        model=settings.model,
         client=object(),
+        openai_settings=settings,
     )
     assert isinstance(evaluator, LoCoMoJudgeEvaluator)
     assert evaluator.mode == "compact"
-    assert evaluator.model == "gpt-4o-mini"
+    assert evaluator.model == "deepseek-v4-flash"
+    assert evaluator._openai_settings is settings
 
     with pytest.raises(ConfigurationError, match="Unknown evaluator profile"):
         create_evaluator(

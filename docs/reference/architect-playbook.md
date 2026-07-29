@@ -110,8 +110,26 @@
   调用跳过剩余动作后标成功；应保留 poisoned runtime、稳定 fail-fast 并禁止复用/并行另建。
   2026-07-27 MemOS M4 两轮返工即因首卡没有把 partial-stop 四态预先锁全。
 - method 官方 benchmark harness 若通过双写、双 namespace、检索融合等改变 build topology，
-  它就是 reproduction implementation variant，不是可暗抄进统一 product adapter 的普通
-  输入格式。主 profile 只复用通用产品接口；作者 harness 另立显式校准身份。
+  **先分类、不得暗抄，也不得一刀切排除**。默认把论文复现超参数/专用 builder 放进作者轨；
+  但若 benchmark 本身的对等角色语义要求对称视角，且拓扑完全由通用产品接口表达、用户与
+  架构师明确裁定进入主轨，也可以作为显式 benchmark policy（2026-07-27 MemOS×LoCoMo
+  双视角判例）。必须在 manifest/dossier 披露写入倍数、per-view top-k 与跨库 rank 缺失，
+  不能仍声称“一 conversation 一 cube / 总 top-k”。
+- 审计官方 harness 必须追到**最终 payload**：外层 `client.add(session)` 可能在 client
+  内按 `batch_size` 再发多次请求。逐层核 wrapper loop、schema extra-field 行为和 current
+  函数签名；只看调用点、README 或 argparse 默认值会漏掉真正改变算法的 batching/
+  namespace/search flag。
+- async method 的后台线程不会自动继承 framework 的 `ContextVar` observation scope。
+  若上游回调发生在线程池，先写 provider-owned、线程安全的原始 observation buffer；只有
+  exact business-task terminal 后，才由发起线程回放到原 conversation/question scope。
+  禁止用 add/pair 数量猜 LLM call，也禁止把后台 scope 全记成 unknown。
+- “runner 为每个 worker 构造 provider”不等于“method runtime 真隔离”。必须继续追
+  process-global owner、模型/tokenizer/client cache。若真实 W2 暴露竞态，当前 profile
+  可诚实判 parallel N/A，并在 CLI 预启动门锁死；不要用一次偶然成功盖过后续一手失败。
+- command summary 是 shell contract：isolated worker 即使把失败收敛成结构化 summary，
+  也必须显式携带 failed count。顶层 batch/run 要聚合该计数并返回非零；组合式 `run`
+  不得继续评测失败 child。conversation budget 留下的 pending 不是失败，两者不可用
+  `completed < total` 粗暴混算。
 
 重构的验收标准是行为守恒与未来修改面缩小，不是文件数或行数减少。
 

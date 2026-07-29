@@ -220,7 +220,14 @@ def _extraction_payload(
         "metric_name": "halumem_extraction",
         "score_records": score_records,
         "total_questions": len(score_records),
-        "mean_score": overall["memory_extraction_f1"] or 0.0,
+        # N/A 与真实 0 分必须在 run 级继续可区分。合法评测若 F1 恰为
+        # 0.0 原样保留；provider 明确不给 session-local extraction readout
+        # 时写 JSON null，不借 runner 的旧空集默认伪装成零分。
+        "mean_score": (
+            overall["memory_extraction_f1"]
+            if status == "ok"
+            else None
+        ),
         "correct_count": None,
         "summary": {
             "status": status,

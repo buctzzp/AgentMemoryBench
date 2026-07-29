@@ -125,6 +125,12 @@ class RunCommandResult:
     selector: str
     runs: tuple["RunVariantResult", ...]
 
+    @property
+    def failed_count(self) -> int:
+        """汇总 prediction child 的失败 conversation 数。"""
+
+        return sum(run.prediction.failed_count for run in self.runs)
+
 
 @dataclass(frozen=True)
 class RunVariantResult:
@@ -279,7 +285,7 @@ def _resolve_run_api_settings(
         raise ConfigurationError(
             "method.answer_reader.api_runtime must be an object"
         )
-    if raw_runtime.get("contract_version") != "v1":
+    if raw_runtime.get("contract_version") != "v2":
         raise ConfigurationError(
             "Unsupported method.answer_reader.api_runtime contract_version"
         )
@@ -393,13 +399,17 @@ def execute_run(command: RunCommand) -> RunCommandResult:
     prediction_batch = execute_predict(command.prediction)
     results: list[RunVariantResult] = []
     for prediction_run in prediction_batch.runs:
-        evaluations = execute_evaluate(
-            EvaluateCommand(
-                project_root=command.prediction.project_root,
-                run_id=prediction_run.run_id,
-                metrics=command.metrics,
-                judge_profile=command.judge_profile,
-                confirm_api=command.prediction.confirm_api,
+        evaluations = (
+            ()
+            if prediction_run.summary.failed_count > 0
+            else execute_evaluate(
+                EvaluateCommand(
+                    project_root=command.prediction.project_root,
+                    run_id=prediction_run.run_id,
+                    metrics=command.metrics,
+                    judge_profile=command.judge_profile,
+                    confirm_api=command.prediction.confirm_api,
+                )
             )
         )
         results.append(

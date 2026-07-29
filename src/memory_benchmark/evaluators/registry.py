@@ -475,6 +475,7 @@ def create_evaluator(
     client: Any | None = None,
     project_root: str | None = None,
     env_file: str | None = None,
+    openai_settings: OpenAISettings | None = None,
 ) -> Any:
     """校验兼容矩阵并构造一个新的 evaluator。
 
@@ -486,6 +487,7 @@ def create_evaluator(
         client: 可选测试 client；registry 不缓存。
         project_root: judge 延迟读取 secret 时使用的项目根。
         env_file: judge 延迟读取 secret 时使用的 `.env`。
+        openai_settings: 已由 run manifest 身份解析并校验的 provider 配置。
 
     输出:
         Any: 新建的 answer-level evaluator 实例。
@@ -512,6 +514,7 @@ def create_evaluator(
             client=client,
             project_root=project_root,
             env_file=env_file,
+            openai_settings=openai_settings,
         )
 
     if profile_name is not None:

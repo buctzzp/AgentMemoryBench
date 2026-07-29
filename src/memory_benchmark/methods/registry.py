@@ -353,10 +353,11 @@ def _memos_efficiency_instrumentation_identity(
         "llm_tokenizer": config.llm_model,
         "embedding_tokenizer": config.embedding_model_path,
         "method_source_sha256": source_identity.get("source_sha256"),
-        # MemOS current OpenAILLM.generate() 只返回纯文本并丢掉 response usage，
-        # async worker 又脱离 framework question context；精确 per-call
-        # token/cost 因此是 M5 preflight 的公开 pending，不在本卡伪造。
-        "exact_api_usage": "pending_m5_preflight",
+        # patch 在成功 response 尚在手时暴露 usage；adapter 的线程安全原始缓冲
+        # 等 business task 精确完成后，再回放到原 conversation/question scope。
+        "exact_api_usage": "patched_response_callback",
+        "async_scope_bridge": "completion_buffered_replay_v1",
+        "embedding_token_source": "sentence_transformer_tokenizer_estimate",
     }
 
 
@@ -1351,9 +1352,9 @@ _REGISTRATIONS = {
         consume_granularity_resolver=_session_consume_granularity,
         provenance_granularity="none",
         retrieval_evidence_contract_version="v1",
-        # MemOS factory 按 config 缓存单例、reader 持有构造期 graph DB；真实跨
-        # namespace interleaving 未验前既不共享实例并行，也不允许 smoke 覆盖
-        # worker 数。
+        # runner 的 isolated worker 只能隔离 provider 对象；MemOSRuntimeOwner
+        # 仍会按同一 config 复用进程级 runtime/embedder。真实 LME W2 已触发
+        # tokenizer `Already borrowed`，故必须在 runtime/API 启动前拒绝覆盖。
         allow_smoke_worker_override=False,
         efficiency_model_inventory_getter=_memos_efficiency_model_inventory,
         efficiency_instrumentation_identity_getter=(

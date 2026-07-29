@@ -93,13 +93,15 @@ class LongMemEvalJudgeEvaluator(LLMJudgeEvaluator):
         """按官方 `evaluate_qa.py:102-110` 使用 Chat Completions 参数。"""
 
         client = self._get_client()
-        model = self.model or self._get_openai_settings().model
+        api_settings = self._resolve_invocation_settings()
+        model = self.model or api_settings.model
         response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             n=1,
             temperature=0,
             max_tokens=self._provider_completion_limit(10),
+            **api_settings.chat_completions_request_overrides(),
         )
         text = response.choices[0].message.content
         if not isinstance(text, str) or not text.strip():

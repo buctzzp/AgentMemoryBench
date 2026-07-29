@@ -239,6 +239,10 @@ class JudgePromptBuilderTest(unittest.TestCase):
         ).evaluate(self.question, self.prediction, self.gold)
 
         self.assertEqual(client.calls[0]["max_tokens"], 128)
+        self.assertEqual(
+            client.calls[0]["extra_body"],
+            {"thinking": {"type": "disabled"}},
+        )
 
     def test_longmemeval_temporal_prompt_allows_off_by_one_errors(self) -> None:
         """temporal-reasoning 分支应迁移官方 off-by-one 容错规则。"""
@@ -448,6 +452,7 @@ def test_opencodego_generic_judge_uses_chat_completions_transport() -> None:
                 }
             ],
             "temperature": 0,
+            "extra_body": {"thinking": {"type": "disabled"}},
         }
     ]
 

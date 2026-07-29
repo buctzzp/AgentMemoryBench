@@ -49,13 +49,15 @@ LightMem 已关闭的异常样本。只有三类触发器允许重开 benchmark 
 4. **MemoryOS 第三家（已完成）**：PyPI product identity、speaker/provenance sidecar、降级
    审计、shared lifecycle 与五格 8-run smoke 已一次收口，冻结为 `method-frozen-v1`；ChromaDB
    variant 不混入主轨。最终证据从 [`memoryos/README.md`](memoryos/README.md) 进入。
-5. **A-Mem → SimpleMem**：各自补全 product/reproduction identity 后重走 B1-B11。
-6. 现有五家压实后，再接 MemOS、Letta/MemGPT、LangMem、Supermemory；EverOS 最后。
+5. **A-Mem → SimpleMem（已完成）**：各自补全 product/reproduction identity 后重走
+   B1-B11。
+6. **MemOS（已完成）**：typed product handler、官方 LoCoMo 双视角、async exact
+   terminal 与 B7 observation 已冻结；framework W2 因共享 runtime/embedder 判 N/A。
+7. 下一家 Letta/MemGPT，再接 LangMem、Supermemory；EverOS 最后。
 
 ## 当前状态
 
-LightMem、Mem0、MemoryOS、A-Mem、SimpleMem 均已冻结；首批五家状态与证据从父级
-`../../README.md` 恢复胶囊进入。**MemOS 现为唯一 active method**：source lock 已升级为
-官方稳定版 `v2.0.25@e820406`，从 [`memos/README.md`](memos/README.md) 进入，只审
-method-specific 接口/算法差量，不重做 dataset census。权威实时动作仍看父级恢复胶囊与
-最新断点。
+LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS 均已冻结；状态与证据从父级
+`../../README.md` 恢复胶囊进入。当前先关闭机器化 smoke plan/preflight 与强制接入
+清单，再转 Letta/MemGPT；只审 method-specific 接口/算法差量，不重做 dataset census。
+权威实时动作仍看父级恢复胶囊与最新断点。
