@@ -53,13 +53,17 @@ LightMem 已关闭的异常样本。只有三类触发器允许重开 benchmark 
    B1-B11。
 6. **MemOS（已完成）**：typed product handler、官方 LoCoMo 双视角、async exact
    terminal 与 B7 observation 已冻结；framework W2 因共享 runtime/embedder 判 N/A。
-7. 下一家 Letta/MemGPT，再接 LangMem、Supermemory；EverOS 最后。
+7. **Letta/MemGPT M2 离线门已完成**：当前等待用户批准机器生成的 11 个 concrete
+   variant B11 真实 smoke；真实 run 与 artifact gate 关闭后方可冻结。随后接 LangMem、
+   Supermemory；EverOS 最后。
 
 ## 当前状态
 
 LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS 均已冻结；状态与证据从父级
 `../../README.md` 恢复胶囊进入。机器化 smoke plan/preflight 与 ledger v1 强制接入门均已
-落地；[Letta/MemGPT 首份 ledger](letta/notes/letta-integration-ledger.md)已在 adapter 之前打开。
-当前动作是锁定 Letta current 官方 source/harness 并完成 M1 架构裁决；只审
-method-specific 接口/算法差量，不重做 dataset census。
+落地；[Letta/MemGPT ledger](letta/notes/letta-integration-ledger.md)已推进到
+`ready_for_smoke`。Letta M1 source/product identity、M2 product-faithful adapter、五格安全档案、
+11 个 concrete variant 的机器计划与无 API 全量回归均已关闭；当前动作是完成离线提交并把
+B11 预算、规模与 run ids 交用户批准。获批前不得发起 Letta build/answer/judge API；也不重做
+dataset census。
 权威实时动作仍看父级恢复胶囊与最新断点。

@@ -562,6 +562,7 @@ def run_predictions(
                         work_plan=work_plan,
                         system_factory=system_factory,
                         build_context_template=build_context_template,
+                        run_context=run_context,
                         run_id=run_context.run_id,
                         policy=policy,
                         paths=paths,
@@ -584,6 +585,12 @@ def run_predictions(
                     )
                 else:
                     _validate_protocol_version(protocol_version, system)
+                    _validate_consume_granularity(
+                        _manifest_consume_granularity(method_manifest),
+                        system,
+                    )
+                    if work_plan.items:
+                        _prepare_memory_provider(system, run_context)
                     ingest_conversations = [
                         item.conversation
                         for item in work_plan.items
@@ -1348,6 +1355,16 @@ def _cleanup_memory_provider(system: BaseMemorySystem | MemoryProvider) -> None:
         system.cleanup()
 
 
+def _prepare_memory_provider(
+    system: BaseMemorySystem | MemoryProvider,
+    run_context: Any,
+) -> None:
+    """对 v3 provider 调用一次 prepare；legacy system 保持原有语义。"""
+
+    if isinstance(system, MemoryProvider):
+        system.prepare(run_context)
+
+
 def _normalize_memory_system(system: _PredictionSystem) -> BaseMemorySystem | MemoryProvider:
     """把旧 retrieve-first provider 规范化为 v3 MemoryProvider。"""
 
@@ -1622,6 +1639,7 @@ def _run_isolated_worker_pipeline(
         _PredictionSystem,
     ],
     build_context_template: MethodBuildContext,
+    run_context: RunContext,
     policy: PredictionRunPolicy,
     paths: ExperimentPaths,
     progress: ProgressReporter,
@@ -1720,6 +1738,7 @@ def _run_isolated_worker_pipeline(
             future = executor.submit(
                 _isolated_worker,
                 worker_context,
+                run_context,
                 system_factory,
                 tuple(chunk),
                 run_id,
@@ -1902,6 +1921,7 @@ def _run_isolated_worker_pipeline(
 
 def _isolated_worker(
     build_context: MethodBuildContext,
+    run_context: RunContext,
     system_factory: Callable[
         [MethodBuildContext],
         _PredictionSystem,
@@ -1932,6 +1952,8 @@ def _isolated_worker(
     try:
         _validate_protocol_version(protocol_version, system)
         _validate_consume_granularity(consume_granularity, system)
+        if work_items:
+            _prepare_memory_provider(system, run_context)
         results: list[_ConversationAnswerBatch | _ConversationFailureBatch] = []
         consecutive_failures = 0
         for work_item in work_items:

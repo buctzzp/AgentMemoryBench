@@ -36,7 +36,12 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 - **当前动作**：**MemOS 已冻结，机器化 smoke plan/preflight 与新 method ledger v1
   强制门均已关闭；Letta/MemGPT
   [source/product identity M1](branches/method-recertification/letta/notes/letta-current-product-identity-m1-ruling.md)
-  已验收，当前进入 sleeptime-memory product adapter M2**。Letta 主轨锁为 legacy V1
+  与
+  [sleeptime-memory product adapter M2](branches/method-recertification/letta/notes/letta-m2-adapter-checkpoint.md)
+  均已验收，当前位于 **B11 真实 smoke 预算批准门**。Letta ledger 已转
+  `ready_for_smoke`，11 个 concrete variant 的原始 planner JSON、五格 dossier、零 API
+  PostgreSQL/`SyncServer` product chain、扩展定向与主树全量均已闭合；未经用户新批准，不得执行
+  build/answer/judge API。Letta 主轨锁为 legacy V1
   `0.16.8` 内核 + official `ai-memory-sdk v0.2.0` 产品契约，五格均为 framework extension；
   active Letta Code 属算法变体，direct archival 属机制绕行。MemOS source lock 为官方稳定版
   `v2.0.25@e820406`。架构师
@@ -84,8 +89,8 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   [`method-integration-ledger-v1`](notes/method-integration-ledger-v1.md)
   落地：33 个受保护检查点、五格独立记录、状态跃迁与证据入口均有机器门；首份
   [Letta ledger](branches/method-recertification/letta/notes/letta-integration-ledger.md)
-  已在 adapter 前创建。当前转 Letta current 官方 source/harness M1；复用五个 benchmark
-  稳定事实，不重开 raw census，也不把真实 DB/image/HaluMem fine-output 等 pending 能力提前写成 valid。
+  已在 adapter 前创建并经 M1/M2 更新到 `ready_for_smoke`；复用五个 benchmark 稳定事实，
+  不重开 raw census，也不把 source lineage、rank、HaluMem extraction 等 N/A 能力伪造成 valid。
   ledger 门无 API 全量为
   `1923 passed, 3 deselected, 13 warnings, 29 subtests passed in 144.84s`，compileall exit 0。
 - **不可顺手重开**：benchmark raw/canonical/gold 调查、已冻结 25 格、旧

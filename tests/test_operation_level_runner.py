@@ -96,10 +96,16 @@ class OperationFakeProvider(MemoryProvider):
         """初始化调用记录、累积 session 状态与可选逐题 evidence。"""
 
         self.calls: list[tuple[str, str, str | None, int | None]] = []
+        self.prepare_contexts: list[RunContext] = []
         self.ingested_sessions: list[str] = []
         self.write_count = 0
         self.update_write_counts: list[tuple[int, int]] = []
         self.evidence = evidence
+
+    def prepare(self, run_context: RunContext) -> None:
+        """记录 operation-level runner 的单次准备调用。"""
+
+        self.prepare_contexts.append(run_context)
 
     def ingest(self, unit: SessionBatch) -> IngestResult:
         """记录 session batch 写入，并把 session 加入累积状态。"""
@@ -381,6 +387,9 @@ def test_operation_level_runner_drives_three_stages_and_writes_artifacts(
 
     assert summary.completed_conversations == 1
     assert summary.completed_questions == 2
+    assert [context.run_id for context in provider.prepare_contexts] == [
+        "halumem-operation-test"
+    ]
     assert [record["session_ref"]["session_id"] for record in session_reports] == [
         "s1",
         "s-no-question",

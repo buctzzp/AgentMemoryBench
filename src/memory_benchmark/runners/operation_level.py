@@ -186,6 +186,30 @@ def run_operation_level_predictions(
             logger=logger,
         )
 
+        needs_provider = any(
+            not (
+                policy.resume
+                and _conversation_state_status(
+                    conversation_status.get(conversation.conversation_id, {})
+                )
+                == _STATUS_COMPLETED
+            )
+            and not (
+                _conversation_state_status(
+                    conversation_status.get(conversation.conversation_id, {})
+                )
+                == _STATUS_FAILED_INGEST
+                and not policy.retry_failed_conversations
+            )
+            for conversation in selected_conversations
+        )
+        if needs_provider:
+            try:
+                provider.prepare(run_context)
+            except Exception:
+                provider.cleanup()
+                raise
+
         supports_extraction = type(provider).end_session is not MemoryProvider.end_session
         for conversation in selected_conversations:
             state = conversation_status.get(conversation.conversation_id, {})
@@ -235,6 +259,11 @@ def run_operation_level_predictions(
                         "error": str(exc),
                     },
                 )
+                if failure_context.get("stage") != "provider_cleanup":
+                    try:
+                        provider.cleanup()
+                    except Exception as cleanup_exc:
+                        raise cleanup_exc from exc
                 raise
             if efficiency_store is not None:
                 efficiency_store.merge_observations(conversation_observations)

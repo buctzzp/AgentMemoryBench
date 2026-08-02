@@ -3133,6 +3133,7 @@ def test_isolated_worker_pipeline_creates_per_worker_instances(
             work_plan=work_plan,
             system_factory=fake_factory,
             build_context_template=build_ctx,
+            run_context=_create_context(tmp_path),
             policy=policy,
             paths=paths,
             progress=progress,
@@ -3552,6 +3553,7 @@ def test_isolated_worker_marks_failed_conversation_and_continues_work(
                 path_settings=None,
                 storage_root=paths.method_state_dir,
             ),
+            run_context=_create_context(tmp_path),
             policy=PredictionRunPolicy(max_workers=2),
             paths=paths,
             progress=progress,
@@ -3649,6 +3651,7 @@ def test_isolated_worker_stops_after_consecutive_failure_threshold(
                 path_settings=None,
                 storage_root=paths.method_state_dir,
             ),
+            run_context=_create_context(tmp_path),
             policy=PredictionRunPolicy(max_workers=1, max_consecutive_failures=2),
             paths=paths,
             progress=progress,
@@ -4273,6 +4276,7 @@ class _CleanupCountingV3Provider(RecordingV3TurnProvider):
         self,
         *,
         shared_events: list[tuple[str, str]] | None = None,
+        fail_on_prepare: bool = False,
         fail_on_ingest: bool = False,
         fail_on_answer: bool = False,
         fail_on_cleanup: bool = False,
@@ -4280,10 +4284,22 @@ class _CleanupCountingV3Provider(RecordingV3TurnProvider):
         """初始化 cleanup 计数与三个失败注入开关。"""
 
         super().__init__(shared_events=shared_events)
+        self.prepare_calls = 0
         self.cleanup_calls = 0
+        self.fail_on_prepare = fail_on_prepare
         self.fail_on_ingest = fail_on_ingest
         self.fail_on_answer = fail_on_answer
         self.fail_on_cleanup = fail_on_cleanup
+
+    def prepare(self, run_context) -> None:
+        """记录 prepare 调用，并按需注入启动失败。"""
+
+        self.prepare_calls += 1
+        self.shared_events.append(
+            ("prepare", str(getattr(run_context, "run_id", "isolated-worker")))
+        )
+        if self.fail_on_prepare:
+            raise RuntimeError("prepare exploded")
 
     def ingest(self, unit):
         """按需在 ingest 阶段注入失败。"""
@@ -4331,10 +4347,25 @@ def test_shared_v3_provider_is_cleaned_up_once_on_success(tmp_path: Path) -> Non
     provider = _CleanupCountingV3Provider()
     _run_with_cleanup_provider(tmp_path, provider)
 
+    assert provider.prepare_calls == 1
     assert provider.cleanup_calls == 1
     # cleanup 必须在最后一次 retrieve 之后（即答题完成后）才发生。
     kinds = [kind for kind, _ in provider.shared_events]
     assert kinds[-1] == "cleanup"
+
+
+def test_shared_v3_provider_prepare_failure_still_cleans_up_once(
+    tmp_path: Path,
+) -> None:
+    """prepare 失败必须可见，且生命周期保护区仍执行 cleanup。"""
+
+    provider = _CleanupCountingV3Provider(fail_on_prepare=True)
+
+    with pytest.raises(RuntimeError, match="prepare exploded"):
+        _run_with_cleanup_provider(tmp_path, provider)
+
+    assert provider.prepare_calls == 1
+    assert provider.cleanup_calls == 1
 
 
 def test_shared_v3_provider_is_cleaned_up_once_on_ingest_failure(
@@ -4442,7 +4473,11 @@ def test_isolated_worker_v3_provider_is_cleaned_up_once_per_worker(
     )
 
     assert created, "isolated 路径应至少创建一个 worker provider"
+    assert all(provider.prepare_calls == 1 for provider in created)
     assert all(provider.cleanup_calls == 1 for provider in created)
+    assert [
+        value for kind, value in shared_events if kind == "prepare"
+    ] == [context.run_id] * len(created)
 
 
 def test_isolated_worker_v3_provider_is_cleaned_up_once_on_failure(
@@ -4489,7 +4524,11 @@ def test_isolated_worker_v3_provider_is_cleaned_up_once_on_failure(
         )
 
     assert created, "isolated 路径应至少创建一个 worker provider"
+    assert all(provider.prepare_calls == 1 for provider in created)
     assert all(provider.cleanup_calls == 1 for provider in created)
+    assert [
+        value for kind, value in shared_events if kind == "prepare"
+    ] == [context.run_id] * len(created)
 
 
 def test_legacy_base_system_gets_no_cleanup_call(tmp_path: Path) -> None:

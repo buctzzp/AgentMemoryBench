@@ -46,6 +46,14 @@ from .lightmem_adapter import (
     build_lightmem_source_identity,
     clean_lightmem_conversation_state,
 )
+from .letta_adapter import (
+    LETTA_BUILD_LLM_RESPONSE_CONTRACT,
+    LETTA_LLM_MODEL_ID,
+    Letta,
+    LettaConfig,
+    build_letta_source_identity,
+    clean_letta_conversation_state,
+)
 from .mem0_adapter import Mem0, Mem0Config, build_mem0_source_identity
 from .memos_adapter import (
     MEMOS_EMBEDDING_MODEL_ID,
@@ -267,6 +275,111 @@ def _session_consume_granularity(_benchmark_name: str | None) -> ConsumeGranular
     """返回固定 session 消费粒度。"""
 
     return "session"
+
+
+def _build_letta_system(context: MethodBuildContext) -> BaseMemorySystem:
+    """根据统一 build context 构造 Letta sleeptime-memory adapter。"""
+
+    if not isinstance(context.config, LettaConfig):
+        raise ConfigurationError("Letta factory requires LettaConfig")
+    if context.openai_settings is None:
+        raise ConfigurationError("Letta factory requires OpenAI settings")
+    return Letta(
+        config=context.config,
+        path_settings=context.path_settings,
+        storage_root=context.storage_root,
+        openai_settings=context.openai_settings,
+        efficiency_collector=context.efficiency_collector,
+        benchmark_name=context.benchmark_name,
+    )
+
+
+def _letta_model_name(config: Any) -> str:
+    """从 Letta 强类型配置读取 memory build LLM 名称。"""
+
+    if not isinstance(config, LettaConfig):
+        raise ConfigurationError("Letta model getter requires LettaConfig")
+    return config.llm_model
+
+
+def _letta_max_workers(config: Any) -> int:
+    """从 Letta 强类型配置读取 conversation worker 数。"""
+
+    if not isinstance(config, LettaConfig):
+        raise ConfigurationError("Letta worker getter requires LettaConfig")
+    return config.max_workers
+
+
+def _letta_efficiency_model_inventory(config: Any) -> tuple[ModelDescriptor, ...]:
+    """返回 Letta 唯一的 API memory-build LLM 身份。"""
+
+    if not isinstance(config, LettaConfig):
+        raise ConfigurationError("Letta model inventory getter requires LettaConfig")
+    return (
+        ModelDescriptor(
+            model_id=LETTA_LLM_MODEL_ID,
+            model_name=config.llm_model,
+            model_role="memory_build_llm",
+            execution_mode="api",
+            tokenizer_name=config.llm_model,
+        ),
+    )
+
+
+def _letta_efficiency_instrumentation_identity(
+    path_settings: PathSettings,
+    config: Any,
+    source_identity: dict[str, Any],
+) -> dict[str, object]:
+    """返回 Letta worker 逐调用 API usage 插桩身份。"""
+
+    if not isinstance(config, LettaConfig):
+        raise ConfigurationError(
+            "Letta instrumentation identity getter requires LettaConfig"
+        )
+    adapter_path = Path("src/memory_benchmark/methods/letta_adapter.py")
+    worker_path = Path("src/memory_benchmark/methods/letta_worker.py")
+    return {
+        "collector_schema": 1,
+        "wrapper_path": adapter_path.as_posix(),
+        "wrapper_sha256": _sha256_file(path_settings.project_root / adapter_path),
+        "worker_path": worker_path.as_posix(),
+        "worker_sha256": _sha256_file(path_settings.project_root / worker_path),
+        "llm_tokenizer": config.llm_model,
+        "method_source_sha256": source_identity.get("source_sha256"),
+        "exact_api_usage": "worker_openai_response_usage_v1",
+        "build_llm_response_contract": LETTA_BUILD_LLM_RESPONSE_CONTRACT,
+        "retrieval_observation": "core_block_read_wall_clock_v1",
+    }
+
+
+def _clean_letta_failed_ingest_state(
+    context: MethodBuildContext,
+    conversation: Conversation,
+    failed_state: dict[str, Any],
+) -> None:
+    """namespace-scoped 清理 Letta failed-ingest conversation 的产品状态。"""
+
+    run_id = context.storage_root.parent.name
+    storage_root = _resolve_clean_retry_storage_root(context, failed_state)
+    clean_context = MethodBuildContext(
+        config=context.config,
+        openai_settings=context.openai_settings,
+        path_settings=context.path_settings,
+        storage_root=storage_root,
+        benchmark_name=context.benchmark_name,
+    )
+    system = _build_letta_system(clean_context)
+    if not isinstance(system, Letta):
+        raise ConfigurationError("Letta clean hook failed to build Letta adapter")
+    isolation_key = f"{run_id}_{conversation.conversation_id}"
+    try:
+        clean_letta_conversation_state(
+            provider=system,
+            isolation_key=isolation_key,
+        )
+    finally:
+        system.cleanup()
 
 
 def _build_memos_system(context: MethodBuildContext) -> BaseMemorySystem:
@@ -1002,6 +1115,21 @@ def _pending_build_identity(
     )
 
 
+def _letta_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityDeclaration:
+    """声明 Letta 主产品轨没有 embedding；v1 schema 暂以 pending 表达 N/A。
+
+    track identity v1 尚无 ``embedding not_applicable`` 枚举。这里保留所有
+    concrete embedding 字段为 null，拒绝用虚构模型或维度填空；稳定 manifest
+    同时由 Letta config 的 ``embedding_provider=null`` 明示产品事实。
+    """
+
+    if config_manifest.get("embedding_provider") is not None:
+        raise ConfigurationError(
+            "Letta sleeptime core-block profile must not declare an embedding provider"
+        )
+    return _pending_build_identity(provider=None, model=None, dimension=None)
+
+
 def _mem0_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityDeclaration:
     """按当前 Mem0 config 解析 controlled 或真实 product-default build。"""
 
@@ -1326,6 +1454,41 @@ _REGISTRATIONS = {
         retrieval_observation_contract_getter=_separable_retrieval_contract,
         clean_failed_ingest_state=_clean_memoryos_failed_ingest_state,
         build_identity_resolver=_memoryos_build_identity,
+    ),
+    "letta": MethodRegistration(
+        name="letta",
+        task_families=frozenset({TaskFamily.CONVERSATION_QA}),
+        provided_capabilities=frozenset(
+            {
+                MethodCapability.CONVERSATION_ADD,
+                MethodCapability.MEMORY_RETRIEVAL,
+            }
+        ),
+        profile_sections=(
+            ("smoke", "smoke"),
+            ("official-full", "official_full"),
+        ),
+        profile_relative_path=Path("configs/methods/letta.toml"),
+        config_type=LettaConfig,
+        requires_api=True,
+        system_factory=_build_letta_system,
+        source_identity_factory=build_letta_source_identity,
+        model_name_getter=_letta_model_name,
+        max_workers_getter=_letta_max_workers,
+        display_name="Letta/MemGPT",
+        protocol_version="v3",
+        consume_granularity_resolver=_session_consume_granularity,
+        provenance_granularity="none",
+        retrieval_evidence_contract_version="v1",
+        allow_smoke_worker_override=False,
+        efficiency_model_inventory_getter=_letta_efficiency_model_inventory,
+        efficiency_instrumentation_identity_getter=(
+            _letta_efficiency_instrumentation_identity
+        ),
+        retrieval_observation_contract_getter=_separable_retrieval_contract,
+        supports_shared_instance_parallelism=False,
+        clean_failed_ingest_state=_clean_letta_failed_ingest_state,
+        build_identity_resolver=_letta_build_identity,
     ),
     "memos": MethodRegistration(
         name="memos",

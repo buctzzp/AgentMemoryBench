@@ -15,6 +15,7 @@ from memory_benchmark.core import (
     validate_compatibility,
 )
 from memory_benchmark.methods.lightmem_adapter import LightMemConfig
+from memory_benchmark.methods.letta_adapter import LettaConfig
 from memory_benchmark.methods.mem0_adapter import Mem0Config
 from memory_benchmark.methods.memoryos_adapter import MemoryOSPaperConfig
 from memory_benchmark.methods.memos_adapter import MemOSConfig
@@ -35,6 +36,7 @@ def test_registry_lists_conversation_qa_methods() -> None:
 
     assert list_methods() == [
         "amem",
+        "letta",
         "lightmem",
         "mem0",
         "memoryos",
@@ -179,7 +181,15 @@ def test_lightmem_registration_model_inventory_excludes_unused_answer_llm() -> N
 def test_built_in_methods_advertise_memory_retrieval_capability() -> None:
     """retrieve-first prediction 要求内置 method 声明 memory_retrieval。"""
 
-    for method_name in ("mem0", "memoryos", "amem", "lightmem", "simplemem", "memos"):
+    for method_name in (
+        "mem0",
+        "memoryos",
+        "amem",
+        "letta",
+        "lightmem",
+        "simplemem",
+        "memos",
+    ):
         registration = get_method_registration(method_name)
 
         assert MethodCapability.CONVERSATION_ADD in registration.provided_capabilities
@@ -211,6 +221,11 @@ def test_built_in_methods_advertise_memory_retrieval_capability() -> None:
         ("memos", "membench", "session"),
         ("memos", "beam", "session"),
         ("memos", "halumem", "session"),
+        ("letta", "locomo", "session"),
+        ("letta", "longmemeval", "session"),
+        ("letta", "membench", "session"),
+        ("letta", "beam", "session"),
+        ("letta", "halumem", "session"),
     ],
 )
 def test_registration_resolves_concrete_consume_granularity(
@@ -242,6 +257,32 @@ def test_clean_retry_support_is_only_declared_by_methods_with_safe_state_cleanup
     assert get_method_registration("mem0").clean_failed_ingest_state is not None
     assert get_method_registration("simplemem").clean_failed_ingest_state is not None
     assert get_method_registration("memos").clean_failed_ingest_state is not None
+    assert get_method_registration("letta").clean_failed_ingest_state is not None
+
+
+def test_letta_registration_declares_sleeptime_product_contract() -> None:
+    """Letta 注册应固定 session 粒度、W1 与唯一 build LLM。"""
+
+    registration = get_method_registration("letta")
+    config = load_method_profile(
+        "letta",
+        "smoke",
+        project_root=load_path_settings().project_root,
+    )
+
+    assert isinstance(config, LettaConfig)
+    assert registration.profile_names == frozenset({"smoke", "official-full"})
+    assert registration.profile_relative_path == Path("configs/methods/letta.toml")
+    assert registration.requires_api is True
+    assert registration.allow_smoke_worker_override is False
+    assert registration.supports_shared_instance_parallelism is False
+    assert registration.provenance_granularity == "none"
+    assert registration.retrieval_evidence_contract_version == "v1"
+    assert registration.resolve_consume_granularity("locomo") == "session"
+    assert registration.efficiency_model_inventory_getter is not None
+    inventory = registration.efficiency_model_inventory_getter(config)
+    assert [entry.model_id for entry in inventory] == ["letta-build-llm"]
+    assert [entry.model_role for entry in inventory] == ["memory_build_llm"]
 
 
 def test_clean_retry_hook_uses_failed_worker_state_for_isolated_runs(

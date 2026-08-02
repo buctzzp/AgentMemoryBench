@@ -125,7 +125,25 @@ def test_ready_for_smoke_rejects_early_pending_gate(tmp_path: Path) -> None:
     )
     metadata = dict(source.metadata)
     metadata["ledger_state"] = "ready_for_smoke"
-    premature = replace(source, path=ledger_path, metadata=metadata)
+    checkpoints = tuple(
+        replace(
+            checkpoint,
+            status="PENDING",
+            record=(
+                "evidence=[待闭合](pending.md); ruling=TOML identity 尚未完成; "
+                "next=补齐 TOML 与 manifest"
+            ),
+        )
+        if checkpoint.checkpoint_id == "B10-TOML-MANIFEST"
+        else checkpoint
+        for checkpoint in source.checkpoints
+    )
+    premature = replace(
+        source,
+        path=ledger_path,
+        metadata=metadata,
+        checkpoints=checkpoints,
+    )
 
     with pytest.raises(LedgerValidationError, match="pre-smoke PENDING"):
         validate_instance(ROOT, template, premature)

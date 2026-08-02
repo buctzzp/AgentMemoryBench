@@ -31,10 +31,14 @@
 
 1. **retrieval recall = N/A 永久声明**（evidence 无 turn id，禁文本相似度造 gold
    映射——H4 裁决）；对所有 method 无 recall。
-2. **需要 memory_point 报告能力**（B2 特例）：提取/更新探针要求 method 在 session
-   边界报告"本 session 产出了哪些记忆"。当前唯一现成通路 = Mem0 的 `end_session`
-   →`SessionMemoryReport`（mem0 实例 §0）；LightMem/其他家待核 add 返回值。
-   **没有该能力的 method 在 HaluMem 的提取/更新阶段怎么处理，是每个 M 阶段必答题**。
+2. **extraction 与 update 的能力门不能混为一谈**（B2 特例）：
+   - extraction 要求 method 在 session 边界报告“本 session 产出了哪些记忆”，现成协议是
+     `end_session → SessionMemoryReport`；没有无损 session-local delta 就必须 N/A；
+   - update 不消费 `SessionMemoryReport`。官方流程在写入该 session 后，用更新后的
+     `memory_content` 查询 method 的**当前记忆状态**，再由 judge 判定旧事实是否被正确替换。
+     因而演化/合并后的记忆只要能经产品 readout/search 返回，就可以测 update；它不要求
+     source-turn lineage，也不能因 Recall/NDCG 为 N/A 而连坐成 N/A。
+   **没有 session report 的 method 仍可能具备 update 资格**，必须逐 operation 独立裁定。
    **官方 harness 喂法全景已取证（M0-5，2026-07-13）**：六 wrapper 全 session 级
    批量注入；收集口径三型 = add 返回（Mem0/MemOS）、事后按 id/上下文读取
    （Supermemory/Zep）、**force flush + 时间窗 DB 增量**（Memobase）；收集不完整
