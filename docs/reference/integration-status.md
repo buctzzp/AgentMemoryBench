@@ -6,10 +6,10 @@
 > （benchmark=A1-A8、method=B1-B11）。**每次接入/冻结/发现特殊情况,更新本文对应行。**
 > 状态图例：✅ 过并留痕 / 🟡 进行中或部分 / ⬜ 未开始 / N/A 不适用（附因）。
 >
-> **三层结构（2026-07-13 用户二次拍板补全）**：模板（checklist）→ 本文（勾选总表，
-> 一眼看谁过了哪项）→ **`integration/` 逐实体实例文档**（每 method / benchmark 一份，
-> 逐项展开证据 + `文件:行号` 锚 + method 的**接口调用面黑盒拆解**）。表中名字即链接；
-> 勾选变化与实例文档必须同步更新。
+> **四层结构（2026-08-02 ledger v1 升级）**：政策模板（checklist）→ 新 method 的
+> **逐项执行 ledger**（33 格状态/证据/裁决/下一动作）→ 本文（勾选总表，一眼看谁过了哪项）
+> → **`integration/` 稳定实例文档**（经架构师验收的接口与能力事实）。表中名字即链接；
+> 勾选变化、ledger 与稳定页必须同步。ledger 机器门只证明没漏格，不替代一手证据验收。
 >
 > **2026-07-17 配置政策更新：**B9-B11 不再按全局 `unified/native` 双流水线判定；现行判据是
 > 一个 method TOML、跨五 benchmark 的主 section、稀疏 `author_<benchmark>` section 与
@@ -61,8 +61,8 @@ ws02.6 于 2026-07-12 将五家全部 frozen-v1；2026-07-15 MemBench 因 100k m
 | [MemoryOS](integration/memoryos.md) | ✅ | ✅PyPI；Chroma=reproduction variant | ✅pair/session | ✅物理 | ✅全层+时间 | ✅turn + M0 v1 | ✅no-op | ✅五格 prediction+judge 实测 | ✅降级审计 | ✅当前 MiniLM smoke build | ✅current 身份 truthful；author builder 待迁 | ✅五格 8 run 开箱 | **method-frozen-v1** |
 | [A-Mem](integration/amem.md) | ✅ | ✅官方 general product | ✅turn | ✅conversation 物理隔离 | ✅speaker/role/time/caption | ✅审计 lineage；evolved memory retrieval metric=N/A | ✅同步 add/evolution | ✅五格 prediction+judge 实测 | ✅fail-fast+clean retry | ✅product MiniLM-384 | ✅主 TOML | ✅五格 11 run 开箱 | **method-frozen-v1** |
 | [SimpleMem](integration/simplemem.md) | ✅ | ✅官方 text product | ✅turn | ✅conversation 物理隔离 | ✅speaker/content/time/caption | ✅合成 memory provenance=N/A；ranking pending | ✅conversation/session finalize | ✅五格 prediction+judge 实测 | ✅兼容 patch+clean retry | ✅controlled MiniLM-384 | ✅主 TOML；build 串行 | ✅五格 11 run 开箱 | **method-frozen-v1** |
-| [MemOS](integration/memos.md) | ✅ | ✅product typed handler | ✅session | 🟡真实 DB 待 B11 | ✅五格 offline payload | 🟡provenance/ranking pending | ✅async task terminal | 🟡真实 judge 待 B11 | ✅fail-closed + namespace clean | ✅MiniLM-384 | ✅主 TOML | 🟡M4 complete；B11 pending | **adapter-m4** |
-| Letta/MemGPT | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
+| [MemOS](integration/memos.md) | ✅ | ✅v2.0.25 typed product | ✅session；LoCoMo 双视角内切 2 | ✅W1 namespace；W2 N/A | ✅五格真实 payload/readout | 🟡provenance/ranking pending | ✅async exact terminal | ✅build/retrieve/answer/judge 实测 | ✅fail-closed + namespace clean | ✅MiniLM-384 + runtime 分 profile | ✅主 TOML | ✅五格真实 smoke + B7 refill | **method-frozen-v1** |
+| [Letta/MemGPT](integration/letta.md) | ⬜ | 🟡ledger 已开，source lock 待核 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | **in-progress** |
 | LangMem | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | Supermemory | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | [EverOS](integration/everos.md) | ✅vendored | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |

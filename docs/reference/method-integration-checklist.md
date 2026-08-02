@@ -7,6 +7,15 @@
 > （playbook 原则 #4/#11）。benchmark 侧五家已按此隐式走完并 frozen-v1，
 > 本文把它显式化，并新增 method 侧标准。
 
+> **ledger v1 强制门（2026-08-02 起）**：本文定义“什么算完成”，但不再假定
+> 判据写在磁盘上就一定会被逐项执行。每家新 method 在 M-1 取证前必须复制
+> [`templates/method-integration-ledger.md`](templates/method-integration-ledger.md) 到自己的
+> `method-recertification/<method>/notes/`，逐格维护 `PASS/N/A/PENDING/BLOCKED`、一手证据、
+> 架构裁决与下一动作。运行
+> `uv run python scripts/validate_method_integration_ledgers.py --root .` 校验漏格、状态越级和
+> 假完成；机器只验证完整性，证据真实性仍由架构师强验收。ledger v1 生效前已经冻结的六家
+> 不为整理历史而回填，后续新 method/config 自动进入强制门。
+
 ## A. Benchmark 接入完成判据（已由五家 frozen-v1 验证的模板）
 
 一个 benchmark 达到 `frozen-v1` = 以下全部有一手锚 + 架构师验收：
@@ -271,7 +280,9 @@ B2/B5 及 HaluMem memory_point 这类**能力缺口**（method 接口不支持�
   真实测试烧钱 → 离线测试先行（已有），真实 resume 验证等预算批复后随
   cost-probe/全量一起做，不阻塞 method-frozen-v1（作为已声明缺口记录）。
 - 冻结门：全量 pytest + compileall + 上述五件套 smoke + 成本观测 →
-  写 `notes/<method>-frozen-v1.md`。
+  写 `notes/<method>-frozen-v1.md`。对 ledger v1 method，冻结前还必须把
+  `ledger_state` 改为 `frozen`、清空全部 `PENDING/BLOCKED`、填写 dossier/frozen note
+  路径，并让 frozen note 回链该 ledger；校验器不通过不得改总表为 frozen。
 - **对表仪式（2026-07-14 用户抓漏后固化，playbook #23）**：架构师宣布
   "下一步=frozen/收口"**之前**，必须重读本节判据原文 + integration-status
   对应行，逐项输出缺项清单（含：五格主 smoke、适用的作者配置、五件套×每格、并行冒烟、

@@ -38,6 +38,10 @@
 - 想生成不会误带 HaluMem 裁剪轴、错误 worker 或 variant run-id 的 smoke 命令：
   先运行 `uv run memory-benchmark plan-smoke --help`；强制门见
   `reference/method-integration-checklist.md` B11。
+- 想接入一家新 method：先复制
+  `reference/templates/method-integration-ledger.md`，再按
+  `reference/method-onboarding-assembly-line.md` 推进；运行
+  `uv run python scripts/validate_method_integration_ledgers.py --root .` 检查漏格与状态越级。
 - 想跑命令、查代码结构：`CLAUDE.md`。
 - 想比较 actor 的真实交付：`reference/actor-performance-ledger.md`（任务级样本，不是
   脱离卡难度的模型神榜）。

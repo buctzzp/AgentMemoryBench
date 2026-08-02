@@ -33,8 +33,8 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   已通过守恒门。无 API 全量：
   `1685 passed, 3 deselected, 1 warning, 29 subtests passed in 128.11s`；
   compileall exit 0。唯一 warning 是既有 vendored LightMem Pydantic deprecation。
-- **当前动作**：**MemOS 已冻结，机器化 smoke plan/preflight 已关闭；现重做新 method
-  强制接入 ledger，随后转 Letta/MemGPT**。MemOS source lock 为官方稳定版
+- **当前动作**：**MemOS 已冻结，机器化 smoke plan/preflight 与新 method ledger v1
+  强制门均已关闭；当前进入 Letta/MemGPT source/harness M1**。MemOS source lock 为官方稳定版
   `v2.0.25@e820406`。架构师
   [最终裁定](branches/method-recertification/memos/notes/memos-v2.0.25-m1-final-ruling.md)
   锁定的 `tree_text + MultiModalStruct + typed handlers +
@@ -76,9 +76,14 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   operation-level W1、multi-variant child run-id、method worker 资格与 evaluator 集合
   均从 registry/TOML 生成，B11 禁止继续手写命令。最新无 API 全量：
   `1917 passed, 3 deselected, 13 warnings, 29 subtests passed in 160.69s`，
-  compileall exit 0。当前只剩**新 method 强制接入 ledger**，随后接 Letta/MemGPT。
-  复用五个 benchmark 稳定事实，不重开 raw census，也不把真实 DB/image/HaluMem
-  fine-output 等 pending 能力提前写成 valid。
+  compileall exit 0。ledger v1 随后以
+  [`method-integration-ledger-v1`](notes/method-integration-ledger-v1.md)
+  落地：33 个受保护检查点、五格独立记录、状态跃迁与证据入口均有机器门；首份
+  [Letta ledger](branches/method-recertification/letta/notes/letta-integration-ledger.md)
+  已在 adapter 前创建。当前转 Letta current 官方 source/harness M1；复用五个 benchmark
+  稳定事实，不重开 raw census，也不把真实 DB/image/HaluMem fine-output 等 pending 能力提前写成 valid。
+  ledger 门无 API 全量为
+  `1923 passed, 3 deselected, 13 warnings, 29 subtests passed in 144.84s`，compileall exit 0。
 - **不可顺手重开**：benchmark raw/canonical/gold 调查、已冻结 25 格、旧
   `config_track` 兼容、legacy bridge/resume、BLEU/ROUGE/Precision 新公式。
 - **恢复当前结构任务只读**：上方 M0 ruling；需要追溯某家 method 才读下表对应 frozen note。

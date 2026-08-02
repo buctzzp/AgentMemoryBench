@@ -150,7 +150,7 @@
 | 问题 | 首读 |
 | --- | --- |
 | 当前做什么 | `docs/roadmap.md` → 活跃 workstream README 热层 |
-| method 接入 | `method-onboarding-assembly-line.md` + checklist + method integration |
+| method 接入 | `method-onboarding-assembly-line.md` + checklist + `templates/method-integration-ledger.md` + method integration |
 | benchmark 事实 | `docs/survey/README.md` 路由到三联页 |
 | 指标资格 | `metric-extension-plan.md` + retrieval-metrics branch |
 | 配置/prompt | `method-toml-and-answer-builder-policy.md` |

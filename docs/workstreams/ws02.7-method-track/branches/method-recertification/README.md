@@ -58,6 +58,8 @@ LightMem 已关闭的异常样本。只有三类触发器允许重开 benchmark 
 ## 当前状态
 
 LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS 均已冻结；状态与证据从父级
-`../../README.md` 恢复胶囊进入。当前先关闭机器化 smoke plan/preflight 与强制接入
-清单，再转 Letta/MemGPT；只审 method-specific 接口/算法差量，不重做 dataset census。
+`../../README.md` 恢复胶囊进入。机器化 smoke plan/preflight 与 ledger v1 强制接入门均已
+落地；[Letta/MemGPT 首份 ledger](letta/notes/letta-integration-ledger.md)已在 adapter 之前打开。
+当前动作是锁定 Letta current 官方 source/harness 并完成 M1 架构裁决；只审
+method-specific 接口/算法差量，不重做 dataset census。
 权威实时动作仍看父级恢复胶囊与最新断点。

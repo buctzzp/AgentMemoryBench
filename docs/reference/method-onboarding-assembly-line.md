@@ -6,6 +6,24 @@
 > 判据模板仍是 `method-integration-checklist.md`（B1-B11）,本文只管
 > **怎么走得快**。
 
+## 零、先实例化 ledger，再开始取证（2026-08-02 强制）
+
+新 method 的第一项改动不是 adapter，而是复制
+[`templates/method-integration-ledger.md`](templates/method-integration-ledger.md) 到
+`docs/workstreams/ws02.7-method-track/branches/method-recertification/<method>/notes/`。
+它把 B0-B11 拆成 33 个不可漏检查点，并给五 benchmark 各留独立格；每格必须写状态、证据、
+裁决和下一动作。M-1/M-2/B11 都更新**同一份 living ledger**，不再分别造一张互相漂移的清单。
+
+机器门：
+
+```bash
+uv run python scripts/validate_method_integration_ledgers.py --root .
+```
+
+任何新 method 支线或 TOML 没有 ledger、少一格、无证据写 PASS、前置门未闭合却宣布
+`ready_for_smoke`，都会 fail-fast。机器门只防遗漏与状态造假；官方 harness 是否读对、
+lineage 是否语义有效，仍由架构师亲读一手源码裁决。ledger v1 之前冻结的六家不追补历史账。
+
 ## 一、已付清的一次性资产（后续 method 白嫖清单）
 
 接新 method 前先读这个清单,**别为已解决的问题再立卡**：
@@ -44,13 +62,14 @@
 
 ```
 M-1 取证卡（actor,零生产代码,产出 notes/m1-<m>-evidence.md）
-  → 架构师裁决一次过（B2 粒度/B3 隔离/B5 策略确认/B6 姿态/B9 口径/native 注册面）
+  + 回填同一份 integration ledger 的 B0-B10/GRID-* 格
+  → 架构师裁决一次过（B2 粒度/B3 隔离/B5 策略确认/B6 姿态/B9 口径/官方注册面）
 M-2 施工卡（actor,adapter 对齐 v3 + registry 声明 + provenance 改造 +
   halumem wrapper + 测试;大卡,允许 1-2 轮往返）
   → 架构师强验收一次（全 diff + 主树全量,不可省——硬规则）
 五格 smoke（用户跑付费 predict/evaluate;架构师跑免费评 + 五件套产物检查,
-  五格可攒到 1-2 个回合集中看）
-frozen note（架构师,短;声明缺口如实列）
+  五格可攒到 1-2 个回合集中看；命令只来自 plan-smoke）
+frozen note（架构师,短;声明缺口如实列）+ ledger_state=frozen + 机器门
 ```
 
 - **并行政策**：不同 method 的 adapter 文件/实例文档/测试文件天然不相交,
