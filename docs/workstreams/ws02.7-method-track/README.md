@@ -1,7 +1,7 @@
 ---
 id: ws02.7
 parent: ws02
-status: in-progress（首批 6 method frozen；Letta/LangMem 离线门完成；Supermemory source-blocked；EverOS 待启动）
+status: in-progress（首批 6 method frozen；Letta/LangMem 离线门完成；Supermemory source-blocked；EverOS M1 已关闭、M2 进行中）
 created: 2026-07-12
 ---
 # ws02.7 Method Track M0
@@ -33,8 +33,15 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   已通过守恒门。无 API 全量：
   `1685 passed, 3 deselected, 1 warning, 29 subtests passed in 128.11s`；
   compileall exit 0。唯一 warning 是既有 vendored LightMem Pydantic deprecation。
-- **当前动作**：**MemOS 已冻结，机器化 smoke plan/preflight 与新 method ledger v1
-  强制门均已关闭；Letta/MemGPT
+- **当前动作**：**EverOS M1 已验收，当前进入 M2 离线 adapter 门**。source/product/harness
+  判据见
+  [M1 裁决](branches/method-recertification/everos/notes/everos-current-source-product-m1-ruling.md)，
+  每项状态只更新
+  [EverOS ledger](branches/method-recertification/everos/notes/everos-integration-ledger.md)。主轨锁定
+  `v1.2.1@4256419`、官方 lifespan 内 typed product service；M2 先关闭 assistant-only owner、
+  missing source time、exact drain、lineage/readout、worker isolation 与五格零 API 强反例，未经
+  用户新批准不发起真实 build/embedding/rerank/answer/judge API。既有基线：MemOS 已冻结，
+  机器化 smoke plan/preflight 与新 method ledger v1 强制门均已关闭；Letta/MemGPT
   [source/product identity M1](branches/method-recertification/letta/notes/letta-current-product-identity-m1-ruling.md)
   与
   [sleeptime-memory product adapter M2](branches/method-recertification/letta/notes/letta-m2-adapter-checkpoint.md)

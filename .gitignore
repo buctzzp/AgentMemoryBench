@@ -50,6 +50,7 @@ third_party/methods/cognee/
 third_party/methods/langmem/
 third_party/methods/letta/
 third_party/methods/supermemory/
+third_party/methods/EverOS/
 third_party/methods/**/.git/
 third_party/methods/**/.github/
 third_party/methods/**/__pycache__/

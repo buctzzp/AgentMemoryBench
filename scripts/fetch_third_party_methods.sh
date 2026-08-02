@@ -43,3 +43,4 @@ fetch_method "cognee" "https://github.com/topoteretes/cognee.git" "f7e2267cf02f5
 fetch_method "langmem" "https://github.com/langchain-ai/langmem.git" "56d85939d80bb731bd5e237567148d817d7bfd16"
 fetch_method "letta" "https://github.com/letta-ai/letta.git" "b76da9092518cbaa2d09042e52fdcbde69243e18"
 fetch_method "supermemory" "https://github.com/supermemoryai/supermemory.git" "566be208981aa23ef20a85fd50a737861b1b10b2"
+fetch_method "EverOS" "https://github.com/EverMind-AI/EverOS.git" "4256419595f63fe307147dc19e379477cecdc44f"
