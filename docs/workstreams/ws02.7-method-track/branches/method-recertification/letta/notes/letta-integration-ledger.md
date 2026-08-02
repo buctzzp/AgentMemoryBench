@@ -19,11 +19,11 @@ frozen_note: none
 <!-- ledger-checkpoints:start -->
 | ID | 完成判据 | Status | 证据、裁决与下一动作 |
 | --- | --- | --- | --- |
-| B0-OFFICIAL-BENCHMARKS | 当前官方 repo 实际跑过的 benchmark、入口和版本已穷举，未跑过者标 framework extension | PENDING | evidence=[B0 判据](../../../../../../reference/method-integration-checklist.md#b0-官方评测-harness-parity-matrix写-adapter-前的前置门); ruling=current upstream 尚未联网锁定，不声明官方覆盖范围; next=核实官方组织、仓库、release 后穷举 eval 与 benchmark 入口 |
-| B0-FINAL-PAYLOAD | 每个官方 harness 展开后的 add 次数、batch、role、namespace、时间、模型参数和 search 最终 payload 已锁 | PENDING | evidence=[B0 判据](../../../../../../reference/method-integration-checklist.md#b0-官方评测-harness-parity-matrix写-adapter-前的前置门); ruling=尚无 current payload 一手锚; next=从官方 harness 追到最终 product add/search payload 并记录文件行号 |
-| B0-DIFFERENCE-RULING | 主轨、author 轨、framework extension、upstream bug 的每项差异已唯一归类 | PENDING | evidence=[配置政策](../../../../../../reference/method-toml-and-answer-builder-policy.md); ruling=没有 payload matrix 前不提前划轨; next=完成 B0 payload 后逐差异裁定唯一身份 |
-| B1-SOURCE-LOCK | 官方 repo、tag、commit、license、vendored 路径、patch 和更新策略已锁定 | PENDING | evidence=[来源锁判据](../../../../../../reference/method-integration-checklist.md#b1-来源锁与接口选择); ruling=旧 MemGPT 与 current Letta 身份可能漂移，当前不沿用历史印象; next=联网核实最新官方 GitHub、稳定 release、license 与可复现 commit |
-| B1-PRODUCT-SURFACE | ingest/retrieve 采用通用产品接口，并解释为何不用 chat、ask、eval、cloud 或 HTTP 专用入口 | PENDING | evidence=[产品接口判据](../../../../../../reference/method-integration-checklist.md#b1-来源锁与接口选择); ruling=尚未裁定 local core、SDK、server 或 archival-memory surface; next=枚举 current product 写入与只读检索接口及其算法调用链 |
+| B0-OFFICIAL-BENCHMARKS | 当前官方 repo 实际跑过的 benchmark、入口和版本已穷举，未跑过者标 framework extension | PASS | evidence=[M1 §2-3](./letta-current-product-identity-m1-ruling.md); ruling=六个 current official repo 对 Phase 1 五 benchmark 均无 harness，五格统一标 framework extension，旧 paper/第三方 MemoryData 不冒充 current harness; next=none |
+| B0-FINAL-PAYLOAD | 每个官方 harness 展开后的 add 次数、batch、role、namespace、时间、模型参数和 search 最终 payload 已锁 | N/A | evidence=[M1 §3-4](./letta-current-product-identity-m1-ruling.md); ruling=Phase 1 官方 harness 集为空，故不存在 author benchmark payload；另已锁 official ai-memory-sdk 产品 payload 供 framework extension 设计; next=none |
+| B0-DIFFERENCE-RULING | 主轨、author 轨、framework extension、upstream bug 的每项差异已唯一归类 | PASS | evidence=[M1 §1、§3、§5](./letta-current-product-identity-m1-ruling.md); ruling=五格主轨是 product-faithful framework extension；Letta Code 是 ALGORITHM_VARIANT；direct archival 是 MECHANISM_BYPASS；当前无 author 轨; next=none |
+| B1-SOURCE-LOCK | 官方 repo、tag、commit、license、vendored 路径、patch 和更新策略已锁定 | PASS | evidence=[M1 §2](./letta-current-product-identity-m1-ruling.md); ruling=Apache-2.0 legacy Letta 0.16.8 product core，保留本地 b76da909 pin；ai-memory-sdk v0.2.0 锁产品契约；只以 product diff 触发重开; next=none |
+| B1-PRODUCT-SURFACE | ingest/retrieve 采用通用产品接口，并解释为何不用 chat、ask、eval、cloud 或 HTTP 专用入口 | PASS | evidence=[M1 §4-5](./letta-current-product-identity-m1-ruling.md); ruling=in-process V1 core 复现 official sleeptime-memory call graph，等终态后读全部 core blocks；不用 HTTP/cloud、answer loop 或 direct archival bypass; next=none |
 | B1-LIFECYCLE-CALLGRAPH | prepare、ingest、retrieve、finalize、cleanup 的 runner 真实调用点和早失败路径已逐一闭合 | PENDING | evidence=[生命周期判据](../../../../../../reference/method-integration-checklist.md#b1-来源锁与接口选择); ruling=尚未形成 Letta runtime owner 与 runner 调用图; next=在接口选择后反查五个 hook 的真实调用与失败清理路径 |
 | B2-GRANULARITY | 原生输入单元、consume_granularity、placeholder、session 边界和尾部残项处理已裁定 | PENDING | evidence=[B2 判据](../../../../../../reference/method-integration-checklist.md#b2-注入粒度consume_granularity); ruling=不从其他 method 的 turn、pair 或 session 结论外推; next=核 product message ingestion 与官方 harness 的真实 batching |
 | B3-ISOLATION-CLEAN | 物理或逻辑隔离的写入、过滤、单空间删除和 clean-retry 等价性已证明 | PENDING | evidence=[B3 判据](../../../../../../reference/method-integration-checklist.md#b3-隔离方式物理-vs-逻辑); ruling=namespace 与删除能力未审，暂不宣称并行安全; next=取证 agent/user/block namespace 的写检删三链及失败态清理 |
@@ -57,5 +57,6 @@ frozen_note: none
 ## 架构师签字
 
 - 当前 ledger 状态：`in_progress`
-- 当前事实边界：仅确认 Letta/MemGPT 是 Phase 1 下一家 method；current upstream 身份尚待联网锁定。
-- 架构师判词：`LEDGER_OPENED_BEFORE_SOURCE_AUDIT`。
+- 当前事实边界：M1 已锁 current source、官方五格覆盖为零、Letta Code 分轨与
+  `ai-memory-sdk` sleeptime-memory 主产品接口；adapter/lifecycle/metric/五格/B11 尚未完成。
+- 架构师判词：`LETTA_M1_PRODUCT_IDENTITY_ACCEPTED`。

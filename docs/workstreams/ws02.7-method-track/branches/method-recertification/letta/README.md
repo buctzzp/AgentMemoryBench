@@ -10,8 +10,9 @@ metric 资格、真实 smoke 与冻结。五家 benchmark 的 raw schema、canon
 
 1. [接入 ledger](notes/letta-integration-ledger.md)：先填 B0/B1 source 与 official harness，
    再写 adapter；任何 `BLOCKED` 立即停工。
-2. M1 一手取证与架构裁决：算法、产品 surface、lifecycle、namespace、readout、官方
-   benchmark harness。
+2. [M1 current product identity 裁决](notes/letta-current-product-identity-m1-ruling.md)：已锁
+   source、官方五格覆盖、Letta Code 分轨与 sleeptime-memory 主产品接口；lifecycle、namespace、
+   readout 和 metric 的生产证据继续由 M2 闭合。
 3. M2 adapter + 五格 production-path 强反例。
 4. `plan-smoke` 机器计划 → 用户批准真实 API → B11 artifact gate → frozen note。
 

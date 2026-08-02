@@ -34,7 +34,11 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   `1685 passed, 3 deselected, 1 warning, 29 subtests passed in 128.11s`；
   compileall exit 0。唯一 warning 是既有 vendored LightMem Pydantic deprecation。
 - **当前动作**：**MemOS 已冻结，机器化 smoke plan/preflight 与新 method ledger v1
-  强制门均已关闭；当前进入 Letta/MemGPT source/harness M1**。MemOS source lock 为官方稳定版
+  强制门均已关闭；Letta/MemGPT
+  [source/product identity M1](branches/method-recertification/letta/notes/letta-current-product-identity-m1-ruling.md)
+  已验收，当前进入 sleeptime-memory product adapter M2**。Letta 主轨锁为 legacy V1
+  `0.16.8` 内核 + official `ai-memory-sdk v0.2.0` 产品契约，五格均为 framework extension；
+  active Letta Code 属算法变体，direct archival 属机制绕行。MemOS source lock 为官方稳定版
   `v2.0.25@e820406`。架构师
   [最终裁定](branches/method-recertification/memos/notes/memos-v2.0.25-m1-final-ruling.md)
   锁定的 `tree_text + MultiModalStruct + typed handlers +
