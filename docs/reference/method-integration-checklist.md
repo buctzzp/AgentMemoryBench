@@ -226,6 +226,15 @@ B2/B5 及 HaluMem memory_point 这类**能力缺口**（method 接口不支持�
 ### B11. 主配置 smoke + 冻结
 - 5×10 主 smoke 只要求 `smoke` section；作者配置不属于冻结必填矩阵。首个作者校准 run 或
   真实效果 full run 前，再完成 author section、完整 builder 与旧 `config_track` 迁移。
+- **机器计划门（2026-07-29）**：禁止架构师/actor 凭记忆手写 B11 smoke 命令。
+  每个 concrete variant 必须先运行
+  `uv run memory-benchmark plan-smoke --root . --method <m> --benchmark <b>
+  --variant <v> --run-id <base>`，审阅并保存 `smoke-plan-v1` JSON，再逐字执行其中
+  `predict_argv` 与 `evaluate_argv`。shape、历史轴、默认裁剪、真实 child run-id、
+  worker 资格与 evaluator 集合均以 registry/TOML 为单一事实源；不得从上一家 method
+  命令复制。HaluMem 是固定 `4-session/1-QA/W1` operation-level shape，生成命令不得出现
+  任何裁剪旗标。planner 自身必须在无 `.env`、无 runtime、无 API 条件下完成；未通过
+  preflight 不得启动付费 smoke。
 - 进入真实 smoke 前重读 B0 parity matrix：逐个官方 benchmark 核对 main/author/
   extension/upstream-bug 四类归属仍与**当前 source lock**一致；任何“已记录但未裁”
   的 namespace、batch、search layer/top-k、偏好开关或完整 builder 差异都会阻塞冻结。
@@ -275,3 +284,5 @@ B2/B5 及 HaluMem memory_point 这类**能力缺口**（method 接口不支持�
 - 冻结后推翻走版本化（frozen-v2）+ 影响分析 + 重跑，不在 adapter 内打
   格子专用补丁。
 - resume/smoke/隔离清理是**框架**职责，不是 adapter。
+- 反复靠 CLI 报错才能记起的规则必须升级为 registry/schema/planner 契约；文档提醒只能解释
+  原因，不能充当执行门。

@@ -54,6 +54,9 @@
 10. **N/A 是能力结论**：不为填矩阵伪造 provenance、item、ranking 或接口。
 11. **开箱验货**：零报错只说明没炸；必须核 state、prompt、artifact、metric、效率和隔离。
 12. **完成前对表**：宣布 frozen/closed 前重新读取 checklist 与 integration 状态。
+13. **不要把人脑当 preflight**：同类命令第二次因固定 shape、variant suffix 或 worker
+   资格撞墙，就把约束升格为 registry/schema，并由机器生成命令。B11 smoke 一律先跑
+   `plan-smoke`，禁止复制上一格命令再人工删参数。
 
 完整 33 条历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

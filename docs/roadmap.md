@@ -47,8 +47,9 @@ runtime/embedder 的真实竞态判 N/A，主 profile 固定 W1。
 [架构减重审计](workstreams/ws03-architecture-slimming/notes/2026-07-23-first-25-cell-consolidation-audit.md)：
 先清临时事实源、盘点活跃 legacy。用户随后明确“整治不只是删除”，
 [结构归一 M0](workstreams/ws03-architecture-slimming/notes/2026-07-23-structural-normalization-m0-ruling.md)
-已完成 evaluator/prompt/文档的零语义迁移与全量守恒门；MemOS 随后已冻结，现补
-机器化 smoke preflight 与新 method 强制接入清单，再转 Letta/MemGPT。
+已完成 evaluator/prompt/文档的零语义迁移与全量守恒门；MemOS 随后已冻结，
+registry-backed `plan-smoke` preflight 也已关闭，现补新 method 强制接入 ledger，
+再转 Letta/MemGPT。
 
 ## Workstream 索引
 

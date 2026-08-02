@@ -65,16 +65,18 @@ class BenchmarkSmokePolicy:
     `history_axis` 是该 benchmark 自然的历史裁剪单位（round/turn/session/
     source 文件），CLI 只接受与该轴匹配的参数，其余轴一律 fail-fast，避免
     “全局 20”假装所有 benchmark 共享同一种历史语义（本任务修复的具体 bug，
-    见 `BenchmarkLoadRequest.smoke_turn_limit` 的历史默认值）。
+    见 `BenchmarkLoadRequest.smoke_turn_limit` 的历史默认值）。`shape_mode=fixed`
+    表示这些数值是不可覆盖的哨兵说明，不应渲染成 CLI 裁剪旗标。
     """
 
     history_axis: Literal["rounds", "turns", "sessions", "sources"]
     default_history_limit: int
     default_isolation_limit: int = 1
     default_question_limit: int = 1
+    shape_mode: Literal["croppable", "fixed"] = "croppable"
 
     def __post_init__(self) -> None:
-        """校验历史轴取值合法，且三个默认预算都是正整数。"""
+        """校验历史轴、shape mode 与三个正整数默认预算。"""
 
         if self.history_axis not in _SMOKE_HISTORY_AXES:
             allowed = ", ".join(sorted(_SMOKE_HISTORY_AXES))
@@ -93,6 +95,10 @@ class BenchmarkSmokePolicy:
             raise ConfigurationError(
                 "BenchmarkSmokePolicy.default_question_limit must be at least 1"
             )
+        if self.shape_mode not in {"croppable", "fixed"}:
+            raise ConfigurationError(
+                "BenchmarkSmokePolicy.shape_mode must be 'croppable' or 'fixed'"
+            )
 
     def to_dict(self) -> dict[str, object]:
         """转换为可写入 manifest/dataset metadata 的稳定字典。"""
@@ -102,6 +108,7 @@ class BenchmarkSmokePolicy:
             "default_history_limit": self.default_history_limit,
             "default_isolation_limit": self.default_isolation_limit,
             "default_question_limit": self.default_question_limit,
+            "shape_mode": self.shape_mode,
         }
 
 

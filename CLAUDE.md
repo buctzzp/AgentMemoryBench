@@ -10,12 +10,13 @@ Claude Code 使用的命令速查与代码结构地图，两边不重复维护�
 ```bash
 uv run pytest                    # 完整回归（默认排除 real API）
 uv run pytest -q                 # 简洁输出；当前基线数字见 docs/roadmap.md 或
-                                 # 最近 workstream 断点（2026-07-07: 802 passed）
+                                 # 最近 workstream 断点
 uv run pytest -m memoryos -q    # MemoryOS 专项
 uv run pytest -m api --collect-only -q  # 查看哪些测试会调真实 API
 uv run pytest -x -q tests/test_method_registry.py  # 单个测试文件
 uv run python -m compileall -q src/memory_benchmark tests  # 编译检查
 uv run memory-benchmark --help   # CLI 帮助
+uv run memory-benchmark plan-smoke --help  # 先生成 registry-backed smoke 命令
 uv run python -m memory_benchmark --help  # 等价入口
 uv sync                          # 同步依赖（首次或有新依赖时）
 ```

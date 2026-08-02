@@ -620,6 +620,7 @@ def test_halumem_registration_declares_operation_level_unified_prompt() -> None:
         default_history_limit=4,
         default_isolation_limit=1,
         default_question_limit=1,
+        shape_mode="fixed",
     )
     assert registration.resume_policy == BenchmarkResumePolicy(
         smoke_enabled=False,
@@ -1109,6 +1110,17 @@ def test_benchmark_smoke_policy_rejects_unknown_history_axis() -> None:
         BenchmarkSmokePolicy(
             history_axis="messages",  # type: ignore[arg-type]
             default_history_limit=1,
+        )
+
+
+def test_benchmark_smoke_policy_rejects_unknown_shape_mode() -> None:
+    """shape_mode 只能声明可裁剪或固定形状。"""
+
+    with pytest.raises(ConfigurationError, match="shape_mode"):
+        BenchmarkSmokePolicy(
+            history_axis="rounds",
+            default_history_limit=1,
+            shape_mode="elastic",  # type: ignore[arg-type]
         )
 
 

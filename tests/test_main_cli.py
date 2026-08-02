@@ -1027,8 +1027,8 @@ def test_execute_run_skips_evaluation_for_failed_prediction_child(
     assert result.failed_count == 1
 
 
-def test_main_help_lists_predict_evaluate_and_run(capsys) -> None:
-    """统一入口 help 应明确显示三个子命令。"""
+def test_main_help_lists_predict_evaluate_run_and_planners(capsys) -> None:
+    """统一入口 help 应明确显示执行命令与两个 smoke 规划入口。"""
 
     with pytest.raises(SystemExit) as raised:
         main_cli.main(["--help"])
@@ -1039,6 +1039,7 @@ def test_main_help_lists_predict_evaluate_and_run(capsys) -> None:
     assert "evaluate" in output
     assert "run" in output
     assert "calibrate-smoke" in output
+    assert "plan-smoke" in output
 
 
 def test_prediction_help_describes_conversation_budget(capsys) -> None:
@@ -1718,6 +1719,40 @@ def test_main_rejects_all_cropping_parameters_for_halumem_smoke(
     assert exit_code == 2
 
 
+def test_main_rejects_parallel_halumem_before_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HaluMem operation-level W2 不得进入 command service。"""
+
+    dispatched: list[PredictCommand] = []
+    monkeypatch.setattr(
+        main_cli,
+        "execute_predict",
+        lambda command: dispatched.append(command)
+        or SimpleNamespace(run_id="should-not-run"),
+    )
+
+    exit_code = main_cli.main(
+        [
+            "predict",
+            "smoke",
+            "--root",
+            str(tmp_path),
+            "--method",
+            "mem0",
+            "--benchmark",
+            "halumem",
+            "--allow-api",
+            "--workers",
+            "2",
+        ]
+    )
+
+    assert exit_code == 2
+    assert dispatched == []
+
+
 def test_main_rejects_sessions_for_non_halumem_smoke(tmp_path: Path) -> None:
     """非 HaluMem benchmark 不接受 session 轴裁剪。"""
 
@@ -1913,7 +1948,7 @@ def test_predict_beam_smoke_rejects_unwired_history_axes(
     )
 
     assert exit_code == 2
-    assert "BEAM smoke uses --rounds" in capsys.readouterr().err
+    assert "beam smoke uses --rounds" in capsys.readouterr().err
 
 
 def test_predict_formal_rejects_membench_sources(

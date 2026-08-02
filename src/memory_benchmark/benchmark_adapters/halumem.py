@@ -64,6 +64,7 @@ HALUMEM_SMOKE_POLICY = BenchmarkSmokePolicy(
     default_history_limit=4,
     default_isolation_limit=1,
     default_question_limit=1,
+    shape_mode="fixed",
 )
 HALUMEM_RESUME_POLICY = BenchmarkResumePolicy(
     smoke_enabled=False,

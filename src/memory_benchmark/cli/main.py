@@ -1,7 +1,7 @@
 """Agent Memory Benchmark 统一命令行入口。
 
-本模块只解析 `predict/evaluate/run` 子命令、构造强类型 command，并把结果交给
-command service。它不读取 benchmark、不构造 method、不调用模型，也不写实验 artifact。
+本模块解析执行与规划子命令、构造强类型 command，并把结果交给 command service。
+它不读取 benchmark、不构造 method、不调用模型，也不写实验 artifact。
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from .commands import (
     execute_predict,
     execute_run,
 )
+from .smoke_plan import build_smoke_execution_plan
 
 
 CONSOLE = Console()
@@ -61,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """构造包含三个子命令的 argparse parser。"""
+    """构造执行、评测与 smoke 规划子命令的 argparse parser。"""
 
     parser = argparse.ArgumentParser(
         prog="memory-benchmark",
@@ -137,6 +138,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run a tiny method × benchmark smoke matrix for API cost calibration.",
     )
     _add_calibration_arguments(calibration_parser)
+
+    smoke_plan_parser = subparsers.add_parser(
+        "plan-smoke",
+        help="Generate registry-backed predict/evaluate smoke commands without API calls.",
+    )
+    _add_smoke_plan_arguments(smoke_plan_parser)
     return parser
 
 
@@ -326,6 +333,51 @@ def _add_calibration_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_smoke_plan_arguments(parser: argparse.ArgumentParser) -> None:
+    """为只读 smoke 规划器添加最小参数。"""
+
+    _add_common_root_argument(parser)
+    parser.add_argument("--method", required=True, choices=list_methods())
+    parser.add_argument(
+        "--benchmark",
+        required=True,
+        choices=list_prediction_benchmarks(),
+    )
+    parser.add_argument(
+        "--variant",
+        default=None,
+        help="One concrete benchmark variant; omitted means the registered default.",
+    )
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument(
+        "--history-limit",
+        type=int,
+        default=None,
+        help="Override the registered history-axis limit for croppable smoke only.",
+    )
+    parser.add_argument(
+        "--isolations",
+        "--conversations",
+        dest="isolation_limit",
+        type=int,
+        default=None,
+        help="Override the isolation/conversation count for croppable smoke only.",
+    )
+    parser.add_argument(
+        "--questions",
+        dest="question_limit",
+        type=int,
+        default=None,
+        help="Override questions per isolation for croppable smoke only.",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Request a smoke worker count; eligibility is checked before runtime/API.",
+    )
+
+
 def _dispatch(args: argparse.Namespace) -> Any:
     """把 argparse namespace 映射为强类型 command。"""
 
@@ -363,6 +415,18 @@ def _dispatch(args: argparse.Namespace) -> Any:
                 max_new_conversations=args.max_new_conversations,
                 max_parallel_runs=args.max_parallel_runs,
             )
+        )
+    if args.command == "plan-smoke":
+        return build_smoke_execution_plan(
+            project_root=Path(args.root),
+            method_name=args.method,
+            benchmark_name=args.benchmark,
+            variant=args.variant,
+            run_id=args.run_id,
+            history_limit=args.history_limit,
+            isolation_limit=args.isolation_limit,
+            question_limit=args.question_limit,
+            workers=args.workers,
         )
     raise MemoryBenchmarkError(f"Unsupported command: {args.command}")
 
@@ -551,35 +615,45 @@ def _normalize_smoke_prediction_args(args: argparse.Namespace) -> dict[str, Any]
         raise MemoryBenchmarkError(
             "predict smoke does not support --conversation-budget; use --conversations"
         )
-    halumem_smoke = args.benchmark == "halumem"
-    round_limit = args.rounds
-    default_history_limit = _default_smoke_history_limit(args.benchmark)
+    smoke_policy = get_benchmark_registration(args.benchmark).smoke_policy
+    if smoke_policy is None:
+        raise MemoryBenchmarkError(
+            f"{args.benchmark} does not declare a smoke policy"
+        )
+    fixed_shape = smoke_policy.shape_mode == "fixed"
+    selected_history_limit = _positive_or_default(
+        (
+            None
+            if fixed_shape
+            else getattr(args, smoke_policy.history_axis)
+        ),
+        default=smoke_policy.default_history_limit,
+        field_name=smoke_policy.history_axis,
+    )
     return {
         "profile": "smoke",
         "confirm_full": False,
-        "smoke_turn_limit": _positive_or_default(
-            round_limit,
-            default=default_history_limit,
-            field_name="rounds",
-        ),
-        "smoke_round_limit": None
-        if halumem_smoke
-        else _positive_or_default(
-            round_limit,
-            default=default_history_limit,
-            field_name="rounds",
+        "smoke_turn_limit": selected_history_limit,
+        "smoke_round_limit": (
+            selected_history_limit
+            if not fixed_shape and smoke_policy.history_axis == "rounds"
+            else None
         ),
         "smoke_conversation_limit": _positive_or_default(
-            args.conversations,
-            default=1,
+            None if fixed_shape else args.conversations,
+            default=smoke_policy.default_isolation_limit,
             field_name="conversations",
         ),
-        "smoke_session_limit": None,
+        "smoke_session_limit": (
+            selected_history_limit
+            if not fixed_shape and smoke_policy.history_axis == "sessions"
+            else None
+        ),
         "workers": _positive_or_none(args.workers, field_name="workers"),
         "max_new_conversations": None,
         "question_limit_per_conversation": _positive_or_default(
-            args.questions_per_conversation,
-            default=1,
+            None if fixed_shape else args.questions_per_conversation,
+            default=smoke_policy.default_question_limit,
             field_name="questions per conversation",
         ),
         "output_layout": "hierarchical",
@@ -632,7 +706,17 @@ def _normalize_formal_prediction_args(args: argparse.Namespace) -> dict[str, Any
 def _validate_smoke_axis_args(args: argparse.Namespace) -> None:
     """按 benchmark 校验 smoke 历史裁剪轴。"""
 
-    if args.benchmark == "halumem":
+    registration = get_benchmark_registration(args.benchmark)
+    smoke_policy = registration.smoke_policy
+    if smoke_policy is None:
+        raise MemoryBenchmarkError(
+            f"{args.benchmark} does not declare a smoke policy"
+        )
+    if registration.operation_level and args.workers not in {None, 1}:
+        raise MemoryBenchmarkError(
+            f"{registration.name} operation-level smoke requires --workers 1"
+        )
+    if smoke_policy.shape_mode == "fixed":
         if (
             args.rounds is not None
             or args.turns is not None
@@ -642,68 +726,29 @@ def _validate_smoke_axis_args(args: argparse.Namespace) -> None:
             or args.questions_per_conversation is not None
         ):
             raise MemoryBenchmarkError(
-                "HaluMem smoke has a fixed shape and does not accept cropping parameters"
+                f"{registration.name} smoke has a fixed shape and does not "
+                "accept cropping parameters"
             )
         return
-    if args.benchmark == "locomo":
-        # LoCoMo 注册的 BenchmarkSmokePolicy.history_axis 是 "rounds"（见
-        # benchmark_adapters/registry.py 的 LOCOMO_SMOKE_POLICY）；turns/
-        # sessions/sources 是其他尚未审计 benchmark 的轴，对 LoCoMo 一律
-        # fail-fast，避免用户以为传了就生效。
-        if (
-            args.turns is not None
-            or args.sessions is not None
-            or args.sources is not None
-        ):
-            raise MemoryBenchmarkError(
-                "LoCoMo smoke uses --rounds; do not pass --turns, --sessions "
-                "or --sources"
-            )
-        return
-    if args.benchmark == "longmemeval":
-        # LongMemEval registered history_axis is "rounds" (LONGMEMEVAL_SMOKE_POLICY);
-        # only --rounds is the audited smoke axis. --turns/--sessions/--sources are
-        # unsupported (membench sources / halumem sessions / unregistered turns) and
-        # must fail-fast rather than be silently ignored.
-        if (
-            args.turns is not None
-            or args.sessions is not None
-            or args.sources is not None
-        ):
-            raise MemoryBenchmarkError(
-                "LongMemEval smoke uses --rounds; do not pass --turns, --sessions "
-                "or --sources"
-            )
-        return
+    axis_values = {
+        "rounds": args.rounds,
+        "turns": args.turns,
+        "sessions": args.sessions,
+        "sources": args.sources,
+    }
+    wrong_axes = tuple(
+        axis
+        for axis, value in axis_values.items()
+        if axis != smoke_policy.history_axis and value is not None
+    )
+    if wrong_axes:
+        rendered = ", ".join(f"--{axis}" for axis in wrong_axes)
+        raise MemoryBenchmarkError(
+            f"{registration.name} smoke uses --{smoke_policy.history_axis}; "
+            f"do not pass {rendered}"
+        )
     if args.benchmark == "membench":
-        # MemBench registered history_axis is "rounds" (MEMBENCH_SMOKE_POLICY);
-        # --membench-sources is a debug knob for selecting source files, not the
-        # generic --sources axis. Unregistered axes must fail-fast.
-        if args.turns is not None or args.sessions is not None or args.sources is not None:
-            raise MemoryBenchmarkError(
-                "MemBench smoke uses --rounds; do not pass --turns, --sessions "
-                "or --sources"
-            )
         _validate_membench_sources(args.membench_sources, is_membench=True)
-        return
-    if args.benchmark == "beam":
-        if (
-            args.turns is not None
-            or args.sessions is not None
-            or args.sources is not None
-        ):
-            raise MemoryBenchmarkError(
-                "BEAM smoke uses --rounds; do not pass --turns, --sessions or --sources"
-            )
-        return
-    if args.sessions is not None:
-        raise MemoryBenchmarkError(
-            "--sessions is only supported for HaluMem smoke"
-        )
-    if args.turns is not None or args.sources is not None:
-        raise MemoryBenchmarkError(
-            f"{args.benchmark} smoke has not registered --turns or --sources"
-        )
 
 
 def _positive_or_default(

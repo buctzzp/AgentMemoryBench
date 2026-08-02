@@ -33,8 +33,8 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   已通过守恒门。无 API 全量：
   `1685 passed, 3 deselected, 1 warning, 29 subtests passed in 128.11s`；
   compileall exit 0。唯一 warning 是既有 vendored LightMem Pydantic deprecation。
-- **当前动作**：**MemOS 已冻结，关闭机器化 smoke plan/preflight 与新 method
-  强制接入清单后转 Letta/MemGPT**。MemOS source lock 为官方稳定版
+- **当前动作**：**MemOS 已冻结，机器化 smoke plan/preflight 已关闭；现重做新 method
+  强制接入 ledger，随后转 Letta/MemGPT**。MemOS source lock 为官方稳定版
   `v2.0.25@e820406`。架构师
   [最终裁定](branches/method-recertification/memos/notes/memos-v2.0.25-m1-final-ruling.md)
   锁定的 `tree_text + MultiModalStruct + typed handlers +
@@ -71,8 +71,12 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   CLI 在 API/runtime 前拒绝 override。最终无 API 全量：
   `1902 passed, 3 deselected, 13 warnings, 29 subtests passed in 129.84s`，
   compileall 与 patch reverse-check 均为 exit 0。当前动作转为
-  **机器化 smoke plan/preflight +
-  新 method 强制接入清单**，随后接 Letta/MemGPT。
+  机器化 smoke plan/preflight 已由
+  [M0 裁决与验收](notes/smoke-plan-preflight-m0.md)关闭：HaluMem fixed shape、
+  operation-level W1、multi-variant child run-id、method worker 资格与 evaluator 集合
+  均从 registry/TOML 生成，B11 禁止继续手写命令。最新无 API 全量：
+  `1917 passed, 3 deselected, 13 warnings, 29 subtests passed in 160.69s`，
+  compileall exit 0。当前只剩**新 method 强制接入 ledger**，随后接 Letta/MemGPT。
   复用五个 benchmark 稳定事实，不重开 raw census，也不把真实 DB/image/HaluMem
   fine-output 等 pending 能力提前写成 valid。
 - **不可顺手重开**：benchmark raw/canonical/gold 调查、已冻结 25 格、旧
@@ -132,8 +136,9 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 3. [x] **ws03 M0-C**：benchmark/author prompt ownership；
 4. [x] 定向测试、文档门、compileall、无 API 全量 pytest；
 5. [x] 按新结构接入 MemOS；
-6. [ ] 机器化 smoke 规划/预检与新 method 强制接入清单；
-7. [ ] 接入 Letta/MemGPT。
+6. [x] 机器化 smoke 规划/预检；
+7. [ ] 新 method 强制接入 ledger；
+8. [ ] 接入 Letta/MemGPT。
 
 M0 红线：零真实 API、零 third-party 算法改动、零 metric/prompt/artifact 语义变化；
 旧 import path 在迁移期保留薄兼容层。

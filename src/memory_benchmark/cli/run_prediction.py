@@ -1352,19 +1352,36 @@ def _resolve_adapter_smoke_session_limit(
     smoke_session_limit: int | None,
     smoke_round_limit: int | None,
 ) -> int | None:
-    """拒绝 HaluMem 固定 smoke 的旧 session/round 裁剪轴。"""
+    """按注册 policy 校验固定 shape 与 session 裁剪轴。"""
 
-    if benchmark_name == "halumem":
-        if smoke_round_limit is not None:
-            raise ConfigurationError("HaluMem smoke has a fixed shape")
+    registration = get_benchmark_registration(benchmark_name)
+    smoke_policy = getattr(registration, "smoke_policy", None)
+    if smoke_policy is None:
         if smoke_session_limit is not None:
             raise ConfigurationError(
-                "HaluMem smoke has a fixed shape and does not accept sessions"
+                f"{benchmark_name} has not registered --sessions"
             )
         return None
-    if smoke_session_limit is not None:
-        raise ConfigurationError("--sessions is only supported for HaluMem")
-    return None
+    if smoke_policy.shape_mode == "fixed":
+        if smoke_round_limit is not None:
+            raise ConfigurationError(
+                f"{registration.name} smoke has a fixed shape"
+            )
+        if smoke_session_limit is not None:
+            raise ConfigurationError(
+                f"{registration.name} smoke has a fixed shape and does not "
+                "accept sessions"
+            )
+        return None
+    if (
+        smoke_session_limit is not None
+        and smoke_policy.history_axis != "sessions"
+    ):
+        raise ConfigurationError(
+            f"{registration.name} smoke uses --{smoke_policy.history_axis}, "
+            "not --sessions"
+        )
+    return smoke_session_limit
 
 
 def _question_limit_for_scope(
@@ -1468,17 +1485,11 @@ def _resolve_batch_run_ids(
 
     multi_variant_registration = len(registration.variant_names()) > 1
     if explicit_base_run_id is not None:
-        base_run_id = _validate_explicit_base_run_id(explicit_base_run_id)
-        if multi_variant_registration:
-            _reject_registered_variant_suffix(
-                base_run_id,
-                registration.variant_names(),
-            )
         run_ids = tuple(
-            _build_explicit_child_run_id(
-                base_run_id=base_run_id,
+            resolve_explicit_prediction_run_id(
+                base_run_id=explicit_base_run_id,
                 variant=variant,
-                multi_variant_registration=multi_variant_registration,
+                registration=registration,
             )
             for variant in variants
         )
@@ -1498,6 +1509,38 @@ def _resolve_batch_run_ids(
             f"Duplicate child run_id generated for '{benchmark_name}': {run_ids}"
         )
     return run_ids
+
+
+def resolve_explicit_prediction_run_id(
+    *,
+    base_run_id: str,
+    variant: str,
+    registration: object,
+) -> str:
+    """按执行路径的同一规则解析显式 base run-id 对应的 child run-id。
+
+    smoke 规划器与真实 prediction runner 共用本函数，避免多 variant benchmark
+    的 evaluate 命令仍拿 base run-id、到运行后才发现 child suffix 不一致。
+    """
+
+    normalized_base_run_id = _validate_explicit_base_run_id(base_run_id)
+    variant_names = tuple(registration.variant_names())
+    multi_variant_registration = len(variant_names) > 1
+    if variant not in variant_names:
+        allowed = ", ".join(variant_names)
+        raise ConfigurationError(
+            f"Unknown benchmark variant '{variant}'. Allowed: {allowed}"
+        )
+    if multi_variant_registration:
+        _reject_registered_variant_suffix(
+            normalized_base_run_id,
+            variant_names,
+        )
+    return _build_explicit_child_run_id(
+        base_run_id=normalized_base_run_id,
+        variant=variant,
+        multi_variant_registration=multi_variant_registration,
+    )
 
 
 def _reject_registered_variant_suffix(
@@ -1897,6 +1940,7 @@ __all__ = [
     "main",
     "PredictionBatchResult",
     "PredictionVariantResult",
+    "resolve_explicit_prediction_run_id",
     "resolve_prediction_max_workers",
     "resolve_mem0_profile",
     "run_mem0_locomo_prediction",
