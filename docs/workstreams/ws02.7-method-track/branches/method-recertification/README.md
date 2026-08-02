@@ -55,19 +55,17 @@ LightMem 已关闭的异常样本。只有三类触发器允许重开 benchmark 
    terminal 与 B7 observation 已冻结；framework W2 因共享 runtime/embedder 判 N/A。
 7. **Letta/MemGPT M2 离线门已完成**：当前等待用户批准机器生成的 11 个 concrete
    variant B11 真实 smoke；真实 run 与 artifact gate 关闭后方可冻结。
-8. **LangMem M1 已完成，M2 在建**：已先建立强制
-   [ledger](langmem/notes/langmem-integration-ledger.md)，current source/product/
-   official-harness 一手取证已锁；当前实现 background-manager 产品 adapter。Letta 的真实
-   批准门与 LangMem 离线施工互不替代。随后接
-   Supermemory；EverOS 最后。
+8. **LangMem M2 离线门已完成**：current source/product/official-harness、background-manager
+   产品 adapter、原子状态、五格 dossier、W2 ownership 与 20 份机器计划均已验收；
+   [ledger](langmem/notes/langmem-integration-ledger.md) 为 `ready_for_smoke`。Letta 与 LangMem
+   各自等待真实 B11 批准，离线主线随后接 Supermemory；EverOS 最后。
 
 ## 当前状态
 
 LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS 均已冻结；状态与证据从父级
 `../../README.md` 恢复胶囊进入。机器化 smoke plan/preflight 与 ledger v1 强制接入门均已
-落地；[Letta/MemGPT ledger](letta/notes/letta-integration-ledger.md)已推进到
-`ready_for_smoke`。Letta M1 source/product identity、M2 product-faithful adapter、五格安全档案、
-11 个 concrete variant 的机器计划与无 API 全量回归均已关闭；获批前不得发起 Letta
-build/answer/judge API。当前离线动作是 LangMem M2，一律从其 ledger 与 M1 ruling 恢复，
-不重做 dataset census。
+落地；Letta/MemGPT 与 LangMem 两份 ledger 均已推进到 `ready_for_smoke`。两家 M1/M2、五格
+安全档案、机器计划与无 API 全量回归均已关闭；获批前不得发起其 build/answer/judge API。
+当前离线动作转入 Supermemory，一律先建 ledger、再锁 current source/product identity，且不重做
+五个 benchmark dataset census。
 权威实时动作仍看父级恢复胶囊与最新断点。

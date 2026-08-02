@@ -15,6 +15,7 @@ from memory_benchmark.core import (
     validate_compatibility,
 )
 from memory_benchmark.methods.lightmem_adapter import LightMemConfig
+from memory_benchmark.methods.langmem_adapter import LangMemConfig
 from memory_benchmark.methods.letta_adapter import LettaConfig
 from memory_benchmark.methods.mem0_adapter import Mem0Config
 from memory_benchmark.methods.memoryos_adapter import MemoryOSPaperConfig
@@ -36,6 +37,7 @@ def test_registry_lists_conversation_qa_methods() -> None:
 
     assert list_methods() == [
         "amem",
+        "langmem",
         "letta",
         "lightmem",
         "mem0",
@@ -185,6 +187,7 @@ def test_built_in_methods_advertise_memory_retrieval_capability() -> None:
         "mem0",
         "memoryos",
         "amem",
+        "langmem",
         "letta",
         "lightmem",
         "simplemem",
@@ -226,6 +229,11 @@ def test_built_in_methods_advertise_memory_retrieval_capability() -> None:
         ("letta", "membench", "session"),
         ("letta", "beam", "session"),
         ("letta", "halumem", "session"),
+        ("langmem", "locomo", "session"),
+        ("langmem", "longmemeval", "session"),
+        ("langmem", "membench", "session"),
+        ("langmem", "beam", "session"),
+        ("langmem", "halumem", "session"),
     ],
 )
 def test_registration_resolves_concrete_consume_granularity(
@@ -258,6 +266,7 @@ def test_clean_retry_support_is_only_declared_by_methods_with_safe_state_cleanup
     assert get_method_registration("simplemem").clean_failed_ingest_state is not None
     assert get_method_registration("memos").clean_failed_ingest_state is not None
     assert get_method_registration("letta").clean_failed_ingest_state is not None
+    assert get_method_registration("langmem").clean_failed_ingest_state is not None
 
 
 def test_letta_registration_declares_sleeptime_product_contract() -> None:
@@ -283,6 +292,43 @@ def test_letta_registration_declares_sleeptime_product_contract() -> None:
     inventory = registration.efficiency_model_inventory_getter(config)
     assert [entry.model_id for entry in inventory] == ["letta-build-llm"]
     assert [entry.model_role for entry in inventory] == ["memory_build_llm"]
+
+
+def test_langmem_registration_declares_background_product_contract() -> None:
+    """LangMem 注册应固定 session 粒度、async manager 与两类 build model。"""
+
+    registration = get_method_registration("langmem")
+    config = load_method_profile(
+        "langmem",
+        "smoke",
+        project_root=load_path_settings().project_root,
+    )
+
+    assert isinstance(config, LangMemConfig)
+    assert registration.profile_names == frozenset({"smoke", "official-full"})
+    assert registration.profile_relative_path == Path("configs/methods/langmem.toml")
+    assert registration.requires_api is True
+    assert registration.allow_smoke_worker_override is True
+    assert registration.supports_shared_instance_parallelism is False
+    assert registration.provenance_granularity == "none"
+    assert registration.retrieval_evidence_contract_version == "v1"
+    assert registration.resolve_consume_granularity("locomo") == "session"
+    assert registration.efficiency_model_inventory_getter is not None
+    inventory = registration.efficiency_model_inventory_getter(config)
+    assert [entry.model_id for entry in inventory] == [
+        "langmem-build-llm",
+        "langmem-embedding",
+    ]
+    assert [entry.model_role for entry in inventory] == [
+        "memory_build_llm",
+        "embedding",
+    ]
+    declaration = registration.build_identity_resolver(config.to_manifest())
+    assert declaration.implementation_variant == "product"
+    assert declaration.embedding_profile == "controlled_embedding_v1"
+    assert declaration.embedding.dimension == 384
+    assert declaration.embedding.normalization == "external_l2"
+    assert declaration.embedding.distance == "langgraph-inmemory-cosine"
 
 
 def test_clean_retry_hook_uses_failed_worker_state_for_isolated_runs(

@@ -1,8 +1,10 @@
 # LangMem 接入说明
 
-状态：`M1 current source/product identity accepted；M2 adapter pending`。本页只承接经架构师验收的稳定摘要；
-完整检查点与下一动作见
-[LangMem integration ledger](../../workstreams/ws02.7-method-track/branches/method-recertification/langmem/notes/langmem-integration-ledger.md)。
+状态：`M2 offline implementation accepted；awaiting B11 real smoke approval`。本页只保存
+跨会话仍需复用的稳定接口事实；逐格状态与下一动作见
+[LangMem integration ledger](../../workstreams/ws02.7-method-track/branches/method-recertification/langmem/notes/langmem-integration-ledger.md)，
+五格异常与 payload 见
+[安全档案](../../workstreams/ws02.7-method-track/branches/method-recertification/langmem/notes/langmem-five-benchmark-safety-dossier.md)。
 
 ## Current source 与官方覆盖
 
@@ -25,16 +27,62 @@
 - LangMem message contract 不要求 user-first、交替或偶数；assistant-first、same-role、
   singleton、odd tail 均合法，所以不补 placeholder。
 
+## Runtime 与状态
+
+- framework 主进程不导入 LangMem/LangChain 依赖；每个 provider 独占一个 Python 3.12
+  JSON-lines worker。worker 内才创建真实 `ChatOpenAI`、本地
+  `SentenceTransformer`、官方 `InMemoryStore` 与 background manager。
+- `scripts/bootstrap_langmem_runtime.sh` 先按 vendored `uv.lock` 执行 `uv sync --frozen`，
+  再安装 `scripts/requirements/langmem-runtime.txt` 的本地 embedding 补充栈；source identity
+  同时锁 current commit、9 个 product 文件、`uv.lock`、adapter、worker、bootstrap 和补充 lock。
+- 一个 canonical session 一次 `ainvoke()`；其返回即 insert/update/delete 全部 await 完成。
+  `opencodego` smoke 强制 Chat Completions 且关闭 thinking；`primary` official_full 保持
+  provider 默认 Chat Completions。每次成功 response 必须提供精确 usage，缺失即失败。
+- 一个 worker 内多个 conversation 用 `("memories", namespace_id)` 逻辑隔离；W2 由 generic
+  isolated runner 建两个独立 provider/worker/model/store/state root，不共享 tokenizer。
+- `InMemoryStore` 的 exact key/value/插入顺序与 completed operation journal 原子写入同一
+  namespace JSON。相同 operation/result-loss retry 不重跑算法；同 operation id 配不同输入
+  fail-fast；manager 或持久化失败先恢复调用前 store。
+- failed-ingest clean 把 active state 原子移到 cleanup tombstone，再只删目标 namespace；删除
+  中断可重试，复核为空后才删除 tombstone。secret 只经 allowlist worker 环境传递，不进
+  manifest/state/error。
+
+## 五格公共输入
+
+- `consume_granularity=session`；一个 canonical 非空 turn 对应一个 LangChain
+  `role/content` message，保持原序，不补 placeholder、不跨 session 重配。
+- source time 只按 `turn → 当前 session → None` 渲染；question time、兄弟 turn 与 wall clock
+  永不回填。MemBench 原文已含 time/place 时保留原文且不重复 header；100k noise 保持无时间。
+- LoCoMo 固定 `speaker_a→user / speaker_b→assistant`，content 保留真实 speaker name；image
+  caption 统一使用 `[Sharing image that shows: ...]`，path/query/locator 不可达算法。
+- LongMemEval 的 assistant-first、连续同 role、singleton/odd tail，BEAM 10M orphan/mismatch，
+  MemBench ThirdAgent user-only 都按 canonical 原序传入；不为“看起来像标准对话”制造假回复。
+- HaluMem 每 session 一次 `ainvoke()`；当前 evolved state 可立即供 update probe 与 QA 检索。
+
 ## Metric 边界
 
 - current memories 会被 LLM update/consolidate；source id 只能证明参与生成，不能证明当前
   content 的 semantic lineage。Recall/Precision/F1@k 与 NDCG 均 N/A。
-- BaseStore 的实际 score/rank 可保留，stable ranking 待 M2 对 tie/resume 做强反例。
-- HaluMem update/QA 是 valid 候选；extraction 与 memory-type 因不具备严格
-  session-local memory point 而 N/A。
+- `MemoryStoreManager.asearch(query, limit)` 的原始 key/content/score/order 完整保留；
+  state 快照按插入顺序恢复，Python stable sort 在同分时保持候选顺序。因此 product ranking
+  assertion 为 `valid`，但 semantic provenance 仍为 `N/A`，不能据此计算 source-qrel 指标。
+- 五格 Recall/Precision/F1@k 与 LongMemEval NDCG 均 N/A；这是 evolved memory 的语义映射
+  不可证，不是 LangMem 没有检索接口。
+- HaluMem update/QA 为 valid；extraction 与 memory-type 因 changed put 可能融合旧 memory、
+  不代表严格本 session memory point 而 N/A。
+
+## 配置与 answer/judge
+
+- `configs/methods/langmem.toml` 只有 `smoke` 与 `official_full`：两者只切 API runtime/model
+  和 full worker 上限，五格均固定 MiniLM-384 normalized、`query_limit=5`、`max_steps=1`、
+  insert/update 开、delete 关。官方五格 harness 集为空，故没有伪造 `author_*` section。
+- LangMem 只构建和检索 memory；answer/judge 全部走 benchmark-scoped framework builder，
+  gold answer/evidence/target/memory-point label 不进入 worker payload。
+- zero hit 返回空 `items=()` 加非空 sentinel；backend/协议失败一律抛错，不降级成空记忆。
 
 ## 当前门
 
-adapter 尚未实现；当前不得宣称五格 ready 或 B11 可运行。M2 必须闭合独立 runtime、
-InMemoryStore 原子持久化/clean retry、W2 ownership、五格 payload、API/embedding 观测与
-机器 smoke plans。
+M2 adapter、runtime、强反例、五格 dossier 与机器计划已经完成离线验收；当前不是 frozen。
+真实 build/answer/judge API、每个 child run 的 artifact 开箱及最终冻结仍需用户单独批准预算、
+规模与 planner 生成的 run id。任何 current source/`uv.lock`、manager factory、store/ranking、
+message/time policy 或 benchmark stable contract 漂移，都必须重开 ledger 对应门。

@@ -54,6 +54,15 @@ from .letta_adapter import (
     build_letta_source_identity,
     clean_letta_conversation_state,
 )
+from .langmem_adapter import (
+    LANGMEM_BUILD_LLM_RESPONSE_CONTRACT,
+    LANGMEM_EMBEDDING_MODEL_ID,
+    LANGMEM_LLM_MODEL_ID,
+    LangMem,
+    LangMemConfig,
+    build_langmem_source_identity,
+    clean_langmem_conversation_state,
+)
 from .mem0_adapter import Mem0, Mem0Config, build_mem0_source_identity
 from .memos_adapter import (
     MEMOS_EMBEDDING_MODEL_ID,
@@ -294,6 +303,100 @@ def _build_letta_system(context: MethodBuildContext) -> BaseMemorySystem:
     )
 
 
+def _build_langmem_system(context: MethodBuildContext) -> BaseMemorySystem:
+    """根据统一 build context 构造 LangMem background-manager adapter。"""
+
+    if not isinstance(context.config, LangMemConfig):
+        raise ConfigurationError("LangMem factory requires LangMemConfig")
+    if context.openai_settings is None:
+        raise ConfigurationError("LangMem factory requires OpenAI settings")
+    return LangMem(
+        config=context.config,
+        path_settings=context.path_settings,
+        storage_root=context.storage_root,
+        openai_settings=context.openai_settings,
+        efficiency_collector=context.efficiency_collector,
+        benchmark_name=context.benchmark_name,
+    )
+
+
+def _langmem_model_name(config: Any) -> str:
+    """从 LangMem 强类型配置读取 memory build LLM 名称。"""
+
+    if not isinstance(config, LangMemConfig):
+        raise ConfigurationError("LangMem model getter requires LangMemConfig")
+    return config.llm_model
+
+
+def _langmem_max_workers(config: Any) -> int:
+    """从 LangMem 强类型配置读取 conversation worker 数。"""
+
+    if not isinstance(config, LangMemConfig):
+        raise ConfigurationError("LangMem worker getter requires LangMemConfig")
+    return config.max_workers
+
+
+def _langmem_efficiency_model_inventory(
+    config: Any,
+) -> tuple[ModelDescriptor, ...]:
+    """返回 LangMem build LLM 与本地 embedding 身份。"""
+
+    if not isinstance(config, LangMemConfig):
+        raise ConfigurationError(
+            "LangMem model inventory getter requires LangMemConfig"
+        )
+    return (
+        ModelDescriptor(
+            model_id=LANGMEM_LLM_MODEL_ID,
+            model_name=config.llm_model,
+            model_role="memory_build_llm",
+            execution_mode="api",
+            tokenizer_name=config.llm_model,
+        ),
+        ModelDescriptor(
+            model_id=LANGMEM_EMBEDDING_MODEL_ID,
+            model_name=config.embedding_model_path,
+            model_role="embedding",
+            execution_mode="local",
+            revision_or_path=config.embedding_model_path,
+            embedding_dimension=config.embedding_dimension,
+            tokenizer_name=config.embedding_model_path,
+        ),
+    )
+
+
+def _langmem_efficiency_instrumentation_identity(
+    path_settings: PathSettings,
+    config: Any,
+    source_identity: dict[str, Any],
+) -> dict[str, object]:
+    """返回 LangMem worker 逐调用 usage/embedding 插桩身份。"""
+
+    if not isinstance(config, LangMemConfig):
+        raise ConfigurationError(
+            "LangMem instrumentation identity getter requires LangMemConfig"
+        )
+    adapter_path = Path("src/memory_benchmark/methods/langmem_adapter.py")
+    worker_path = Path("src/memory_benchmark/methods/langmem_worker.py")
+    requirements_path = Path("scripts/requirements/langmem-runtime.txt")
+    return {
+        "collector_schema": 1,
+        "wrapper_path": adapter_path.as_posix(),
+        "wrapper_sha256": _sha256_file(path_settings.project_root / adapter_path),
+        "worker_path": worker_path.as_posix(),
+        "worker_sha256": _sha256_file(path_settings.project_root / worker_path),
+        "runtime_requirements_path": requirements_path.as_posix(),
+        "runtime_requirements_sha256": _sha256_file(
+            path_settings.project_root / requirements_path
+        ),
+        "method_source_sha256": source_identity.get("source_sha256"),
+        "exact_api_usage": "langchain-response-usage-required-v1",
+        "embedding_observation": "sentence-transformer-tokenizer+wall-clock-v1",
+        "build_llm_response_contract": LANGMEM_BUILD_LLM_RESPONSE_CONTRACT,
+        "retrieval_observation": "product-asearch-wall-clock-v1",
+    }
+
+
 def _letta_model_name(config: Any) -> str:
     """从 Letta 强类型配置读取 memory build LLM 名称。"""
 
@@ -375,6 +478,35 @@ def _clean_letta_failed_ingest_state(
     isolation_key = f"{run_id}_{conversation.conversation_id}"
     try:
         clean_letta_conversation_state(
+            provider=system,
+            isolation_key=isolation_key,
+        )
+    finally:
+        system.cleanup()
+
+
+def _clean_langmem_failed_ingest_state(
+    context: MethodBuildContext,
+    conversation: Conversation,
+    failed_state: dict[str, Any],
+) -> None:
+    """namespace-scoped 清理 LangMem failed-ingest conversation 状态。"""
+
+    run_id = context.storage_root.parent.name
+    storage_root = _resolve_clean_retry_storage_root(context, failed_state)
+    clean_context = MethodBuildContext(
+        config=context.config,
+        openai_settings=context.openai_settings,
+        path_settings=context.path_settings,
+        storage_root=storage_root,
+        benchmark_name=context.benchmark_name,
+    )
+    system = _build_langmem_system(clean_context)
+    if not isinstance(system, LangMem):
+        raise ConfigurationError("LangMem clean hook failed to build LangMem adapter")
+    isolation_key = f"{run_id}_{conversation.conversation_id}"
+    try:
+        clean_langmem_conversation_state(
             provider=system,
             isolation_key=isolation_key,
         )
@@ -1130,6 +1262,45 @@ def _letta_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityDecla
     return _pending_build_identity(provider=None, model=None, dimension=None)
 
 
+def _langmem_build_identity(
+    config_manifest: dict[str, Any],
+) -> BuildIdentityDeclaration:
+    """解析 LangMem controlled MiniLM + InMemoryStore cosine build。"""
+
+    provider = _manifest_text(config_manifest, "embedding_provider")
+    model = _manifest_text(config_manifest, "embedding_model_path")
+    dimension = _manifest_dimension(config_manifest, "embedding_dimension")
+    normalization = config_manifest.get("embedding_normalize")
+    model_key = "" if model is None else model.strip().split("/")[-1].lower()
+    if (
+        provider == "sentence-transformers-local"
+        and model_key == "all-minilm-l6-v2"
+        and dimension == 384
+        and normalization is True
+    ):
+        return BuildIdentityDeclaration(
+            implementation_variant="product",
+            embedding_profile="controlled_embedding_v1",
+            historical_controlled_build_equivalent_to_current_main=False,
+            embedding=EmbeddingIdentity(
+                provider=provider,
+                model=model,
+                dimension=dimension,
+                revision=None,
+                revision_status="local_unpinned",
+                normalization="external_l2",
+                instruction=None,
+                distance="langgraph-inmemory-cosine",
+                identity_status="declared",
+            ),
+        )
+    return _pending_build_identity(
+        provider=provider,
+        model=model,
+        dimension=dimension,
+    )
+
+
 def _mem0_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityDeclaration:
     """按当前 Mem0 config 解析 controlled 或真实 product-default build。"""
 
@@ -1489,6 +1660,41 @@ _REGISTRATIONS = {
         supports_shared_instance_parallelism=False,
         clean_failed_ingest_state=_clean_letta_failed_ingest_state,
         build_identity_resolver=_letta_build_identity,
+    ),
+    "langmem": MethodRegistration(
+        name="langmem",
+        task_families=frozenset({TaskFamily.CONVERSATION_QA}),
+        provided_capabilities=frozenset(
+            {
+                MethodCapability.CONVERSATION_ADD,
+                MethodCapability.MEMORY_RETRIEVAL,
+            }
+        ),
+        profile_sections=(
+            ("smoke", "smoke"),
+            ("official-full", "official_full"),
+        ),
+        profile_relative_path=Path("configs/methods/langmem.toml"),
+        config_type=LangMemConfig,
+        requires_api=True,
+        system_factory=_build_langmem_system,
+        source_identity_factory=build_langmem_source_identity,
+        model_name_getter=_langmem_model_name,
+        max_workers_getter=_langmem_max_workers,
+        display_name="LangMem",
+        protocol_version="v3",
+        consume_granularity_resolver=_session_consume_granularity,
+        provenance_granularity="none",
+        retrieval_evidence_contract_version="v1",
+        allow_smoke_worker_override=True,
+        efficiency_model_inventory_getter=_langmem_efficiency_model_inventory,
+        efficiency_instrumentation_identity_getter=(
+            _langmem_efficiency_instrumentation_identity
+        ),
+        retrieval_observation_contract_getter=_separable_retrieval_contract,
+        supports_shared_instance_parallelism=False,
+        clean_failed_ingest_state=_clean_langmem_failed_ingest_state,
+        build_identity_resolver=_langmem_build_identity,
     ),
     "memos": MethodRegistration(
         name="memos",

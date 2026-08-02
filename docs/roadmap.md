@@ -35,14 +35,14 @@ TOML 字段，效果实验前再裁共同模型或产品默认，当前 smoke �
 仅作产物兼容，eval fork 不得藏进配置名字。Mem0/LightMem/MemoryOS 的 product default、
 generic/eval/build-axis 与 MemoryOS PyPI/ChromaDB 关系已完成审计和架构裁决；truthful track
 identity M0 已经 R1/R2、严格 resume/evaluate 和全量回归关闭。LightMem → Mem0 → MemoryOS →
-A-Mem → SimpleMem → MemOS 已逐家重认证 B1-B11；Letta/MemGPT 现已关闭 M2 离线门，位于
-B11 真实 smoke 预算批准门，不靠历史 frozen 惯性，也不盲目重烧未变资产。
+A-Mem → SimpleMem → MemOS 已逐家重认证 B1-B11；Letta/MemGPT 与 LangMem 现均已关闭 M2
+离线门，位于各自 B11 真实 smoke 预算批准门，不靠历史 frozen 惯性，也不盲目重烧未变资产。
 
 MemOS=`method-frozen-v1`：官方 `v2.0.25` typed product handler、LoCoMo 双 namespace、
 async exact terminal 与真实 API usage 观测已闭合；framework W2 因共享进程级
 runtime/embedder 的真实竞态判 N/A，主 profile 固定 W1。
 
-缺口：3 个尚无 adapter 的 method（EverOS、LangMem、Supermemory）；Letta/MemGPT 已有
+缺口：2 个尚无 adapter 的 method（EverOS、Supermemory）；Letta/MemGPT 与 LangMem 已有
 product-faithful adapter、五格 dossier 与机器化 smoke plan，但真实 B11 smoke 尚待用户批准。
 效果参数、作者 builder、真实 resume 与 full 成本 pilot 仍待后续。真实 API
 一律继续由用户确认预算、规模与 run_id。首批 25 格完成后已做一次有边界的

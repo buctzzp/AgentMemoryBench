@@ -1,7 +1,7 @@
 ---
 id: ws02.7
 parent: ws02
-status: in-progress（首批 6 method frozen；Letta 离线门完成，LangMem M2 在建）
+status: in-progress（首批 6 method frozen；Letta/LangMem 离线门完成，Supermemory 待启动）
 created: 2026-07-12
 ---
 # ws02.7 Method Track M0
@@ -94,17 +94,19 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   ledger 门无 API 全量为
   `1923 passed, 3 deselected, 13 warnings, 29 subtests passed in 144.84s`，compileall exit 0。
 - **不可顺手重开**：benchmark raw/canonical/gold 调查、已冻结 25 格、旧
-  `config_track` 兼容、legacy bridge/resume、BLEU/ROUGE/Precision 新公式。Letta 真实
-  B11 继续等待用户新批准；当前不烧 API 的施工动作已转入
-  [LangMem ledger](branches/method-recertification/langmem/notes/langmem-integration-ledger.md)：
-  M1 已锁 current source/product/harness，当前进入 M2 adapter 离线施工。
+  `config_track` 兼容、legacy bridge/resume、BLEU/ROUGE/Precision 新公式。Letta 与 LangMem
+  的真实 B11 均继续等待用户新批准；LangMem M2 已由
+  [检查点](branches/method-recertification/langmem/notes/langmem-m2-adapter-checkpoint.md)
+  收口为 `ready_for_smoke`：真实零 API product readout、扩展定向 473 passed、主树
+  `2021 passed, 3 deselected, 13 warnings, 29 subtests passed in 132.29s`、compileall、ledger
+  与 20 份 machine plan 均闭合。当前不烧 API 的下一动作是 Supermemory ledger/M1。
 - **恢复当前结构任务只读**：上方 M0 ruling；需要追溯某家 method 才读下表对应 frozen note。
 - **派工边界**：actor 卡由架构师写成自包含 prompt，用户选择跨模型 actor；除非用户明确
   要求，不自动启动 Codex subagent。
 
 ## 当前里程碑
 
-| Method | 状态 | 权威冻结记录 | 关键资格边界 |
+| Method | 状态 | 权威状态记录 | 关键资格边界 |
 | --- | --- | --- | --- |
 | LightMem | `method-frozen-v3` | [frozen-v3](branches/method-recertification/lightmem/notes/lightmem-frozen-v3.md) | online-soft；pair lineage 资格按 benchmark；forced flush 已修 |
 | Mem0 | `method-frozen-v2` | [frozen-v2](branches/method-recertification/mem0/notes/mem0-frozen-v2.md) | V3 singleton 合法；LoCoMo speaker 映射；turn/session provenance 分格 |
@@ -112,8 +114,11 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 | A-Mem | `method-frozen-v1` | [frozen-v1](branches/method-recertification/amem/notes/amem-frozen-v1.md) | evolution 后 current memory；Recall/Precision/NDCG N/A |
 | SimpleMem | `method-frozen-v1` | [frozen-v1](branches/method-recertification/simplemem/notes/simplemem-frozen-v1.md) | 合成 MemoryEntry；provenance N/A；build 串行 |
 | MemOS | `method-frozen-v1` | [frozen-v1](branches/method-recertification/memos/notes/memos-frozen-v1.md) | typed product handlers；LoCoMo 双视角；framework W2 N/A |
+| Letta/MemGPT | `ready_for_smoke` | [M2 checkpoint](branches/method-recertification/letta/notes/letta-m2-adapter-checkpoint.md) | sleeptime core blocks；五格 source-qrel N/A；W1-only |
+| LangMem | `ready_for_smoke` | [M2 checkpoint](branches/method-recertification/langmem/notes/langmem-m2-adapter-checkpoint.md) | async background manager；stable rank valid；evolved provenance N/A；croppable W2 |
 
-未接入：Letta/MemGPT、EverOS、LangMem、Supermemory。EverOS 仍排最后。
+尚无 adapter：Supermemory、EverOS。EverOS 仍排最后；Letta/LangMem 已接入但未完成真实 B11，
+因此不能标 frozen。
 
 ## 现行长期裁决
 

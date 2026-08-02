@@ -13,9 +13,11 @@ smoke 与冻结。五家 benchmark 的 raw schema、canonical id、已知异常�
 2. M1 已完成：current source/product/official-harness、background manager、
    store/namespace、完成门与五格 metric 资格见
    [M1 ruling](notes/langmem-current-product-identity-m1-ruling.md)。
-3. 当前动作：实现 provider v3 adapter、独立 runtime、原子状态、五格 production-path
-   强反例与 living dossier。
-4. 无 API 回归和机器 smoke plan 通过后，真实 API 仍须用户另行批准预算、规模与 run id。
+3. M2 离线门已完成：provider v3 adapter、独立 runtime、原子状态、五格 production-path
+   强反例、living dossier 与 20 份机器 smoke plan 均已验收；最小恢复入口见
+   [M2 检查点](notes/langmem-m2-adapter-checkpoint.md)。
+4. 当前停在 B11 真实 smoke 批准门；真实 API 仍须用户另行批准预算、规模与 run id。
 
 Letta/MemGPT 已完成离线 M2，仍独立停在真实 B11 批准门；LangMem 的离线施工不代替也不
-取消该批准门。父级 `../README.md` 与 ws02.7 恢复胶囊保存权威动态状态，本页只作支线索引。
+取消该批准门。LangMem 当前 ledger 也已为 `ready_for_smoke`，但不是 frozen；父级
+`../README.md` 与 ws02.7 恢复胶囊保存权威动态状态，本页只作支线索引。

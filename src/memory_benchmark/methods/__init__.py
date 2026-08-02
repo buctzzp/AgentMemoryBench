@@ -7,6 +7,7 @@
 from .amem_adapter import AMem, AMemConfig, build_amem_source_identity
 from .lightmem_adapter import LightMem, LightMemConfig, build_lightmem_source_identity
 from .letta_adapter import Letta, LettaConfig, build_letta_source_identity
+from .langmem_adapter import LangMem, LangMemConfig, build_langmem_source_identity
 from .mem0_adapter import Mem0
 from .memos_adapter import MemOS, MemOSConfig, build_memos_source_identity
 from .memoryos_adapter import (
@@ -38,6 +39,9 @@ __all__ = [
     "Letta",
     "LettaConfig",
     "build_letta_source_identity",
+    "LangMem",
+    "LangMemConfig",
+    "build_langmem_source_identity",
     "Mem0",
     "MemOS",
     "MemOSConfig",
