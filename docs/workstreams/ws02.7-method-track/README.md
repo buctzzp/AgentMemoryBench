@@ -1,7 +1,7 @@
 ---
 id: ws02.7
 parent: ws02
-status: in-progress（首批 6 method frozen；下一家 Letta/MemGPT）
+status: in-progress（首批 6 method frozen；Letta 离线门完成，LangMem M2 在建）
 created: 2026-07-12
 ---
 # ws02.7 Method Track M0
@@ -94,7 +94,10 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   ledger 门无 API 全量为
   `1923 passed, 3 deselected, 13 warnings, 29 subtests passed in 144.84s`，compileall exit 0。
 - **不可顺手重开**：benchmark raw/canonical/gold 调查、已冻结 25 格、旧
-  `config_track` 兼容、legacy bridge/resume、BLEU/ROUGE/Precision 新公式。
+  `config_track` 兼容、legacy bridge/resume、BLEU/ROUGE/Precision 新公式。Letta 真实
+  B11 继续等待用户新批准；当前不烧 API 的施工动作已转入
+  [LangMem ledger](branches/method-recertification/langmem/notes/langmem-integration-ledger.md)：
+  M1 已锁 current source/product/harness，当前进入 M2 adapter 离线施工。
 - **恢复当前结构任务只读**：上方 M0 ruling；需要追溯某家 method 才读下表对应 frozen note。
 - **派工边界**：actor 卡由架构师写成自包含 prompt，用户选择跨模型 actor；除非用户明确
   要求，不自动启动 Codex subagent。

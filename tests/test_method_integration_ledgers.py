@@ -43,7 +43,10 @@ def test_repository_method_ledgers_pass_machine_gate() -> None:
 
     ledgers = validate_repository(ROOT)
 
-    assert [ledger.metadata["method_id"] for ledger in ledgers] == ["letta"]
+    assert [ledger.metadata["method_id"] for ledger in ledgers] == [
+        "langmem",
+        "letta",
+    ]
 
 
 def test_template_has_exact_protected_checkpoint_order() -> None:

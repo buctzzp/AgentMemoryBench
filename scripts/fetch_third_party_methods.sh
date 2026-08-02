@@ -40,6 +40,6 @@ apply_method_patch "MemOS" "${ROOT_DIR}/scripts/patches/memos-product-runtime-ob
 fetch_method "SimpleMem" "https://github.com/aiming-lab/SimpleMem.git" "60a48e83a7fef10d386e1f438589047d3a4257bc"
 apply_method_patch "SimpleMem" "${ROOT_DIR}/scripts/patches/simplemem-product-compat.patch"
 fetch_method "cognee" "https://github.com/topoteretes/cognee.git" "f7e2267cf02f5df15c4b60bf196b30ac2c06b32d"
-fetch_method "langmem" "https://github.com/langchain-ai/langmem.git" "c01e273b94aa4c06e41d0ed1ccce0db17de2bc11"
+fetch_method "langmem" "https://github.com/langchain-ai/langmem.git" "56d85939d80bb731bd5e237567148d817d7bfd16"
 fetch_method "letta" "https://github.com/letta-ai/letta.git" "b76da9092518cbaa2d09042e52fdcbde69243e18"
 fetch_method "supermemory" "https://github.com/supermemoryai/supermemory.git" "acd2fea9a958361e7add50c1c8c8956a8c5c1814"
