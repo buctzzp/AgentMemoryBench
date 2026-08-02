@@ -70,6 +70,12 @@
 
 ### B1. 来源锁与接口选择
 - 官方 repo/commit（拿不到写"来源待溯"）、license、vendored 路径。
+- **开源资格必须核 source availability，不看宣传标签猜。**GitHub repo 有 OSI license、
+  release 可下载本地 binary、文档写 self-host/open source，三者都不能单独证明运行时核心已
+  开源；必须在 pinned tree 中找到实际 ingest/extract/update/search/storage server/engine 源码
+  与可复现 build 入口。若产品核心只发布预编译 binary，写
+  `source-unavailable self-hosted binary`，不能计入要求 local OSS 的矩阵；是否放宽为 binary-only
+  产品是用户的范围裁决，adapter 不得先斩后奏。Supermemory `server-v0.0.6` 是首个判例。
 - **产品接口选择**：用哪个 ingest/retrieve 接口，**为什么不用**它的
   chat/ask/eval 专用入口（公平性——只测记忆质量，见 AGENTS 运行主线）。
   附官方源码 `文件:行号`。

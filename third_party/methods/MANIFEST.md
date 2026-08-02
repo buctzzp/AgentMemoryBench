@@ -12,4 +12,4 @@
 | cognee | https://github.com/topoteretes/cognee.git | f7e2267cf02f5df15c4b60bf196b30ac2c06b32d | local-only；按 fetch 脚本恢复 |
 | LangMem | https://github.com/langchain-ai/langmem.git | 56d85939d80bb731bd5e237567148d817d7bfd16（package 0.0.30） | local-only；按 fetch 脚本恢复；current remote 相对旧 pin 仅 `uv.lock` 依赖维护漂移，产品源码未变 |
 | letta | https://github.com/letta-ai/letta.git | b76da9092518cbaa2d09042e52fdcbde69243e18 | local-only；按 fetch 脚本恢复 |
-| supermemory | https://github.com/supermemoryai/supermemory.git | acd2fea9a958361e7add50c1c8c8956a8c5c1814 | local-only；按 fetch 脚本恢复 |
+| supermemory | https://github.com/supermemoryai/supermemory.git | server-v0.0.6 / 566be208981aa23ef20a85fd50a737861b1b10b2 | local-only public control/docs repo；按 fetch 脚本恢复。注意：同名 self-host runtime 只以 release binary 发布，公开 tree 无 server/engine 源码，当前不满足 Phase 1 local OSS 门 |

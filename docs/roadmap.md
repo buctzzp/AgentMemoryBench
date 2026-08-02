@@ -42,7 +42,9 @@ MemOS=`method-frozen-v1`：官方 `v2.0.25` typed product handler、LoCoMo 双 n
 async exact terminal 与真实 API usage 观测已闭合；framework W2 因共享进程级
 runtime/embedder 的真实竞态判 N/A，主 profile 固定 W1。
 
-缺口：2 个尚无 adapter 的 method（EverOS、Supermemory）；Letta/MemGPT 与 LangMem 已有
+缺口：2 个尚无 adapter 的 method（EverOS、Supermemory）；其中 Supermemory 最新稳定
+self-host runtime 只有 binary、公开 tree 无 server/engine source，已在 ws02.7 标
+`source-blocked`，不满足现行 local OSS 范围。Letta/MemGPT 与 LangMem 已有
 product-faithful adapter、五格 dossier 与机器化 smoke plan，但真实 B11 smoke 尚待用户批准。
 效果参数、作者 builder、真实 resume 与 full 成本 pilot 仍待后续。真实 API
 一律继续由用户确认预算、规模与 run_id。首批 25 格完成后已做一次有边界的
@@ -65,7 +67,7 @@ registry-backed `plan-smoke` preflight 与新 method ledger v1 强制门也已�
 | [ws02.4](workstreams/ws02.4-simplemem/README.md) | simplemem-adapter | accepted | P0 | 历史 T1-T6 已关闭；current text product 的五格重认证与 frozen-v1 见 ws02.7 |
 | [ws02.5](workstreams/ws02.5-method-interface-audit/README.md) | method-interface-audit | done | P0 | 2026-07-09 关闭：5 method 接口审计 + MemoryOS 迁移 + 当时配置归一化；shared embedder 资产保留为 controlled，ws02.7 现审计 product-default 精确身份与迁移/复证面 |
 | [ws02.6](workstreams/ws02.6-first-smoke-hardening/README.md) | first-smoke-hardening | done | P0 | 五 benchmark 全部 frozen-v1 + B6 横向总验收完成（2026-07-12）；method 侧已转 ws02.7 |
-| [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | in-progress | P0 | 首批 6 method 含 MemOS 全部 frozen；Letta/MemGPT M2 离线门通过、待 B11 真实 smoke 批准，EverOS 仍排最后 |
+| [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | in-progress | P0 | 首批 6 method frozen；Letta/LangMem M2 离线门通过、待 B11 批准；Supermemory source-blocked；当前进入 EverOS |
 | [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | open | P1 | 结构归一 M0 已关闭；legacy/LLM runtime 等 M1 后续有边界推进，不阻塞 MemOS |
 | [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | open | P2 | isolated 进度心跳、第三方 stdout/tqdm 治理 |
 | [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | open | P1 | 全量实验申请材料：成本估算表 + 结果汇总 + 兜底验证清单（依赖 ws02） |

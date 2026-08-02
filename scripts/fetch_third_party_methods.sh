@@ -42,4 +42,4 @@ apply_method_patch "SimpleMem" "${ROOT_DIR}/scripts/patches/simplemem-product-co
 fetch_method "cognee" "https://github.com/topoteretes/cognee.git" "f7e2267cf02f5df15c4b60bf196b30ac2c06b32d"
 fetch_method "langmem" "https://github.com/langchain-ai/langmem.git" "56d85939d80bb731bd5e237567148d817d7bfd16"
 fetch_method "letta" "https://github.com/letta-ai/letta.git" "b76da9092518cbaa2d09042e52fdcbde69243e18"
-fetch_method "supermemory" "https://github.com/supermemoryai/supermemory.git" "acd2fea9a958361e7add50c1c8c8956a8c5c1814"
+fetch_method "supermemory" "https://github.com/supermemoryai/supermemory.git" "566be208981aa23ef20a85fd50a737861b1b10b2"

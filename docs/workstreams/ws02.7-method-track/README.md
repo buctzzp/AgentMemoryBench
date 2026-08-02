@@ -1,7 +1,7 @@
 ---
 id: ws02.7
 parent: ws02
-status: in-progress（首批 6 method frozen；Letta/LangMem 离线门完成，Supermemory 待启动）
+status: in-progress（首批 6 method frozen；Letta/LangMem 离线门完成；Supermemory source-blocked；EverOS 待启动）
 created: 2026-07-12
 ---
 # ws02.7 Method Track M0
@@ -99,7 +99,11 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   [检查点](branches/method-recertification/langmem/notes/langmem-m2-adapter-checkpoint.md)
   收口为 `ready_for_smoke`：真实零 API product readout、扩展定向 473 passed、主树
   `2021 passed, 3 deselected, 13 warnings, 29 subtests passed in 132.29s`、compileall、ledger
-  与 20 份 machine plan 均闭合。当前不烧 API 的下一动作是 Supermemory ledger/M1。
+  与 20 份 machine plan 均闭合。Supermemory
+  [M1 裁决](branches/method-recertification/supermemory/notes/supermemory-current-source-product-m1-ruling.md)
+  已锁最新稳定 self-host `server-v0.0.6`：公开 MIT tree 没有实际 server/engine source，release
+  只提供 checksum-pinned binary，故不满足 Phase 1 `local OSS` 门；ledger 诚实标
+  `blocked`，不偷换 cloud/binary adapter。当前不烧 API 的下一动作是 EverOS ledger/M1。
 - **恢复当前结构任务只读**：上方 M0 ruling；需要追溯某家 method 才读下表对应 frozen note。
 - **派工边界**：actor 卡由架构师写成自包含 prompt，用户选择跨模型 actor；除非用户明确
   要求，不自动启动 Codex subagent。
@@ -116,8 +120,10 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 | MemOS | `method-frozen-v1` | [frozen-v1](branches/method-recertification/memos/notes/memos-frozen-v1.md) | typed product handlers；LoCoMo 双视角；framework W2 N/A |
 | Letta/MemGPT | `ready_for_smoke` | [M2 checkpoint](branches/method-recertification/letta/notes/letta-m2-adapter-checkpoint.md) | sleeptime core blocks；五格 source-qrel N/A；W1-only |
 | LangMem | `ready_for_smoke` | [M2 checkpoint](branches/method-recertification/langmem/notes/langmem-m2-adapter-checkpoint.md) | async background manager；stable rank valid；evolved provenance N/A；croppable W2 |
+| Supermemory | `blocked` | [M1 source ruling](branches/method-recertification/supermemory/notes/supermemory-current-source-product-m1-ruling.md) | self-host binary 可下载但 runtime source 不在公开 tree；等待范围裁决或 upstream 开源 |
 
-尚无 adapter：Supermemory、EverOS。EverOS 仍排最后；Letta/LangMem 已接入但未完成真实 B11，
+尚无 adapter：Supermemory、EverOS。Supermemory 被 local OSS source gate 阻断，离线主线现进入
+EverOS；Letta/LangMem 已接入但未完成真实 B11，
 因此不能标 frozen。
 
 ## 现行长期裁决
