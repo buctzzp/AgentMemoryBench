@@ -113,8 +113,9 @@ official product surface，同时逐 benchmark 复用已冻结的公开输入契
 
 ### 5.1 Runtime 与生命周期
 
-- runtime 用 vendored Letta V1 server 的 `SyncServer`、manager/agent loop 和 SQLite backend，
-  每个 child run 使用 run-scoped `LETTA_DIR`；不要求用户启动 host，也不走 Letta cloud。
+- runtime 用 vendored Letta V1 server 的 `SyncServer`、manager/agent loop 和本地 PostgreSQL
+  数据层；不要求用户启动 Letta HTTP host，也不走 Letta cloud。worker 依赖使用 vendored
+  `uv.lock` 的独立 Python 3.12 环境，避免把 Letta 的 250+ 包与主框架依赖扁平合并。
 - adapter 复现 §4 的产品 call graph，不复制 SDK 网络层：创建 sleeptime agent 和 blocks，
   发送 formatted batch，等待精确 terminal，再读 blocks。
 - `prepare` 创建 runtime/actor/agent/blocks；`ingest` 只负责当前 session 的消息批；
@@ -168,7 +169,7 @@ section，不修改主配置含义。
 
 1. 用 current vendored source 走通 in-process sleeptime agent 的真实调用链，而不是 fake-only
    模拟官方 SDK 表面。
-2. SQLite、actor、agent、blocks、background run 的所有权与 cleanup/retry 状态机。
+2. PostgreSQL、actor、agent、blocks、background run 的所有权与 cleanup/retry 状态机。
 3. OpenAI-compatible build LLM 与 embedding 的配置映射、timeout/retry、效率观测和 secret
    负空间。
 4. 五格 canonical event 到最终 wrapper 的字节级强反例，尤其 LoCoMo speaker/caption/time、
@@ -188,3 +189,30 @@ section，不修改主配置含义。
 - active Letta Code 与 legacy V1 已明确分轨；
 - primary product surface 已从 direct archival bypass 改判为 official sleeptime-memory contract；
 - M2 可以开始，但 ledger 中 lifecycle、五格、metric 与 B11 仍保持未完成状态。
+
+## 9. M1-R1：真实初始化探针勘误（2026-08-02）
+
+M1 首版把 legacy server 的本地 backend 写成 SQLite，这是被 current production import/初始化
+探针推翻的旧印象，现已撤回：
+
+- `settings.database_engine` 在没有 PG env 时确实返回 `SQLite`，但
+  `letta/server/db.py:20-21,57-58` 无条件把 `settings.letta_pg_uri` 转成 `asyncpg` URI 并创建
+  PostgreSQL engine；它没有 SQLite 分支。
+- 在隔离 `HOME`、隔离 `LETTA_DIR`、清空外部 API key 的真实 `SyncServer` 初始化中，第一次
+  actor query 仍尝试连接 `localhost:5432`，不是写 SQLite。
+- upstream `CONTRIBUTING.md:30-61` 明写开发环境要求 PostgreSQL；`compose.yaml:1-36` 也以
+  Postgres/pgvector 为正式数据层。这与真实调用一致，优先级高于残留 enum/config 字段。
+
+同时，`uv pip install --dry-run 'letta[sqlite]==0.16.8'` 会给主环境新增约 178 个包并卸载或
+降级 12 个既有包；current 无锁解析还把 `mcp` 解到与 `fastmcp` 不兼容的版本。故 M2 锁定：
+
+1. 不给主项目直接添加 `letta` 依赖；
+2. 使用 vendored `pyproject.toml + uv.lock` 的 Python 3.12 独立 runtime；
+3. 只额外补 current server 无条件 import/PG runtime 所需且由 upstream lock 已锁版本的
+   `asyncpg`、`pg8000` 与 `pgvector`；不启用会强制本机编译 `psycopg2` 的整包 extra；
+4. adapter 与 worker 通过本地长驻 stdio 传输结构化命令，worker 内部直接调用 `SyncServer`
+   与 agent loop。该进程是依赖隔离边界，不是 HTTP host，也不改变 Letta 算法调用链。
+
+因此 M1 的 product/interface 裁决不变，只有 storage/runtime packaging 从“SQLite 同进程”
+勘误为“PostgreSQL + 独立本地 worker”。M2 必须继续证明 DB namespace、进程退出、异常传播与
+clean retry，不能把这次 import 成功冒充 lifecycle 已闭合。

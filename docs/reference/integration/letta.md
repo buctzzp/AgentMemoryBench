@@ -10,7 +10,10 @@ Letta/MemGPT 已完成 M1 source/product identity 裁决，尚未完成 adapter 
   替换 legacy MemGPT/Letta V1。
 - 主轨采用官方 `ai-memory-sdk v0.2.0` 的产品语义：role/content message batch 驱动
   memory-only sleeptime agent，等待 run 完成后读取 learned core blocks；框架在进程内调用
-  同一 Letta 内核，不启动 HTTP host。
+  同一 Letta 内核，不启动 HTTP host。legacy server 的真实数据层是 PostgreSQL/pgvector，
+  不是残留配置字段暗示的 SQLite。
+- Letta 的 250+ 依赖与主框架存在版本冲突；runtime 使用 vendored `uv.lock` 的独立 Python
+  3.12 长驻 worker，stdio 只承担本地依赖隔离，worker 内仍直接调用 `SyncServer`/agent loop。
 - direct archival insert/search 会绕过 core-memory learning，只可作以后显式 diagnostic
   profile，不能进入主表。
 - current official repositories 对 Phase 1 五 benchmark 的 harness 覆盖为零，五格均是
