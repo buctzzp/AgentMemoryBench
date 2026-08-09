@@ -10,8 +10,10 @@
 - Phase 1 固定范围（2026-07-04 锁定，2026-07-11 名单修订）：5 benchmark
   （LoCoMo、LongMemEval、HaluMem、BEAM、MemBench）× 10 method（学术型 A-Mem、
   MemoryOS、MemOS、LightMem、SimpleMem；工程型 Mem0、Letta/MemGPT、EverOS、
-  LangMem、Supermemory）× 尽可能多 metric。
-  Supermemory 只按 self-host/local OSS 口径接入；Zep 与 Graphiti 不进 Phase 1。
+  LangMem、Graphiti）× 尽可能多 metric。2026-08-09 source gate 复核确认 Supermemory
+  stable self-host 只有预编译 runtime、公开仓库缺 server/engine source，用户裁定由
+  Graphiti OSS 接替第十格。这里的 method 身份严格是 Apache-2.0 的 Graphiti，不是 Zep
+  hosted product，也不宣称 Zep parity；Supermemory blocked note 只作历史 source-gate 判例。
 - 主协议 **v3 provider**：`MemoryProvider.ingest(unit) + retrieve(query) ->
   RetrievalResult`，粒度由实例级 `consume_granularity`（turn/pair/session/
   conversation）声明、框架事件流聚合投递；framework reader 统一执行 answer

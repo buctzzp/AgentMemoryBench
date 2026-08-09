@@ -53,29 +53,34 @@ LightMem 已关闭的异常样本。只有三类触发器允许重开 benchmark 
    B1-B11。
 6. **MemOS（已完成）**：typed product handler、官方 LoCoMo 双视角、async exact
    terminal 与 B7 observation 已冻结；framework W2 因共享 runtime/embedder 判 N/A。
-7. **Letta/MemGPT M2 离线门已完成**：当前等待用户批准机器生成的 11 个 concrete
-   variant B11 真实 smoke；真实 run 与 artifact gate 关闭后方可冻结。
+7. **Letta/MemGPT M2 离线门已完成**：11 个 concrete plan 已获批执行；首次真实 run
+   依次暴露并修复 PostgreSQL 临时 init-server readiness 与 official run lifecycle 两个缺口，
+   当前已到达 OpenCodeGo provider，但因账号未完成区域 opt-in 返回 403。外部门解除后从同一
+   planner plan 重跑；真实 artifact gate 关闭后方可冻结。
 8. **LangMem M2 离线门已完成**：current source/product/official-harness、background-manager
    产品 adapter、原子状态、五格 dossier、W2 ownership 与 20 份机器计划均已验收；
    [ledger](langmem/notes/langmem-integration-ledger.md) 为 `ready_for_smoke`。Letta 与 LangMem
    各自等待真实 B11 批准。
-9. **Supermemory M1 已命中 source gate**：最新稳定 self-host `server-v0.0.6` 只发布
+9. **EverOS M2 离线门已完成**：官方稳定版锁为 `v1.2.3@48fc908`；EverOS 与精确锁定的
+   EverAlgo runtime packages 均有 Apache-2.0 public source。official lifespan 内 typed-product
+   adapter、exact drain、五格 dossier、20 份 machine plan 与全量回归均已闭合，ledger 为
+   `ready_for_smoke`。公开 harness 只有 LoCoMo；LongMemEval 仅论文报告、其余三格为
+   framework extension；与 LangMem 一样暂停在共用 OpenCodeGo opt-in 外部门。
+10. **Supermemory M1 历史 source gate**：最新稳定 self-host `server-v0.0.6` 只发布
    checksum-pinned binary，公开 MIT tree 没有 server/engine source 或 release build；官方
-   issue #1299 仍无维护者答复。现行范围要求 local OSS，故 ledger 为 `blocked`，未经用户
-   明确放宽不得写 binary/cloud adapter。
-10. **EverOS M2 离线门已完成**：官方稳定版锁为 `v1.2.3@48fc908`；EverOS 与精确锁定的
-    EverAlgo runtime packages 均有 Apache-2.0 public source。official lifespan 内 typed-product
-    adapter、exact drain、五格 dossier、20 份 machine plan 与全量回归均已闭合，ledger 为
-    `ready_for_smoke`。公开 harness 只有 LoCoMo；LongMemEval 仅论文报告、其余三格为
-    framework extension；真实 B11 尚待新预算批准。
+   issue #1299 仍无维护者技术答复。该 method 已退出 Phase 1，第十格不再等待其开源。
+11. **Graphiti OSS M1 已关闭**：用户裁定以 Apache-2.0 Graphiti 接替第十格，锁
+    `v0.29.3@021d3a5`。Graphiti 与 Zep hosted product 严格分名；direct
+    `add_episode/search` 是 product-equivalent surface，current official repo 仅有 LongMemEval
+    graph-build payload anchor。当前只做 M2 FalkorDB Lite、embedding、lineage、HaluMem、
+    missing-time 审计；未经单独预算批准不执行 Graphiti 真实 API。
 
 ## 当前状态
 
 LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS 均已冻结；状态与证据从父级
 `../../README.md` 恢复胶囊进入。机器化 smoke plan/preflight 与 ledger v1 强制接入门均已
 落地；Letta/MemGPT、LangMem 与 EverOS 三份 ledger 均已推进到 `ready_for_smoke`。三家 M1/M2、
-五格安全档案、机器计划与无 API 全量回归均已关闭；获批前不得发起其 build/answer/judge API。
-Supermemory 已先建 ledger 并完成 current source/product/harness M1，但因 runtime source
-不可得停在 local OSS 门。当前动作是等待三家 `ready_for_smoke` method 的真实 B11 批准，且不重做
-五个 benchmark dataset census。
+五格安全档案、机器计划与无 API 全量回归均已关闭；当前共用外部门是 OpenCodeGo 区域 opt-in，
+不是重新申请预算。Supermemory source gate 保留为历史，Graphiti M1 已通过并成为当前 M2 动作。
+继续复用五个 benchmark 稳定层，不重做 dataset census。
 权威实时动作仍看父级恢复胶囊与最新断点。

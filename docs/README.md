@@ -19,7 +19,7 @@
 | `data/`、`models/` | 运行时数据集与本地模型权重（HF repo `BuptZZP/agentmemorybench-data`） |
 | `outputs/` | 实验产物；`memoryos-locomo-full-20260603/` 受保护 |
 | `third_party/benchmarks/` | 官方 benchmark 仓库副本（事实核查用） |
-| `third_party/methods/` 中 6 个重仓库 | 见 `third_party/methods/MANIFEST.md` + fetch 脚本 |
+| `third_party/methods/` 中多个重仓库 | 见 `third_party/methods/MANIFEST.md` + fetch 脚本 |
 | `old/` | 2026-06 之前的遗留草稿 |
 | `tmp/` | 临时抓取与中间产物 |
 | `paper-make/` | 论文 LaTeX 工作区 |

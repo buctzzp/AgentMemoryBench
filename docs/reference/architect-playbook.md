@@ -126,6 +126,16 @@
   架构师明确裁定进入主轨，也可以作为显式 benchmark policy（2026-07-27 MemOS×LoCoMo
   双视角判例）。必须在 manifest/dossier 披露写入倍数、per-view top-k 与跨库 rank 缺失，
   不能仍声称“一 conversation 一 cube / 总 top-k”。
+- 容器“起来了”不等于最终 product ready。readiness probe 必须穿过生产协议与最终地址执行最小
+  业务查询；临时 init server、Unix socket 或过早端口健康都可能在真正 runtime 接管前误报绿。
+  Letta 首次真实 smoke 因 PostgreSQL init race 暴露此盲点，后续容器 adapter 在离线门就要写
+  transient-init 强反例。
+- fake backend 不会替产品证明 run/task bookkeeping。凡官方业务入口强制 `run_id/task_id`，先
+  画 `create → business call → terminal(success/failure/cancel)` 状态机，再写 adapter；只调用
+  中间 step 会在真实 product 首次执行时失败。状态记录也不得携带 secret-rich 原始异常文本。
+- Phase 槽位替换要重新做**身份裁决**，不能把“同一组织的 OSS 项目”写成“托管产品开源版”。
+  Graphiti 是 Apache-2.0 temporal graph engine，Zep 是另一 hosted product surface；接替
+  source-unavailable Supermemory 后，manifest、文档、结果命名均只能写 Graphiti，不能写 Zep parity。
 - 审计官方 harness 必须追到**最终 payload**：外层 `client.add(session)` 可能在 client
   内按 `batch_size` 再发多次请求。逐层核 wrapper loop、schema extra-field 行为和 current
   函数签名；只看调用点、README 或 argparse 默认值会漏掉真正改变算法的 batching/

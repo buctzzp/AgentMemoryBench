@@ -12,5 +12,12 @@
 | cognee | https://github.com/topoteretes/cognee.git | f7e2267cf02f5df15c4b60bf196b30ac2c06b32d | local-only；按 fetch 脚本恢复 |
 | LangMem | https://github.com/langchain-ai/langmem.git | 56d85939d80bb731bd5e237567148d817d7bfd16（package 0.0.30） | local-only；按 fetch 脚本恢复；current remote 相对旧 pin 仅 `uv.lock` 依赖维护漂移，产品源码未变 |
 | letta | https://github.com/letta-ai/letta.git | b76da9092518cbaa2d09042e52fdcbde69243e18 | local-only；按 fetch 脚本恢复 |
-| supermemory | https://github.com/supermemoryai/supermemory.git | server-v0.0.6 / 566be208981aa23ef20a85fd50a737861b1b10b2 | local-only public control/docs repo；按 fetch 脚本恢复。注意：同名 self-host runtime 只以 release binary 发布，公开 tree 无 server/engine 源码，当前不满足 Phase 1 local OSS 门 |
+| graphiti | https://github.com/getzep/graphiti.git | v0.29.3 / 021d3a57d511f21b10adaf7fa923bd5c1fce5e9d | local-only；按 fetch 脚本恢复。Graphiti 是 Apache-2.0 temporal context graph engine，不冒充 Zep 托管产品；Phase 1 用 direct core product surface，source/product 裁决见 ws02.7 |
 | EverOS | https://github.com/EverMind-AI/EverOS.git | v1.2.3 / 48fc9084888bc17100053227284f939a5aca5e91 | local-only；按 fetch 脚本恢复并应用 `scripts/patches/everos-product-runtime-observability.patch`。patch 只让 lifespan shutdown 失败在全部 provider settle 后向调用方可见，不改成功路径或算法。运行算法依赖由该版本 `uv.lock` 固定，公开源码对应 EverMind-AI/EverAlgo 的精确 package tags。用户本地 `EverMemOS.pdf` 不属于恢复资产 |
+
+## 已退出 Phase 1 的 source-gate 快照
+
+- `supermemoryai/supermemory@server-v0.0.6/566be208` 曾作为第十格候选；其公开 control/docs
+  repo 不含 self-host memory engine/server source，稳定 runtime 只发布 executable。2026-08-09
+  用户裁定由 Graphiti 接替，因此 fetch 脚本不再恢复它；完整证据保留在 ws02.7 Supermemory
+  M1 note，禁止把残留本地 checkout 当成 active method source。

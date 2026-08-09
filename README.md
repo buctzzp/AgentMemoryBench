@@ -18,55 +18,51 @@ method 接入统一 benchmark 的研究者。
 conversation history -> question -> answer-level score
 ```
 
-### Phase 1 目标与进展（2026-07-07）
+### Phase 1 目标与进展（2026-08-09）
 
-Phase 1 范围已于 2026-07-04 锁定：**5 个 benchmark × 10 个 method**，里程碑 2026-07-20。
+Phase 1 范围是 **5 个 benchmark × 10 个 method**。
 多模态字段已在 core 中保留，但当前阶段不主动运行多模态 benchmark。
 
 Phase 1 的**交付物是 5×10 smoke 矩阵**（每格极小规模真实测试 + 成本 observation），
 不是全量实验。全量实验在预算获批后另启。
 
-**已完成**：
+**当前里程碑**：
 
-- **协议**：v3 provider 协议（`ingest + retrieve`）已批准并全链路落地（M-A/M-B 验收通过），
-  全量回归基线 **802 passed**。协议全文：
-  [spec-protocol-v3.md](docs/workstreams/ws02-phase1-matrix/spec-protocol-v3.md)
-- **Benchmark adapter（2/5）**：LoCoMo、LongMemEval S/M
-- **Method adapter（4/10，均已按 retrieve-first 接入）**：Mem0、MemoryOS、A-Mem、LightMem
-- **效率观测**：token、latency、model identity、memory context tokens 等原始 observation
-- **CLI v2**：`predict smoke/formal` + `evaluate` + `run`；conversation 级并行/resume
+- 5 个 benchmark adapter 全部 frozen-v1；canonical、Gold Evidence Group、异常账、answer/judge
+  和 metric 资格均有稳定文档。
+- 6 个 method 已完成五格真实 smoke 并冻结：LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS。
+- Letta/MemGPT、LangMem、EverOS 已完成 product-faithful adapter、五格 dossier、机器 smoke plan
+  与无 API 回归；Letta 首次真实 smoke 已到达 OpenCodeGo endpoint，但区域 opt-in 返回 403，
+  三家 B11 暂停在同一个外部账号门，不能标 frozen。
+- Graphiti OSS `v0.29.3` 已通过 source/product M1，正在做产品运行时与 metric 资格审计；它于
+  2026-08-09 接替 source-unavailable 的 Supermemory，且不代表 Zep hosted product。
+- 最新已记录的无 API 全量基线为 **2078 passed, 3 deselected, 13 warnings, 29 subtests**。
 
-**进行中**：
-
-- MemBench adapter（[ws02.1](docs/workstreams/ws02.1-membench/README.md)）— 架构师验收通过，
-  本项目第一条 unified prompt 链路 + 第一个零成本 evaluator 落地
-- SimpleMem adapter（[ws02.4](docs/workstreams/ws02.4-simplemem/README.md)）— T1 完成，T2-T6 待施工
-
-**缺口**：3 个新 benchmark adapter（HaluMem、BEAM 的 spec 待架构师起草）、
-6 个新 method adapter（LangMem、Supermemory、MemOS、Cognee、Letta、SimpleMem 剩余）。
-推进顺序与策略见 [路线图](docs/roadmap.md) 与
-[架构师手册 §9.6](docs/reference/architect-playbook.md#96-全局规划原理防漂移北极星2026-07-07-与用户对齐)。
+协议全文见 [spec-protocol-v3.md](docs/workstreams/ws02-phase1-matrix/spec-protocol-v3.md)，
+逐家进度与恢复断点见 [ws02.7](docs/workstreams/ws02.7-method-track/README.md)。
 
 ### 已实现基线详情
 
 | 类型 | 当前状态 |
 | --- | --- |
 | Phase 1 目标 Benchmark | LoCoMo、LongMemEval、HaluMem、BEAM、MemBench |
-| Phase 1 目标 Method | A-Mem、MemoryOS、MemOS、LightMem、SimpleMem、Mem0、Letta/MemGPT、Cognee、LangMem、Supermemory |
-| 已接入 Benchmark | LoCoMo、LongMemEval S/M |
-| 已接入 Method | Mem0、MemoryOS、A-Mem、LightMem |
-| 质量指标 | LoCoMo token F1、LoCoMo LLM judge、LongMemEval LLM judge |
-| 效率观测 | token、latency、model identity、memory context tokens |
-| Supermemory 口径 | 纳入 Phase 1，仅 self-host/local OSS；不用 Enterprise/full platform |
-| Phase 1 排除 | Zep、Graphiti（属 Zep 体系） |
+| Phase 1 目标 Method | A-Mem、MemoryOS、MemOS、LightMem、SimpleMem、Mem0、Letta/MemGPT、EverOS、LangMem、Graphiti OSS |
+| 已接入 Benchmark | LoCoMo、LongMemEval、HaluMem、BEAM、MemBench（均 frozen-v1） |
+| 已冻结 Method | LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS |
+| 待真实 B11 Method | Letta/MemGPT、LangMem、EverOS（OpenCodeGo 区域 opt-in 外部阻断） |
+| 正在接入 | Graphiti OSS v0.29.3；不是 Zep parity |
+| 指标与观测 | answer/retrieval/operation evaluator + token、latency、model/runtime identity、memory context observations |
+| 历史 source gate | Supermemory stable self-host binary 的运行时核心未公开，已退出 Phase 1 第十格 |
 | 已移除 | PrefEval（不恢复 adapter、测试、文档或原始仓库） |
 
 ### 关键约束
 
 - **预算强约束**：全量实验必须先有成本估算表并经导师批准；当前一切真实 run 均为极小
   smoke。真实 API 调用须用户显式确认 method、benchmark、样本规模和 `run_id`。
-- 当前所有真实 LLM 调用统一 `gpt-4o-mini`；未经用户改口不得切换模型。
-- 真实费用按 ohmygpt 实际价格离线计算，不绑定 OpenAI 官方价。
+- smoke 使用 `.env` 中 `opencode_go_key/opencode_base_url/opencode_model_name` 对应的
+  `opencodego/deepseek-v4-flash`；`official_full` 与作者正式校准使用
+  `primary/gpt-4o-mini`。两条 runtime 身份进入 manifest，分数不可直接混比。
+- 真实费用按实际 API 服务商价格离线计算，不绑定 OpenAI 官方价。
 - smoke 使用官方 method 参数；成本控制只通过数据规模裁剪。
 - `outputs/memoryos-locomo-full-20260603/` 是受保护实验资产。
 
@@ -84,6 +80,12 @@ uv sync
 配置 API。根目录 `.env` 只保存 secret 和服务地址，不提交到 Git：
 
 ```text
+# 低预算 smoke profile
+opencode_go_key=<your-opencodego-key>
+opencode_base_url=<your-opencodego-base-url>
+opencode_model_name=deepseek-v4-flash
+
+# official_full / 作者正式校准 profile
 OPENAI_KEY=<your-api-key>
 BASE_URL=https://api.openai.com/v1
 ```

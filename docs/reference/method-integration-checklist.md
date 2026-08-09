@@ -82,6 +82,14 @@
 - **lifecycle 调用图**：不要因为协议类声明了 `prepare/finalize/cleanup` 就假定
   runner 会调用；对每个钩子从 runner 实际调用点反查一次。死钩子要么接线/删除，
   要么 adapter 明确采用 lazy init，并把 no-work resume 与早失败 cleanup 行为锁进测试。
+- **服务 readiness 必须命中最终服务，而不是临时初始化进程**：容器能响应 Unix socket、
+  端口已监听或 `pg_isready` 返回成功，都可能只是 init 阶段的短生命周期 server。应使用生产
+  client 同协议/地址执行最小业务查询，并证明临时 init → shutdown → final server 的窗口不会
+  被误判。Letta PostgreSQL 首次真实 smoke 是判例。
+- **产品强制 run/task lifecycle 必须完整镜像**：若 product 的执行方法要求 official
+  `run_id/task_id`，adapter 不能只直接调用 step/handler。必须使用产品 manager 创建记录、把 id
+  传入业务调用，并在 success/failure/cancel 路径写入唯一 terminal；否则 fake backend 可能全绿、
+  真实 product 才在第一步 fail-fast。Letta `Run create → AgentLoop.step(run_id) → terminal` 是判例。
 - **产品 root/bootstrap**：若官方 runtime 只靠 CLI scaffold 生成配置目录，adapter 不得手写一套
   “近似配置”。从 source-locked tree 复制官方模板，所有会改变算法/模型/存储的模板与 bootstrap
   wrapper 一并纳入 source/manifest identity；缺模板、模板漂移或未知 backend 都 fail-fast。
@@ -269,6 +277,10 @@ B2/B5 及 HaluMem memory_point 这类**能力缺口**（method 接口不支持�
 - 进入真实 smoke 前重读 B0 parity matrix：逐个官方 benchmark 核对 main/author/
   extension/upstream-bug 四类归属仍与**当前 source lock**一致；任何“已记录但未裁”
   的 namespace、batch、search layer/top-k、偏好开关或完整 builder 差异都会阻塞冻结。
+- **共用 provider 的账号/区域 opt-in 属外部批次门**：第一份 machine plan 已证明请求到达 endpoint
+  后，若 provider 以账号、区域或 workspace opt-in 拒绝，隔离并记录失败 run，暂停同 runtime
+  profile 的其余 method，不把同一 4xx 逐家重放。用户本人解除外部门后从首份 plan 重跑；不得
+  把 4xx 记成成功 smoke，也不得擅自代用户接受区域条款。
 - **格子安全说明采用“每 method 一份 living dossier、五 benchmark 分章”，不制造 50 份顶层
   文档**（2026-07-18 用户要求固化）。每格至少写：benchmark 特殊/异常、canonical 层处置、
   method 最终 payload、adapter 差分、私有边界、metric valid/N/A/pending、离线/真实 smoke

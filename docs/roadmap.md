@@ -1,6 +1,6 @@
 # 项目路线图
 
-更新日期：2026-07-29。本文件是唯一方向文档：Phase 1 目标、workstream 索引与
+更新日期：2026-08-09。本文件是唯一方向文档：Phase 1 目标、workstream 索引与
 全局约束。逐任务状态见各 workstream README；2026-06 的历史阶段记录（Phase E-S）
 已归档到 `archive/status/2026-07-04-current-roadmap.md` 与
 `archive/status/2026-07-04-task-ledger.md`。
@@ -9,9 +9,10 @@
 
 - **Benchmark（5）**：LoCoMo、LongMemEval、HaluMem、BEAM、MemBench。
 - **Method（10）**：学术型 A-Mem、MemoryOS、MemOS、LightMem、SimpleMem；
-  工程型 Mem0、Letta/MemGPT、EverOS、LangMem、Supermemory（仅 self-host/local
-  OSS）。（2026-07-11 用户拍板：去 Cognee 换 EverOS，`third_party/methods/
-  EverOS` 已按最新稳定版锁源，上游活跃故排接入序列最后。）
+  工程型 Mem0、Letta/MemGPT、EverOS、LangMem、Graphiti OSS。（2026-07-11 用户拍板
+  去 Cognee 换 EverOS；2026-08-09 又因 Supermemory stable self-host runtime 只有 binary、
+  公开 tree 缺运行时核心源码，改由 Apache-2.0 Graphiti 接替。Graphiti 不等于 Zep hosted
+  product，结果也不宣称 Zep parity。）
 
 **Phase 1 的完成判据不是全量实验，而是 5×10 smoke 矩阵**（2026-07-05 与用户
 重新对齐）：每个可行组合跑通极小规模真实测试并写出成本 observation；汇总为
@@ -42,11 +43,13 @@ MemOS=`method-frozen-v1`：官方 `v2.0.25` typed product handler、LoCoMo 双 n
 async exact terminal 与真实 API usage 观测已闭合；framework W2 因共享进程级
 runtime/embedder 的真实竞态判 N/A，主 profile 固定 W1。
 
-缺口：仅 Supermemory 尚无 adapter；其最新稳定 self-host runtime 只有 binary、公开 tree 无
-server/engine source，已在 ws02.7 标 `source-blocked`，不满足现行 local OSS 范围。
+缺口：Graphiti OSS 已锁 `v0.29.3@021d3a5` source/product 身份，正在关闭 embedded
+FalkorDB Lite、build/embedding runtime、lineage、HaluMem 与 MemBench missing-time 的 M2 门，
+尚无 adapter。Supermemory 旧 blocked 记录只保留为 source-gate 历史。
 Letta/MemGPT、LangMem 与 EverOS 均已有 product-faithful adapter、五格 dossier 与机器化 smoke
-plan，但真实 B11 smoke 尚待用户批准。EverOS latest-stable source 锁为 v1.2.3，official lifespan
-typed-product adapter、exact drain、物理隔离与离线回归已闭合。
+plan；用户已批准使用 OpenCodeGo smoke。Letta 首次真实 run 已到达 provider，但该账号需在
+OpenCodeGo workspace 显式启用中国区模型而返回 403，因此三家 B11 目前是
+`PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`，不是代码失败或预算未批。
 效果参数、作者 builder、真实 resume 与 full 成本 pilot 仍待后续。真实 API
 一律继续由用户确认预算、规模与 run_id。首批 25 格完成后已做一次有边界的
 [架构减重审计](workstreams/ws03-architecture-slimming/notes/2026-07-23-first-25-cell-consolidation-audit.md)：
@@ -54,7 +57,8 @@ typed-product adapter、exact drain、物理隔离与离线回归已闭合。
 [结构归一 M0](workstreams/ws03-architecture-slimming/notes/2026-07-23-structural-normalization-m0-ruling.md)
 已完成 evaluator/prompt/文档的零语义迁移与全量守恒门；MemOS 随后已冻结，
 registry-backed `plan-smoke` preflight 与新 method ledger v1 强制门也已关闭；Letta/MemGPT、
-LangMem 与 EverOS 现处于 B11 真实 smoke 批准门，获批后再执行 artifact gate 与冻结对表。
+LangMem 与 EverOS 的 B11 已获批，当前统一暂停在 OpenCodeGo workspace 区域 opt-in；解除后
+从 Letta 首份 machine plan 继续，再执行 artifact gate 与冻结对表。
 
 ## Workstream 索引
 
@@ -68,7 +72,7 @@ LangMem 与 EverOS 现处于 B11 真实 smoke 批准门，获批后再执行 art
 | [ws02.4](workstreams/ws02.4-simplemem/README.md) | simplemem-adapter | accepted | P0 | 历史 T1-T6 已关闭；current text product 的五格重认证与 frozen-v1 见 ws02.7 |
 | [ws02.5](workstreams/ws02.5-method-interface-audit/README.md) | method-interface-audit | done | P0 | 2026-07-09 关闭：5 method 接口审计 + MemoryOS 迁移 + 当时配置归一化；shared embedder 资产保留为 controlled，ws02.7 现审计 product-default 精确身份与迁移/复证面 |
 | [ws02.6](workstreams/ws02.6-first-smoke-hardening/README.md) | first-smoke-hardening | done | P0 | 五 benchmark 全部 frozen-v1 + B6 横向总验收完成（2026-07-12）；method 侧已转 ws02.7 |
-| [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | in-progress | P0 | 首批 6 method frozen；Letta/LangMem/EverOS M2 离线门通过、待 B11 批准；Supermemory source-blocked |
+| [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | in-progress | P0 | 首批 6 method frozen；Letta/LangMem/EverOS B11 等 OpenCodeGo opt-in；Graphiti M1 通过、M2 当前动作 |
 | [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | open | P1 | 结构归一 M0 已关闭；legacy/LLM runtime 等 M1 后续有边界推进，不阻塞 MemOS |
 | [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | open | P2 | isolated 进度心跳、第三方 stdout/tqdm 治理 |
 | [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | open | P1 | 全量实验申请材料：成本估算表 + 结果汇总 + 兜底验证清单（依赖 ws02） |
