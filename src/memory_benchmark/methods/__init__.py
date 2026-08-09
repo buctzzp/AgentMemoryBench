@@ -5,6 +5,7 @@
 """
 
 from .amem_adapter import AMem, AMemConfig, build_amem_source_identity
+from .everos_adapter import EverOS, EverOSConfig, build_everos_source_identity
 from .lightmem_adapter import LightMem, LightMemConfig, build_lightmem_source_identity
 from .letta_adapter import Letta, LettaConfig, build_letta_source_identity
 from .langmem_adapter import LangMem, LangMemConfig, build_langmem_source_identity
@@ -33,6 +34,9 @@ __all__ = [
     "AMem",
     "AMemConfig",
     "build_amem_source_identity",
+    "EverOS",
+    "EverOSConfig",
+    "build_everos_source_identity",
     "LightMem",
     "LightMemConfig",
     "build_lightmem_source_identity",

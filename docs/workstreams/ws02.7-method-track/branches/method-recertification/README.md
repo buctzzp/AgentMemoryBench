@@ -63,19 +63,19 @@ LightMem 已关闭的异常样本。只有三类触发器允许重开 benchmark 
    checksum-pinned binary，公开 MIT tree 没有 server/engine source 或 release build；官方
    issue #1299 仍无维护者答复。现行范围要求 local OSS，故 ledger 为 `blocked`，未经用户
    明确放宽不得写 binary/cloud adapter。
-10. **EverOS M1 已验收**：官方稳定版锁为 `v1.2.1@4256419`；EverOS 与其精确锁定的
-    EverAlgo runtime packages 均有 Apache-2.0 public source。公开 harness 只有 LoCoMo，
-    LongMemEval 仅论文报告、其余三格为 framework extension；主轨锁 typed product service
-    inside official lifespan，当前进入 M2 离线 adapter 门。
+10. **EverOS M2 离线门已完成**：官方稳定版锁为 `v1.2.3@48fc908`；EverOS 与精确锁定的
+    EverAlgo runtime packages 均有 Apache-2.0 public source。official lifespan 内 typed-product
+    adapter、exact drain、五格 dossier、20 份 machine plan 与全量回归均已闭合，ledger 为
+    `ready_for_smoke`。公开 harness 只有 LoCoMo；LongMemEval 仅论文报告、其余三格为
+    framework extension；真实 B11 尚待新预算批准。
 
 ## 当前状态
 
 LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS 均已冻结；状态与证据从父级
 `../../README.md` 恢复胶囊进入。机器化 smoke plan/preflight 与 ledger v1 强制接入门均已
-落地；Letta/MemGPT 与 LangMem 两份 ledger 均已推进到 `ready_for_smoke`。两家 M1/M2、五格
-安全档案、机器计划与无 API 全量回归均已关闭；获批前不得发起其 build/answer/judge API。
+落地；Letta/MemGPT、LangMem 与 EverOS 三份 ledger 均已推进到 `ready_for_smoke`。三家 M1/M2、
+五格安全档案、机器计划与无 API 全量回归均已关闭；获批前不得发起其 build/answer/judge API。
 Supermemory 已先建 ledger 并完成 current source/product/harness M1，但因 runtime source
-不可得停在 local OSS 门。EverOS ledger 与 current source/product/harness M1 已关闭；当前动作
-是 M2 typed-product adapter、lifecycle、五格 payload/metric 资格与零 API 强反例，且不重做五个
-benchmark dataset census。
+不可得停在 local OSS 门。当前动作是等待三家 `ready_for_smoke` method 的真实 B11 批准，且不重做
+五个 benchmark dataset census。
 权威实时动作仍看父级恢复胶囊与最新断点。

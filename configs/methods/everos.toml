@@ -1,0 +1,40 @@
+# EverOS v1.2.3 product-chat 配置。
+#
+# 两个 section 只切换 build LLM 与 full worker 上限；product source、chat mode、
+# official add batch、HYBRID search、Qwen embedding/rerank identity、物理 conversation
+# 隔离与输入语义保持相同。embedding/rerank secret 只声明环境变量名；值不进
+# TOML、manifest、日志或 artifact。主轨没有暗中选择 benchmark 专用参数。
+
+[smoke]
+llm_model = "deepseek-v4-flash"
+memory_mode = "chat"
+search_method = "hybrid"
+add_batch_size = 25
+embedding_model = "Qwen/Qwen3-Embedding-4B"
+embedding_dimension = 1024
+embedding_credential_env = "EVEROS_DEEPINFRA_API_KEY"
+rerank_provider = "deepinfra"
+rerank_model = "Qwen/Qwen3-Reranker-4B"
+rerank_credential_env = "EVEROS_DEEPINFRA_API_KEY"
+app_id = "memorybenchmark"
+project_id = "phase1"
+worker_request_timeout_seconds = 900.0
+drain_timeout_seconds = 600.0
+max_workers = 1
+
+[official_full]
+llm_model = "gpt-4o-mini"
+memory_mode = "chat"
+search_method = "hybrid"
+add_batch_size = 25
+embedding_model = "Qwen/Qwen3-Embedding-4B"
+embedding_dimension = 1024
+embedding_credential_env = "EVEROS_DEEPINFRA_API_KEY"
+rerank_provider = "deepinfra"
+rerank_model = "Qwen/Qwen3-Reranker-4B"
+rerank_credential_env = "EVEROS_DEEPINFRA_API_KEY"
+app_id = "memorybenchmark"
+project_id = "phase1"
+worker_request_timeout_seconds = 900.0
+drain_timeout_seconds = 600.0
+max_workers = 10

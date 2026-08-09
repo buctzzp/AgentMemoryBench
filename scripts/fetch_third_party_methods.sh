@@ -44,3 +44,4 @@ fetch_method "langmem" "https://github.com/langchain-ai/langmem.git" "56d85939d8
 fetch_method "letta" "https://github.com/letta-ai/letta.git" "b76da9092518cbaa2d09042e52fdcbde69243e18"
 fetch_method "supermemory" "https://github.com/supermemoryai/supermemory.git" "566be208981aa23ef20a85fd50a737861b1b10b2"
 fetch_method "EverOS" "https://github.com/EverMind-AI/EverOS.git" "48fc9084888bc17100053227284f939a5aca5e91"
+apply_method_patch "EverOS" "${ROOT_DIR}/scripts/patches/everos-product-runtime-observability.patch"

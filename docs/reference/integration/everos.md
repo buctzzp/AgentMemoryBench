@@ -1,7 +1,7 @@
 # EverOS 接入实例（B1-B11 逐项）
 
 > 判据模板：`../method-integration-checklist.md` §B；勾选总表：`../integration-status.md`。
-> 当前状态：**M1-R1 已验收，进入 M2 离线 adapter 门**；尚未运行真实 API smoke，也未冻结。
+> 当前状态：**M2 离线 adapter 门已关闭，等待 B11 真实 smoke 新预算批准**；尚未冻结。
 
 - 主 source：官方稳定版 `EverOS v1.2.3@48fc9084888bc17100053227284f939a5aca5e91`，
   Apache-2.0；本地路径 `third_party/methods/EverOS/` 为 local-only，可由
@@ -11,7 +11,9 @@
 - 产品调用面：在隔离 worker 内进入官方 `create_app()` lifespan，直接调用与
   `/api/v2/memory/add|flush|search|get` 相同的 typed DTO/service。它仅省去 HTTP transport，
   不绕过 boundary、Episode、Cascade、OME、SQLite、LanceDB 或产品搜索算法。
-- adapter：待 M2 实现。
+- adapter：`everos-product-chat-v1`；provider v3、`consume_granularity=session`。每个
+  provider 独占 Python 3.12 worker，每个 conversation 使用独立 product root；worker 进入
+  official lifespan 后直接调用 typed `memorize/search/get`。
 - 官方 benchmark：current EverOS 与 EverAlgo 的公开 harness 只覆盖 LoCoMo；论文另报告
   LongMemEval，但没有公开 loader/final payload。HaluMem、BEAM、MemBench 均为 framework
   extension。
@@ -28,30 +30,47 @@
 - **B8 retrieval side effect**：current SearchManager/service 是只读检索；telemetry 不计作
   memory mutation。
 
-## M2 硬门
+- **B1 lifecycle**：独立 worker 进入 official `create_app()` lifespan；项目 patch 只让所有
+  provider shutdown settle 后聚合上抛失败，不改变成功路径。
+- **B2/B4 input**：session 粒度、每 canonical event 一条产品 message。LoCoMo 沿 official
+  all-user + real speaker sender；其他四格保留 canonical role/order。纯 assistant session 只加
+  空且无 source identity 的结构 user anchor，不伪造回复。
+- **B4 time/image**：source time 只按 turn→当前 session→None；缺失时使用不可见的稳定
+  operational ms 满足产品正整数契约，绝不借 question/兄弟 turn/墙钟。LoCoMo image 走共享
+  `[Sharing image that shows: ...]` helper，locator 不可见。
+- **B3/B6/B8 resilience**：每 conversation 物理 root；OME terminal + Cascade health/failure +
+  双稳定零 exact drain。completed-operation sidecar 与 root cleanup marker/tombstone 支持安全
+  resume/clean retry，清理和 shutdown 失败可见。
+- **B4/B5 readout**：public HYBRID search 保留 Episode/atomic facts、score 与稳定 rank；主轨
+  多 owner 以 score→owner→product rank 合并。zero hit 与 backend failure 分开。
+- **B7 observability**：product response exact LLM/embedding usage 由透传 wrapper 收集，只有
+  operation 成功才回放。reranker capability 同样在 lazy SearchManager 前被纯透传包装；current
+  chat/Episode HYBRID 预期零调用，任一非空 rerank 观测均 fail-fast；answer/judge 沿框架公共观测。
 
-1. `consume_granularity=session` 候选必须经真实 product-chain 反例确认；assistant-first、连续
-   role、singleton、odd tail 与 assistant-only session 不得通过改 role 或伪造自然语言回复掩盖。
-2. 产品 timestamp 要求正整数毫秒，而框架要求缺失 source time 保持 `None`。MemBench 100k
-   必须证明独立 transport-order time 不会变成可见事实，或做最小 preserve-none 扩展；不得借
-   question time、相邻消息或墙钟伪造 source time。
-3. LoCoMo 沿 official “两位 speaker 均 role=user、保留 sender identity”口径，但主轨仍须
-   无损渲染共享 image caption；需裁定单 owner search 与双 owner 合并的资格和 top-k。
-4. add/flush 返回不等于 Cascade/OME 完成。必须锁 exact scoped drain、失败传播、迟到任务、
-   cleanup retry、resume 与独占 root/process ownership。
-5. 检索 readout 必须保留产品返回的 Episode 顺序、score、time、session/sender；zero hit 与
-   backend failure 分开。Episode→memcell→message lineage 只有在 reflection-off 且 sidecar
-   一一可证时才可宣称 valid。
-6. HaluMem extraction/update/QA/memory-type 四格分别裁定；`get` 全库结果不能冒充本 session
-   delta，memory-type 当前仅是 N/A 候选。
-7. build、embedding、rerank、answer、judge 观测和 model/runtime/source/transport 身份均须落
-   manifest；真实 B11 前只做零 API preflight。
+## Metric 资格
+
+| 能力 | 状态 |
+| --- | --- |
+| stable product ranking | valid |
+| semantic provenance | N/A：current Episode 是合成记忆，无 lossless source mapping |
+| Recall/Precision/F1@k、NDCG | N/A |
+| HaluMem extraction | valid candidate：session-filtered public get |
+| HaluMem update | valid candidate：probe query 读取累计 current state |
+| HaluMem QA | valid candidate |
+| HaluMem memory type | N/A：产品 Conversation kind 不等于官方三类 taxonomy |
+
+candidate 仍需真实 B11 artifact gate 才能转为最终通过；不会为了填满矩阵改造算法。
 
 ## 证据入口
 
 - [EverOS 接入 ledger](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-integration-ledger.md)
 - [v1.2.3 source drift M1-R1](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-v1.2.3-source-drift-m1-r1.md)
 - [current source / product / official harness M1 裁决](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-current-source-product-m1-ruling.md)
+- [M2 adapter 实现记录](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-m2-adapter-implementation.md)
+- [五 benchmark 安全档案](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-five-benchmark-safety-dossier.md)
+- [M2 检查点](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-m2-adapter-checkpoint.md)
+- [机器 smoke plans](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-smoke-plans-v1.json)
 - [EverOS 接入支线](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/README.md)
 
-当前判词：`EVEROS_V1_2_3_SOURCE_DRIFT_ACCEPTED_READY_FOR_M2`。
+当前判词：`READY_FOR_B11_REAL_SMOKE_APPROVAL`。当前环境缺
+`EVEROS_DEEPINFRA_API_KEY`，且本 method 未获新预算批准，因此没有启动真实 API。

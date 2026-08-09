@@ -82,6 +82,12 @@
 - **lifecycle 调用图**：不要因为协议类声明了 `prepare/finalize/cleanup` 就假定
   runner 会调用；对每个钩子从 runner 实际调用点反查一次。死钩子要么接线/删除，
   要么 adapter 明确采用 lazy init，并把 no-work resume 与早失败 cleanup 行为锁进测试。
+- **产品 root/bootstrap**：若官方 runtime 只靠 CLI scaffold 生成配置目录，adapter 不得手写一套
+  “近似配置”。从 source-locked tree 复制官方模板，所有会改变算法/模型/存储的模板与 bootstrap
+  wrapper 一并纳入 source/manifest identity；缺模板、模板漂移或未知 backend 都 fail-fast。
+- **async context 进入/退出**：`__aenter__` 失败后不得调用对应 `__aexit__` 覆盖原异常；只有确认
+  enter 成功的 provider 才进入 reverse-order shutdown。多个 shutdown 都要 settle 后聚合上抛，
+  不能首错短路留下后续 provider。EverOS v1.2.3 official lifespan 是判例。
 
 ### B2. 注入粒度（consume_granularity）
 - method 原生接口支持的注入单元：turn / pair / session(list) / conversation。
@@ -124,6 +130,9 @@
 - 检索返回是否覆盖官方全部有效记忆层 + 时间/地点字段。
 - **取回规则**：能单独传/取时间戳就结构化带；不能就折进 content；只要检索**能拿回**
   时间戳，formatted_memory 就必须带；拿不回则记 gap。前提是 benchmark dataset 有时间戳。
+- **派生时间最终出口门**：仅在 item 层把公开 timestamp 置空不够；最终 formatter 不得再从 raw
+  metadata/product payload 把 operational、tie-break 或 wall-clock 时间渲染回 answer context。
+  对 merged/unmapped memory 也必须默认隐藏，除非能证明其 source time 资格。
 - 禁止 `str(context)` 这种不可审计的塞法（A-Mem 判例）。
 - **get_answer 型接口的拆分流程覆盖**（用户 2026-07-13 固化）：method 官方
   只有 `get_answer/ask/get_response` 一体化入口、没有独立 retrieve 时，我们
@@ -187,6 +196,10 @@ B2/B5 及 HaluMem memory_point 这类**能力缺口**（method 接口不支持�
   缺口与拦截层。
 - **method 原生返回的效率指标**（如 LightMem add_memory 返回 token/
   api_call_nums）→ 作为我们插桩的交叉参照留档。
+- **配置了 provider 不等于主 profile 可达。**对 reranker、query rewrite 等条件分支，先按真实
+  build/readout 类型画可达图；若主轨判定为零调用，仍须在 capability/client 边界安装纯透传
+  观测并锁 `[]`，非空即 fail-fast。不得只凭配置或源码注释声称“不会调用”，也不得为了一个
+  预期零调用的组件先扩张公共效率协议；真出现调用时停工，再设计可审计的 observation schema。
 - **注入记忆 token 跨 builder 口径**：见 `efficiency-injected-tokens-policy.md`
   （各 profile 都只记“记忆载荷 token”，模板开销不计入）。**作者 builder 审计项**：
   每个作者 prompt builder 核一次“统计的载荷 ≡ prompt_messages 实际嵌入的
@@ -196,6 +209,9 @@ B2/B5 及 HaluMem memory_point 这类**能力缺口**（method 接口不支持�
 - 区分"污染"（eval 探测内容写进记忆，必须防）vs"算法固有状态变化"
   （MemoryOS heat/N_visit，必须保留）——判据 = 回 method 官方 eval 看
   作者意图（playbook §4.5.7）。失败态清理（Mem0 clean_failed_ingest_state）。
+- **物理 root 删除可重入**：`rename(root, tombstone) → rmtree` 不是天然可重试；若进程在 rename 后
+  或递归删除中途退出，live path 已不存在但 tombstone 仍有残留。必须在 root 外保存受 identity
+  保护的 cleanup marker，下一次从同一 tombstone 继续，并以删除完成后才提交 cleaned 状态。
 
 ### B8+. 外部调用韧性（超时/重试/失败兜底，用户 2026-07-14 新增）
 - M-1 取证时列出该 method **全部 API/网络调用点**（抽取 LLM、embedding、

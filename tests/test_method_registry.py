@@ -14,9 +14,10 @@ from memory_benchmark.core import (
     TaskFamily,
     validate_compatibility,
 )
-from memory_benchmark.methods.lightmem_adapter import LightMemConfig
+from memory_benchmark.methods.everos_adapter import EverOSConfig
 from memory_benchmark.methods.langmem_adapter import LangMemConfig
 from memory_benchmark.methods.letta_adapter import LettaConfig
+from memory_benchmark.methods.lightmem_adapter import LightMemConfig
 from memory_benchmark.methods.mem0_adapter import Mem0Config
 from memory_benchmark.methods.memoryos_adapter import MemoryOSPaperConfig
 from memory_benchmark.methods.memos_adapter import MemOSConfig
@@ -37,6 +38,7 @@ def test_registry_lists_conversation_qa_methods() -> None:
 
     assert list_methods() == [
         "amem",
+        "everos",
         "langmem",
         "letta",
         "lightmem",
@@ -187,6 +189,7 @@ def test_built_in_methods_advertise_memory_retrieval_capability() -> None:
         "mem0",
         "memoryos",
         "amem",
+        "everos",
         "langmem",
         "letta",
         "lightmem",
@@ -219,6 +222,11 @@ def test_built_in_methods_advertise_memory_retrieval_capability() -> None:
         ("lightmem", "halumem", "session"),
         ("memoryos", "longmemeval", "pair"),
         ("memoryos", "membench", "session"),
+        ("everos", "locomo", "session"),
+        ("everos", "longmemeval", "session"),
+        ("everos", "membench", "session"),
+        ("everos", "beam", "session"),
+        ("everos", "halumem", "session"),
         ("memos", "locomo", "session"),
         ("memos", "longmemeval", "session"),
         ("memos", "membench", "session"),
@@ -267,6 +275,7 @@ def test_clean_retry_support_is_only_declared_by_methods_with_safe_state_cleanup
     assert get_method_registration("memos").clean_failed_ingest_state is not None
     assert get_method_registration("letta").clean_failed_ingest_state is not None
     assert get_method_registration("langmem").clean_failed_ingest_state is not None
+    assert get_method_registration("everos").clean_failed_ingest_state is not None
 
 
 def test_letta_registration_declares_sleeptime_product_contract() -> None:
@@ -329,6 +338,46 @@ def test_langmem_registration_declares_background_product_contract() -> None:
     assert declaration.embedding.dimension == 384
     assert declaration.embedding.normalization == "external_l2"
     assert declaration.embedding.distance == "langgraph-inmemory-cosine"
+
+
+def test_everos_registration_declares_typed_product_session_contract() -> None:
+    """EverOS 注册应锁 official lifespan、session 粒度和三类模型身份。"""
+
+    registration = get_method_registration("everos")
+    config = load_method_profile(
+        "everos",
+        "smoke",
+        project_root=load_path_settings().project_root,
+    )
+
+    assert isinstance(config, EverOSConfig)
+    assert registration.profile_names == frozenset({"smoke", "official-full"})
+    assert registration.profile_relative_path == Path("configs/methods/everos.toml")
+    assert registration.requires_api is True
+    assert registration.allow_smoke_worker_override is True
+    assert registration.supports_shared_instance_parallelism is False
+    assert registration.provenance_granularity == "none"
+    assert registration.retrieval_evidence_contract_version == "v1"
+    assert registration.resolve_consume_granularity("locomo") == "session"
+    assert registration.efficiency_model_inventory_getter is not None
+    inventory = registration.efficiency_model_inventory_getter(config)
+    assert [entry.model_id for entry in inventory] == [
+        "everos-build-llm",
+        "everos-embedding",
+        "everos-reranker",
+    ]
+    assert [entry.model_role for entry in inventory] == [
+        "memory_build_llm",
+        "embedding",
+        "reranker",
+    ]
+    declaration = registration.build_identity_resolver(config.to_manifest())
+    assert declaration.implementation_variant == "product"
+    assert declaration.embedding_profile == "product_default_v1"
+    assert declaration.embedding.provider == "deepinfra-openai-compatible"
+    assert declaration.embedding.model == "Qwen/Qwen3-Embedding-4B"
+    assert declaration.embedding.dimension == 1024
+    assert declaration.embedding.distance == "lancedb-l2"
 
 
 def test_clean_retry_hook_uses_failed_worker_state_for_isolated_runs(

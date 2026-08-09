@@ -65,7 +65,7 @@ ws02.6 于 2026-07-12 将五家全部 frozen-v1；2026-07-15 MemBench 因 100k m
 | [Letta/MemGPT](integration/letta.md) | ✅ | ✅legacy V1 0.16.8 + ai-memory-sdk v0.2.0 | ✅session；≤10 message；无 placeholder | ✅W1 subject/agent 隔离；W2 N/A | ✅五格 role/time/place/caption | N/A 演化 core blocks 无 source lineage | ✅每批 AgentLoop terminal | ✅build exact usage；retrieve 无 embedding | ✅journal + namespace-safe clean retry | ✅smoke/full runtime 分 profile；embedding N/A | ✅主 TOML；五格均 framework extension | 🟡机器计划/离线回归通过，待真实 smoke | **ready-for-smoke** |
 | LangMem | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | Supermemory | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
-| [EverOS](integration/everos.md) | ⬜M2 | ✅v1.2.3 typed product；EverAlgo public source | 🟡session candidate | 🟡独占 worker/root candidate | 🟡五格待 M2 强反例 | 🟡Episode lineage candidate | 🟡v1.2.3 exact drain 待实现 | 🟡待接线 | ✅Search 只读 | 🟡product identity 已锁、runtime 待配 | 🟡主边界已裁、TOML 待实现 | 🟡M1-R1 已验收、未 smoke | **in-progress** |
+| [EverOS](integration/everos.md) | ✅ | ✅v1.2.3 typed product；EverAlgo public source | ✅session + batch25 + flush | ✅独占 worker/conversation root；离线 W2 ownership | ✅五格 role/time/place/caption/readout | N/A semantic lineage；✅stable rank | ✅OME/Cascade exact drain | ✅build/retrieve 接线；真实 artifact 待 B11 | ✅Search 只读；journal+clean retry | ✅Qwen3-Embedding-4B/1024 + runtime 分 profile | ✅主 TOML；author LoCoMo 后续校准 | 🟡20 份 machine plan + 离线回归通过，待真实 smoke | **ready-for-smoke** |
 
 > "适配器 ✅" 只代表代码入口存在，不代表冻结。Mem0 原 frozen-v1 的大部分证据保留，
 > MemBench/BEAM/HaluMem B4 effective-time 离线修复已验收，内容抽查并入后续 B11；三家 B9

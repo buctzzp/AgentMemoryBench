@@ -1,7 +1,7 @@
 ---
 id: ws02.7
 parent: ws02
-status: in-progress（首批 6 method frozen；Letta/LangMem 离线门完成；Supermemory source-blocked；EverOS M1 已关闭、M2 进行中）
+status: in-progress（首批 6 method frozen；Letta/LangMem/EverOS 离线门完成；Supermemory source-blocked）
 created: 2026-07-12
 ---
 # ws02.7 Method Track M0
@@ -27,13 +27,25 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 禁止为恢复全局而全文读取历史账、全部 workstream 或两本经验手册。若本节与 Git
 冲突，以 Git 和最新 ruling 为准。
 
-- **稳定基线（2026-07-29）**：5 benchmark × 首批 6 method 的真实 smoke 与
+- **稳定离线基线（2026-08-09）**：5 benchmark × 首批 6 method 的真实 smoke 与
   B1-B11 已关闭；ws03
   [结构归一 M0](../ws03-architecture-slimming/notes/2026-07-23-structural-normalization-m0-ruling.md)
-  已通过守恒门。无 API 全量：
-  `1685 passed, 3 deselected, 1 warning, 29 subtests passed in 128.11s`；
-  compileall exit 0。唯一 warning 是既有 vendored LightMem Pydantic deprecation。
-- **当前动作**：**EverOS v1.2.3 M1-R1 已验收，当前进入 M2 离线 adapter 门**。current source
+  已通过守恒门；Letta/LangMem/EverOS 三家 M2 adapter 处于 `ready_for_smoke`。最新无 API 全量：
+  `2078 passed, 3 deselected, 13 warnings, 29 subtests passed in 127.82s`；compileall exit 0。
+  warning 全来自既有 vendored LightMem/MemOS 依赖。
+- **当前动作**：**EverOS v1.2.3 M2 离线门已关闭，等待 B11 真实 smoke 新预算批准**。恢复只读
+  [M2 检查点](branches/method-recertification/everos/notes/everos-m2-adapter-checkpoint.md)与
+  [EverOS ledger](branches/method-recertification/everos/notes/everos-integration-ledger.md)。主轨锁定
+  `v1.2.3@48fc908`、official lifespan 内 typed product service；五格 dossier、20 份 machine
+  plan、exact drain、物理隔离、readout/metric 资格与离线全量均已闭合。未经用户新批准不发起
+  真实 build/embedding/rerank/answer/judge API。
+- **其他未冻结状态**：Letta/MemGPT 与 LangMem 同在 B11 批准门；Supermemory 因公开 runtime
+  source 不可得继续 `blocked`。不得重开 benchmark raw census、已冻结 25 格或旧 config-track
+  兼容任务。
+
+## 历史恢复记录（冷层；压缩恢复默认不读）
+
+- **2026-08-09 前断点**：EverOS v1.2.3 M1-R1 已验收，随后进入 M2 离线 adapter 门。current source
   与 drift 边界见
   [M1-R1 裁决](branches/method-recertification/everos/notes/everos-v1.2.3-source-drift-m1-r1.md)，
   source/product/harness
@@ -130,11 +142,11 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 | MemOS | `method-frozen-v1` | [frozen-v1](branches/method-recertification/memos/notes/memos-frozen-v1.md) | typed product handlers；LoCoMo 双视角；framework W2 N/A |
 | Letta/MemGPT | `ready_for_smoke` | [M2 checkpoint](branches/method-recertification/letta/notes/letta-m2-adapter-checkpoint.md) | sleeptime core blocks；五格 source-qrel N/A；W1-only |
 | LangMem | `ready_for_smoke` | [M2 checkpoint](branches/method-recertification/langmem/notes/langmem-m2-adapter-checkpoint.md) | async background manager；stable rank valid；evolved provenance N/A；croppable W2 |
+| EverOS | `ready_for_smoke` | [M2 checkpoint](branches/method-recertification/everos/notes/everos-m2-adapter-checkpoint.md) | typed product lifespan；Episode semantic provenance N/A；croppable W2；HaluMem fixed W1 |
 | Supermemory | `blocked` | [M1 source ruling](branches/method-recertification/supermemory/notes/supermemory-current-source-product-m1-ruling.md) | self-host binary 可下载但 runtime source 不在公开 tree；等待范围裁决或 upstream 开源 |
 
-尚无 adapter：Supermemory、EverOS。Supermemory 被 local OSS source gate 阻断，离线主线现进入
-EverOS；Letta/LangMem 已接入但未完成真实 B11，
-因此不能标 frozen。
+尚无 adapter：Supermemory（被 local OSS source gate 阻断）。Letta/LangMem/EverOS 已接入但
+未完成真实 B11，因此不能标 frozen。
 
 ## 现行长期裁决
 

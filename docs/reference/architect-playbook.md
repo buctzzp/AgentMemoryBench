@@ -112,6 +112,14 @@
   若 upstream stop/commit 会先修改一部分状态再在后段抛错，不能用 `attempted=True` 让下一次
   调用跳过剩余动作后标成功；应保留 poisoned runtime、稳定 fail-fast 并禁止复用/并行另建。
   2026-07-27 MemOS M4 两轮返工即因首卡没有把 partial-stop 四态预先锁全。
+- 带 official lifespan 与物理 product root 的 adapter，还要把两条故障链画全：进入链只对成功
+  enter 的 provider 逆序 exit，并 settle 全部 shutdown error；删除链用 root 外 cleanup marker
+  连接 `live → tombstone → deleted`，不能把 live path 消失当作完成。若产品用 CLI scaffold 生成
+  root，精确模板和 bootstrap wrapper 也属于算法身份。EverOS v1.2.3 M2 是组合判例。
+- 声明性模型身份与运行时可达性是两件事。配置中的 reranker 可能只服务 agent 分支，而主
+  chat/Episode 路径永远不调用；此时正确验收不是删掉模型身份，也不是臆造 token，而是在 lazy
+  singleton/capability 构造前装透传探针，证明成功 operation 的调用账恒为空并对非空 fail-fast。
+  EverOS v1.2.3 M2 的 rerank 零调用门就是判例。
 - method 官方 benchmark harness 若通过双写、双 namespace、检索融合等改变 build topology，
   **先分类、不得暗抄，也不得一刀切排除**。默认把论文复现超参数/专用 builder 放进作者轨；
   但若 benchmark 本身的对等角色语义要求对称视角，且拓扑完全由通用产品接口表达、用户与

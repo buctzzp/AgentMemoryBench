@@ -35,28 +35,26 @@ TOML 字段，效果实验前再裁共同模型或产品默认，当前 smoke �
 仅作产物兼容，eval fork 不得藏进配置名字。Mem0/LightMem/MemoryOS 的 product default、
 generic/eval/build-axis 与 MemoryOS PyPI/ChromaDB 关系已完成审计和架构裁决；truthful track
 identity M0 已经 R1/R2、严格 resume/evaluate 和全量回归关闭。LightMem → Mem0 → MemoryOS →
-A-Mem → SimpleMem → MemOS 已逐家重认证 B1-B11；Letta/MemGPT 与 LangMem 现均已关闭 M2
-离线门，位于各自 B11 真实 smoke 预算批准门，不靠历史 frozen 惯性，也不盲目重烧未变资产。
+A-Mem → SimpleMem → MemOS 已逐家重认证 B1-B11；Letta/MemGPT、LangMem 与 EverOS 均已关闭
+M2 离线门，位于各自 B11 真实 smoke 预算批准门，不靠历史 frozen 惯性，也不盲目重烧未变资产。
 
 MemOS=`method-frozen-v1`：官方 `v2.0.25` typed product handler、LoCoMo 双 namespace、
 async exact terminal 与真实 API usage 观测已闭合；framework W2 因共享进程级
 runtime/embedder 的真实竞态判 N/A，主 profile 固定 W1。
 
-缺口：2 个尚无 adapter 的 method（EverOS、Supermemory）；其中 Supermemory 最新稳定
-self-host runtime 只有 binary、公开 tree 无 server/engine source，已在 ws02.7 标
-`source-blocked`，不满足现行 local OSS 范围。Letta/MemGPT 与 LangMem 已有
-product-faithful adapter、五格 dossier 与机器化 smoke plan，但真实 B11 smoke 尚待用户批准。
-EverOS 已将 latest-stable source 线性更新至 v1.2.3，并关闭公开算法依赖、official harness 与
-typed-product surface M1-R1，
-现进入 M2 离线 adapter/lifecycle/五格契约门。
+缺口：仅 Supermemory 尚无 adapter；其最新稳定 self-host runtime 只有 binary、公开 tree 无
+server/engine source，已在 ws02.7 标 `source-blocked`，不满足现行 local OSS 范围。
+Letta/MemGPT、LangMem 与 EverOS 均已有 product-faithful adapter、五格 dossier 与机器化 smoke
+plan，但真实 B11 smoke 尚待用户批准。EverOS latest-stable source 锁为 v1.2.3，official lifespan
+typed-product adapter、exact drain、物理隔离与离线回归已闭合。
 效果参数、作者 builder、真实 resume 与 full 成本 pilot 仍待后续。真实 API
 一律继续由用户确认预算、规模与 run_id。首批 25 格完成后已做一次有边界的
 [架构减重审计](workstreams/ws03-architecture-slimming/notes/2026-07-23-first-25-cell-consolidation-audit.md)：
 先清临时事实源、盘点活跃 legacy。用户随后明确“整治不只是删除”，
 [结构归一 M0](workstreams/ws03-architecture-slimming/notes/2026-07-23-structural-normalization-m0-ruling.md)
 已完成 evaluator/prompt/文档的零语义迁移与全量守恒门；MemOS 随后已冻结，
-registry-backed `plan-smoke` preflight 与新 method ledger v1 强制门也已关闭；Letta/MemGPT
-现处于 B11 真实 smoke 批准门，获批后再执行 artifact gate 与冻结对表。
+registry-backed `plan-smoke` preflight 与新 method ledger v1 强制门也已关闭；Letta/MemGPT、
+LangMem 与 EverOS 现处于 B11 真实 smoke 批准门，获批后再执行 artifact gate 与冻结对表。
 
 ## Workstream 索引
 
@@ -70,7 +68,7 @@ registry-backed `plan-smoke` preflight 与新 method ledger v1 强制门也已�
 | [ws02.4](workstreams/ws02.4-simplemem/README.md) | simplemem-adapter | accepted | P0 | 历史 T1-T6 已关闭；current text product 的五格重认证与 frozen-v1 见 ws02.7 |
 | [ws02.5](workstreams/ws02.5-method-interface-audit/README.md) | method-interface-audit | done | P0 | 2026-07-09 关闭：5 method 接口审计 + MemoryOS 迁移 + 当时配置归一化；shared embedder 资产保留为 controlled，ws02.7 现审计 product-default 精确身份与迁移/复证面 |
 | [ws02.6](workstreams/ws02.6-first-smoke-hardening/README.md) | first-smoke-hardening | done | P0 | 五 benchmark 全部 frozen-v1 + B6 横向总验收完成（2026-07-12）；method 侧已转 ws02.7 |
-| [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | in-progress | P0 | 首批 6 method frozen；Letta/LangMem M2 离线门通过、待 B11 批准；Supermemory source-blocked；EverOS v1.2.3 M1-R1 已关闭、当前进入 M2 |
+| [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | in-progress | P0 | 首批 6 method frozen；Letta/LangMem/EverOS M2 离线门通过、待 B11 批准；Supermemory source-blocked |
 | [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | open | P1 | 结构归一 M0 已关闭；legacy/LLM runtime 等 M1 后续有边界推进，不阻塞 MemOS |
 | [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | open | P2 | isolated 进度心跳、第三方 stdout/tqdm 治理 |
 | [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | open | P1 | 全量实验申请材料：成本估算表 + 结果汇总 + 兜底验证清单（依赖 ws02） |

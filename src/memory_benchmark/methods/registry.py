@@ -32,13 +32,21 @@ from memory_benchmark.observability.efficiency import (
     RetrievalObservationContract,
 )
 
-from .config_track import BuildIdentityDeclaration, EmbeddingIdentity
-
 from .amem_adapter import (
     AMem,
     AMemConfig,
     build_amem_source_identity,
     clean_amem_conversation_state,
+)
+from .config_track import BuildIdentityDeclaration, EmbeddingIdentity
+from .everos_adapter import (
+    EVEROS_EMBEDDING_MODEL_ID,
+    EVEROS_LLM_MODEL_ID,
+    EVEROS_RERANKER_MODEL_ID,
+    EverOS,
+    EverOSConfig,
+    build_everos_source_identity,
+    clean_everos_conversation_state,
 )
 from .lightmem_adapter import (
     LightMem,
@@ -317,6 +325,168 @@ def _build_langmem_system(context: MethodBuildContext) -> BaseMemorySystem:
         openai_settings=context.openai_settings,
         efficiency_collector=context.efficiency_collector,
         benchmark_name=context.benchmark_name,
+    )
+
+
+def _build_everos_system(context: MethodBuildContext) -> BaseMemorySystem:
+    """根据统一 build context 构造 EverOS typed-product adapter。"""
+
+    if not isinstance(context.config, EverOSConfig):
+        raise ConfigurationError("EverOS factory requires EverOSConfig")
+    if context.openai_settings is None:
+        raise ConfigurationError("EverOS factory requires OpenAI settings")
+    return EverOS(
+        config=context.config,
+        path_settings=context.path_settings,
+        storage_root=context.storage_root,
+        openai_settings=context.openai_settings,
+        efficiency_collector=context.efficiency_collector,
+        benchmark_name=context.benchmark_name,
+        session_memory_report=context.benchmark_name == "halumem",
+        completed_conversation_ids={
+            conversation.conversation_id
+            for conversation in context.completed_conversations
+        },
+    )
+
+
+def _everos_model_name(config: Any) -> str:
+    """从 EverOS 配置读取 memory build LLM 名称。"""
+
+    if not isinstance(config, EverOSConfig):
+        raise ConfigurationError("EverOS model getter requires EverOSConfig")
+    return config.llm_model
+
+
+def _everos_max_workers(config: Any) -> int:
+    """从 EverOS 配置读取 conversation worker 上限。"""
+
+    if not isinstance(config, EverOSConfig):
+        raise ConfigurationError("EverOS worker getter requires EverOSConfig")
+    return config.max_workers
+
+
+def _everos_efficiency_model_inventory(
+    config: Any,
+) -> tuple[ModelDescriptor, ...]:
+    """返回 EverOS build LLM、embedding 与声明性 reranker 身份。"""
+
+    if not isinstance(config, EverOSConfig):
+        raise ConfigurationError(
+            "EverOS model inventory getter requires EverOSConfig"
+        )
+    return (
+        ModelDescriptor(
+            model_id=EVEROS_LLM_MODEL_ID,
+            model_name=config.llm_model,
+            model_role="memory_build_llm",
+            execution_mode="api",
+            tokenizer_name=config.llm_model,
+        ),
+        ModelDescriptor(
+            model_id=EVEROS_EMBEDDING_MODEL_ID,
+            model_name=config.embedding_model,
+            model_role="embedding",
+            execution_mode="api",
+            embedding_dimension=config.embedding_dimension,
+            tokenizer_name=config.embedding_model,
+        ),
+        ModelDescriptor(
+            model_id=EVEROS_RERANKER_MODEL_ID,
+            model_name=config.rerank_model,
+            model_role="reranker",
+            execution_mode="api",
+            tokenizer_name=config.rerank_model,
+        ),
+    )
+
+
+def _everos_efficiency_instrumentation_identity(
+    path_settings: PathSettings,
+    config: Any,
+    source_identity: dict[str, Any],
+) -> dict[str, object]:
+    """返回 EverOS worker 纯观测 wrapper 身份。"""
+
+    if not isinstance(config, EverOSConfig):
+        raise ConfigurationError(
+            "EverOS instrumentation identity getter requires EverOSConfig"
+        )
+    worker = Path("src/memory_benchmark/methods/everos_worker.py")
+    return {
+        "collector_schema": 1,
+        "wrapper_path": worker.as_posix(),
+        "wrapper_sha256": _sha256_file(path_settings.project_root / worker),
+        "llm_tokenizer": config.llm_model,
+        "embedding_tokenizer": config.embedding_model,
+        "method_source_sha256": source_identity.get("source_sha256"),
+        "exact_api_usage": "product-response-proxy-v1",
+        "async_scope_bridge": "exact-drain-buffered-replay-v1",
+    }
+
+
+def _clean_everos_failed_ingest_state(
+    context: MethodBuildContext,
+    conversation: Conversation,
+    failed_state: dict[str, Any],
+) -> None:
+    """物理 root 级清理 EverOS failed-ingest conversation 状态。"""
+
+    run_id = context.storage_root.parent.name
+    storage_root = _resolve_clean_retry_storage_root(context, failed_state)
+    clean_context = MethodBuildContext(
+        config=context.config,
+        openai_settings=context.openai_settings,
+        path_settings=context.path_settings,
+        storage_root=storage_root,
+        benchmark_name=context.benchmark_name,
+    )
+    system = _build_everos_system(clean_context)
+    if not isinstance(system, EverOS):
+        raise ConfigurationError("EverOS clean hook failed to build adapter")
+    isolation_key = f"{run_id}_{conversation.conversation_id}"
+    try:
+        clean_everos_conversation_state(
+            provider=system,
+            isolation_key=isolation_key,
+        )
+    finally:
+        system.cleanup()
+
+
+def _everos_build_identity(
+    config_manifest: dict[str, Any],
+) -> BuildIdentityDeclaration:
+    """解析 EverOS product-default Qwen embedding + LanceDB build。"""
+
+    provider = _manifest_text(config_manifest, "embedding_provider")
+    model = _manifest_text(config_manifest, "embedding_model")
+    dimension = _manifest_dimension(config_manifest, "embedding_dimension")
+    if (
+        provider == "deepinfra-openai-compatible"
+        and model == "Qwen/Qwen3-Embedding-4B"
+        and dimension == 1024
+    ):
+        return BuildIdentityDeclaration(
+            implementation_variant="product",
+            embedding_profile="product_default_v1",
+            historical_controlled_build_equivalent_to_current_main=False,
+            embedding=EmbeddingIdentity(
+                provider=provider,
+                model=model,
+                dimension=dimension,
+                revision=None,
+                revision_status="provider_managed_unpinned",
+                normalization=None,
+                instruction=None,
+                distance="lancedb-l2",
+                identity_status="declared",
+            ),
+        )
+    return _pending_build_identity(
+        provider=provider,
+        model=model,
+        dimension=dimension,
     )
 
 
@@ -1521,6 +1691,41 @@ _REGISTRATIONS = {
         retrieval_observation_contract_getter=_separable_retrieval_contract,
         clean_failed_ingest_state=_clean_amem_failed_ingest_state,
         build_identity_resolver=_amem_build_identity,
+    ),
+    "everos": MethodRegistration(
+        name="everos",
+        task_families=frozenset({TaskFamily.CONVERSATION_QA}),
+        provided_capabilities=frozenset(
+            {
+                MethodCapability.CONVERSATION_ADD,
+                MethodCapability.MEMORY_RETRIEVAL,
+            }
+        ),
+        profile_sections=(
+            ("smoke", "smoke"),
+            ("official-full", "official_full"),
+        ),
+        profile_relative_path=Path("configs/methods/everos.toml"),
+        config_type=EverOSConfig,
+        requires_api=True,
+        system_factory=_build_everos_system,
+        source_identity_factory=build_everos_source_identity,
+        model_name_getter=_everos_model_name,
+        max_workers_getter=_everos_max_workers,
+        display_name="EverOS",
+        protocol_version="v3",
+        consume_granularity_resolver=_session_consume_granularity,
+        provenance_granularity="none",
+        retrieval_evidence_contract_version="v1",
+        allow_smoke_worker_override=True,
+        efficiency_model_inventory_getter=_everos_efficiency_model_inventory,
+        efficiency_instrumentation_identity_getter=(
+            _everos_efficiency_instrumentation_identity
+        ),
+        retrieval_observation_contract_getter=_separable_retrieval_contract,
+        supports_shared_instance_parallelism=False,
+        clean_failed_ingest_state=_clean_everos_failed_ingest_state,
+        build_identity_resolver=_everos_build_identity,
     ),
     "mem0": MethodRegistration(
         name="mem0",
