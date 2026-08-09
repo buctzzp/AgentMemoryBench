@@ -33,12 +33,15 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   已通过守恒门。无 API 全量：
   `1685 passed, 3 deselected, 1 warning, 29 subtests passed in 128.11s`；
   compileall exit 0。唯一 warning 是既有 vendored LightMem Pydantic deprecation。
-- **当前动作**：**EverOS M1 已验收，当前进入 M2 离线 adapter 门**。source/product/harness
+- **当前动作**：**EverOS v1.2.3 M1-R1 已验收，当前进入 M2 离线 adapter 门**。current source
+  与 drift 边界见
+  [M1-R1 裁决](branches/method-recertification/everos/notes/everos-v1.2.3-source-drift-m1-r1.md)，
+  source/product/harness
   判据见
   [M1 裁决](branches/method-recertification/everos/notes/everos-current-source-product-m1-ruling.md)，
   每项状态只更新
   [EverOS ledger](branches/method-recertification/everos/notes/everos-integration-ledger.md)。主轨锁定
-  `v1.2.1@4256419`、官方 lifespan 内 typed product service；M2 先关闭 assistant-only owner、
+  `v1.2.3@48fc908`、官方 lifespan 内 typed product service；M2 先关闭 assistant-only owner、
   missing source time、exact drain、lineage/readout、worker isolation 与五格零 API 强反例，未经
   用户新批准不发起真实 build/embedding/rerank/answer/judge API。既有基线：MemOS 已冻结，
   机器化 smoke plan/preflight 与新 method ledger v1 强制门均已关闭；Letta/MemGPT
@@ -110,7 +113,7 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   [M1 裁决](branches/method-recertification/supermemory/notes/supermemory-current-source-product-m1-ruling.md)
   已锁最新稳定 self-host `server-v0.0.6`：公开 MIT tree 没有实际 server/engine source，release
   只提供 checksum-pinned binary，故不满足 Phase 1 `local OSS` 门；ledger 诚实标
-  `blocked`，不偷换 cloud/binary adapter。当前不烧 API 的下一动作是 EverOS ledger/M1。
+  `blocked`，不偷换 cloud/binary adapter。当前不烧 API 的下一动作是 EverOS M2 离线 adapter。
 - **恢复当前结构任务只读**：上方 M0 ruling；需要追溯某家 method 才读下表对应 frozen note。
 - **派工边界**：actor 卡由架构师写成自包含 prompt，用户选择跨模型 actor；除非用户明确
   要求，不自动启动 Codex subagent。

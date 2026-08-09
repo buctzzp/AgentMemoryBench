@@ -22,7 +22,7 @@ frozen_note: none
 | B0-OFFICIAL-BENCHMARKS | 当前官方 repo 实际跑过的 benchmark、入口和版本已穷举，未跑过者标 framework extension | PASS | evidence=[M1 §3](./everos-current-source-product-m1-ruling.md); ruling=current EverOS/EverAlgo 公开 harness 仅 LoCoMo；LongMemEval 只有论文结果、无公开最终 payload；HaluMem/BEAM/MemBench 为 framework extension; next=none |
 | B0-FINAL-PAYLOAD | 每个官方 harness 展开后的 add 次数、batch、role、namespace、时间、模型参数和 search 最终 payload 已锁 | PASS | evidence=[M1 §3.1-3.3](./everos-current-source-product-m1-ruling.md); ruling=current product 与 research v93.05 两套 LoCoMo payload 分开锁定，LongMemEval 公开 payload 缺失诚实标 pending author parity; next=none |
 | B0-DIFFERENCE-RULING | 主轨、author 轨、framework extension、upstream bug 的每项差异已唯一归类 | PASS | evidence=[M1 §3-5](./everos-current-source-product-m1-ruling.md); ruling=typed product service=主轨，LoCoMo product harness=author candidate，research stages=calibration not product，LME paper-only，三家 extension，caption loss=upstream harness drift; next=none |
-| B1-SOURCE-LOCK | 官方 repo、tag、commit、license、vendored 路径、patch 和更新策略已锁定 | PASS | evidence=[M1 §2](./everos-current-source-product-m1-ruling.md); ruling=EverOS v1.2.1@4256419 与 exact EverAlgo tags/PyPI lock 均为 Apache-2.0 public source；无 patch，PDF local-only; next=none |
+| B1-SOURCE-LOCK | 官方 repo、tag、commit、license、vendored 路径、patch 和更新策略已锁定 | PASS | evidence=[M1-R1 §2-4](./everos-v1.2.3-source-drift-m1-r1.md); ruling=EverOS v1.2.3@48fc908 与 exact EverAlgo 0.4.0 tags/PyPI lock 均为 Apache-2.0 public source；无 patch，PDF local-only；M1 payload 文件 byte-stable; next=none |
 | B1-PRODUCT-SURFACE | ingest/retrieve 采用通用产品接口，并解释为何不用 chat、ask、eval、cloud 或 HTTP 专用入口 | PASS | evidence=[M1 §4](./everos-current-source-product-m1-ruling.md); ruling=official lifespan 内 typed memorize/search/get 与 HTTP route 同业务实现，transport-equivalent；direct EverAlgo与直接写库排除; next=none |
 | B1-LIFECYCLE-CALLGRAPH | prepare、ingest、retrieve、finalize、cleanup 的 runner 真实调用点和早失败路径已逐一闭合 | PENDING | evidence=[M1 §4、§8](./everos-current-source-product-m1-ruling.md); ruling=目标调用图已锁但 framework 接线未实现; next=M2 实现 worker/lifespan/exact drain/cleanup 并锁强反例 |
 | B2-GRANULARITY | 原生输入单元、consume_granularity、placeholder、session 边界和尾部残项处理已裁定 | PENDING | evidence=[M1 §6](./everos-current-source-product-m1-ruling.md); ruling=session+内部 batch+session flush 候选；assistant-only owner 仍是硬门; next=生产链验证空 user anchor 或诚实能力缺口 |
@@ -58,5 +58,5 @@ frozen_note: none
 
 - 当前 ledger 状态：`in_progress`
 - 最后一次一手证据复核 commit：EverOS
-  `4256419595f63fe307147dc19e379477cecdc44f`；EverAlgo runtime tags 见 M1 §2.2
-- 架构师判词：`EVEROS_M1_ACCEPTED_READY_FOR_M2`。
+  `48fc9084888bc17100053227284f939a5aca5e91`；EverAlgo runtime tags 见 M1-R1 §3
+- 架构师判词：`EVEROS_V1_2_3_SOURCE_DRIFT_ACCEPTED_READY_FOR_M2`。

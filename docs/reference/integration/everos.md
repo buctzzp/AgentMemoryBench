@@ -1,9 +1,9 @@
 # EverOS 接入实例（B1-B11 逐项）
 
 > 判据模板：`../method-integration-checklist.md` §B；勾选总表：`../integration-status.md`。
-> 当前状态：**M1 已验收，进入 M2 离线 adapter 门**；尚未运行真实 API smoke，也未冻结。
+> 当前状态：**M1-R1 已验收，进入 M2 离线 adapter 门**；尚未运行真实 API smoke，也未冻结。
 
-- 主 source：官方稳定版 `EverOS v1.2.1@4256419595f63fe307147dc19e379477cecdc44f`，
+- 主 source：官方稳定版 `EverOS v1.2.3@48fc9084888bc17100053227284f939a5aca5e91`，
   Apache-2.0；本地路径 `third_party/methods/EverOS/` 为 local-only，可由
   `scripts/fetch_third_party_methods.sh` 恢复。
 - 算法依赖：该 release 的 `uv.lock` 固定 `everalgo-*` 包；对应版本均能在官方
@@ -50,7 +50,8 @@
 ## 证据入口
 
 - [EverOS 接入 ledger](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-integration-ledger.md)
+- [v1.2.3 source drift M1-R1](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-v1.2.3-source-drift-m1-r1.md)
 - [current source / product / official harness M1 裁决](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-current-source-product-m1-ruling.md)
 - [EverOS 接入支线](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/README.md)
 
-M1 判词：`EVEROS_M1_ACCEPTED_READY_FOR_M2`。
+当前判词：`EVEROS_V1_2_3_SOURCE_DRIFT_ACCEPTED_READY_FOR_M2`。

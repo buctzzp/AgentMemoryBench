@@ -1,5 +1,10 @@
 # EverOS current source / product / official harness M1 裁决
 
+> **历史版本提示（2026-08-09）**：本文的 v1.2.1 source/runtime identity 已由
+> [v1.2.3 source drift M1-R1](./everos-v1.2.3-source-drift-m1-r1.md) 替代。本文保留为
+> 一手历史；官方覆盖、最终 payload 与 typed product surface 只有在 M1-R1 明确列出的
+> byte-stable 范围内继续有效，禁止再把 v1.2.1 当 current stable。
+
 日期：2026-08-02
 状态：`ARCHITECT_ACCEPTED_READY_FOR_M2`
 范围：锁 current stable source、公开算法依赖、官方 benchmark 覆盖、产品 surface 与 M2
