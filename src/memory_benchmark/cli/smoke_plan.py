@@ -183,6 +183,7 @@ def build_smoke_execution_plan(
             "plan-smoke requires one concrete variant; generate one plan per variant"
         )
     benchmark_registration.variant_spec(selected_variant)
+    method_registration.validate_variant(benchmark_name, selected_variant)
 
     smoke_policy = benchmark_registration.smoke_policy
     if smoke_policy is None:

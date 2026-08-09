@@ -45,6 +45,7 @@ def test_repository_method_ledgers_pass_machine_gate() -> None:
 
     assert [ledger.metadata["method_id"] for ledger in ledgers] == [
         "everos",
+        "graphiti",
         "langmem",
         "letta",
         "supermemory",

@@ -1,7 +1,7 @@
 ---
 id: ws02.7
 parent: ws02
-status: in-progress（首批 6 method frozen；Letta/LangMem/EverOS 等 OpenCodeGo opt-in；Graphiti M2）
+status: in-progress（首批 6 method frozen；其余 4 method B11 共用外部门暂停）
 created: 2026-07-12
 ---
 # ws02.7 Method Track M0
@@ -30,19 +30,22 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 - **稳定离线基线（2026-08-09）**：5 benchmark × 首批 6 method 的真实 smoke 与
   B1-B11 已关闭；ws03
   [结构归一 M0](../ws03-architecture-slimming/notes/2026-07-23-structural-normalization-m0-ruling.md)
-  已通过守恒门；Letta/LangMem/EverOS 三家 M2 adapter 处于 `ready_for_smoke`。最新无 API 全量：
-  `2078 passed, 3 deselected, 13 warnings, 29 subtests passed in 127.82s`；compileall exit 0。
+  已通过守恒门；Letta/LangMem/EverOS 三家 M2 adapter 与 Graphiti M3 adapter 均处于
+  `ready_for_smoke`。最新无 API 全量：
+  `2133 passed, 3 deselected, 13 warnings, 29 subtests passed in 156.70s`；compileall exit 0。
   warning 全来自既有 vendored LightMem/MemOS 依赖。
-- **当前动作**：**Graphiti OSS v0.29.3 已通过 source/product M1，进入 M2 产品运行时审计**。
-  恢复只读
-  [M1 裁决](branches/method-recertification/graphiti/notes/graphiti-v0.29.3-source-product-m1-ruling.md)
-  与
-  [Graphiti ledger](branches/method-recertification/graphiti/notes/graphiti-integration-ledger.md)。主轨身份
-  是 Graphiti OSS，不是 Zep hosted product；先闭合 FalkorDB Lite、local embedding、completion、
-  lineage、HaluMem 和 MemBench missing-time，Graphiti 未单独获批前不调用真实 API。
-- **其他未冻结状态**：Letta/MemGPT、LangMem 与 EverOS 的 adapter/plan 已离线闭合。用户已批准
+- **当前动作**：**Graphiti OSS v0.29.3 已完成 M3 product adapter；首个真实 LoCoMo W1
+  已到达 OpenCodeGo build provider，但命中与 Letta 相同的区域 opt-in 403，B11 暂停**。
+  压缩恢复只读一份
+  [Graphiti 首次真实尝试](branches/method-recertification/graphiti/notes/graphiti-b11-first-live-attempt.md)；
+  其内再按需要链接 M3/dossier/ledger，不在恢复时并读。主轨身份是 Graphiti OSS，不是 Zep
+  hosted product；18 份 machine plan 已保存，MemBench 100k 因 mandatory source time 判 N/A。
+  在 workspace 完成 opt-in 前不得重复重试；解除后先按既有队列恢复 Letta，再
+  LangMem、EverOS、Graphiti。
+- **其他未冻结状态**：Letta/MemGPT、LangMem、EverOS 与 Graphiti 的 adapter/plan 已离线闭合。用户已批准
   使用 `.env` OpenCodeGo smoke；Letta 首次真实 run 已到 provider，但账号返回“需显式区域
-  opt-in”的 403，因此三家统一暂停为 `PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`。这不是预算未批，
+  opt-in”的 403，Graphiti 首次真实 run 随后复现同一门，因此四家统一暂停为
+  `PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`。这不是预算未批，
   也不应继续重试烧同一外部门。Supermemory 退出第十格，blocked note 仅作 source-gate 历史。
 
 ## 历史恢复记录（冷层；压缩恢复默认不读）
@@ -145,10 +148,11 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 | Letta/MemGPT | `ready_for_smoke / external-paused` | [首次真实尝试](branches/method-recertification/letta/notes/letta-b11-first-live-attempt-r1.md) | sleeptime core blocks；W1-only；运行时修复已闭合，OpenCodeGo opt-in 403 |
 | LangMem | `ready_for_smoke / external-paused` | [M2 checkpoint](branches/method-recertification/langmem/notes/langmem-m2-adapter-checkpoint.md) | async background manager；stable rank valid；evolved provenance N/A；croppable W2 |
 | EverOS | `ready_for_smoke / external-paused` | [M2 checkpoint](branches/method-recertification/everos/notes/everos-m2-adapter-checkpoint.md) | typed product lifespan；Episode semantic provenance N/A；croppable W2；HaluMem fixed W1 |
-| Graphiti | `M1 source/product locked` | [M1 ruling](branches/method-recertification/graphiti/notes/graphiti-v0.29.3-source-product-m1-ruling.md) | Graphiti OSS 非 Zep；direct core product-equivalent；M2 runtime/lineage 门进行中 |
+| Graphiti | `ready_for_smoke / external-paused` | [首次真实尝试](branches/method-recertification/graphiti/notes/graphiti-b11-first-live-attempt.md) | Graphiti OSS 非 Zep；direct core + FalkorDB Lite；首个 build 请求命中 OpenCodeGo opt-in 403；MemBench 100k N/A |
 
-尚无 adapter：Graphiti（M2 进行中）。Letta/LangMem/EverOS 已接入但未完成真实 B11，因此
-不能标 frozen。Supermemory 的 source-blocked ledger/note 保留为历史判例，不再占 Phase 1 格子。
+尚未冻结：Letta/LangMem/EverOS/Graphiti 均已完成离线 adapter，但因共用 OpenCodeGo 区域
+opt-in 外部门暂停。Supermemory 的 source-blocked ledger/note 保留为历史判例，不再占 Phase 1
+格子。
 
 ## 现行长期裁决
 
@@ -189,8 +193,9 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 4. [x] 定向测试、文档门、compileall、无 API 全量 pytest；
 5. [x] 按新结构接入 MemOS；
 6. [x] 机器化 smoke 规划/预检；
-7. [ ] 新 method 强制接入 ledger；
-8. [ ] 接入 Letta/MemGPT。
+7. [x] 新 method 强制接入 ledger；
+8. [x] Letta/LangMem/EverOS/Graphiti 离线 product adapter + machine plan；
+9. [ ] OpenCodeGo workspace 区域 opt-in 后完成四家真实 B11、artifact gate 与冻结同步。
 
 M0 红线：零真实 API、零 third-party 算法改动、零 metric/prompt/artifact 语义变化；
 旧 import path 在迁移期保留薄兼容层。
@@ -211,7 +216,7 @@ M0 红线：零真实 API、零 third-party 算法改动、零 metric/prompt/art
 - [x] 首批 5 method × 5 benchmark 真实 smoke 与 B1-B11
 - [x] 结构归一 M0
 - [x] MemOS
-- [ ] Letta/MemGPT
-- [ ] LangMem
-- [ ] EverOS
-- [ ] Graphiti OSS（第十格；M2 进行中）
+- [ ] Letta/MemGPT（离线门闭合；B11 外部门暂停）
+- [ ] LangMem（离线门闭合；B11 外部门暂停）
+- [ ] EverOS（离线门闭合；B11 外部门暂停）
+- [ ] Graphiti OSS（M3 离线门闭合；首个真实 run 命中同一外部门）

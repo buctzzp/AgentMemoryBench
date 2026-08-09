@@ -93,6 +93,10 @@
 - **产品 root/bootstrap**：若官方 runtime 只靠 CLI scaffold 生成配置目录，adapter 不得手写一套
   “近似配置”。从 source-locked tree 复制官方模板，所有会改变算法/模型/存储的模板与 bootstrap
   wrapper 一并纳入 source/manifest identity；缺模板、模板漂移或未知 backend 都 fail-fast。
+- **runtime 安装门必须验证真实 import symbol**：distribution 名、extra 名与 Python import module
+  可能不同；`sync/install succeeded` 不是可运行证据。bootstrap 至少导入 adapter 真正使用的类，
+  再跑一条零 API 产品初始化/关闭链。Graphiti 的 `falkordblite` distribution 实际从
+  `redislite.async_falkordb_client` 导入是判例。
 - **async context 进入/退出**：`__aenter__` 失败后不得调用对应 `__aexit__` 覆盖原异常；只有确认
   enter 成功的 provider 才进入 reverse-order shutdown。多个 shutdown 都要 settle 后聚合上抛，
   不能首错短路留下后续 provider。EverOS v1.2.3 official lifespan 是判例。
@@ -186,6 +190,9 @@ B2/B5 及 HaluMem memory_point 这类**能力缺口**（method 接口不支持�
   投递改造）。改造实现在 **adapter/包装层优先**；确需动 third_party 时走"最小
   diff + 留档 + 不碰核心算法"审批（架构师裁决）。
 - **不可改造**：诚实记 N/A（如 HaluMem recall 判例），不硬造。
+HaluMem `memory-type` 需先读 evaluator：当前它是按 gold memory point type 对 extraction/update
+得分做分组汇总，不要求 method 自己预测 Event/Persona/Relationship。不能仅因产品 readout 无
+type 字段就判 N/A；Graphiti M2 初稿误判、M3 更正是判例。
 评估证据与结论写进该 method 的 `integration/<m>.md` 实例文档。**改造经真实实验
 验证有效后，可向 method 官方仓库提 upstream PR**（贡献者收益，用户 2026-07-13
 提议）；PR 门槛 = 我们自己的实验数据先证明改造不劣化原行为。
@@ -208,6 +215,9 @@ B2/B5 及 HaluMem memory_point 这类**能力缺口**（method 接口不支持�
   build/readout 类型画可达图；若主轨判定为零调用，仍须在 capability/client 边界安装纯透传
   观测并锁 `[]`，非空即 fail-fast。不得只凭配置或源码注释声称“不会调用”，也不得为了一个
   预期零调用的组件先扩张公共效率协议；真出现调用时停工，再设计可审计的 observation schema。
+- **负能力 sentinel 也要满足产品 nominal type 契约**：若第三方用 Pydantic/ABC 做运行时类型
+校验，纯 duck-type sentinel 可能在产品构造阶段被拒绝，导致“预期零调用”测试根本没到业务链。
+应继承官方最窄基类并只在真正调用时 fail-fast；Graphiti cross-encoder 是判例。
 - **注入记忆 token 跨 builder 口径**：见 `efficiency-injected-tokens-policy.md`
   （各 profile 都只记“记忆载荷 token”，模板开销不计入）。**作者 builder 审计项**：
   每个作者 prompt builder 核一次“统计的载荷 ≡ prompt_messages 实际嵌入的

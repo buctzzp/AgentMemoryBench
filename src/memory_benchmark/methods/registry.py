@@ -48,6 +48,16 @@ from .everos_adapter import (
     build_everos_source_identity,
     clean_everos_conversation_state,
 )
+from .graphiti_adapter import (
+    GRAPHITI_BUILD_LLM_RESPONSE_CONTRACT,
+    GRAPHITI_EMBEDDING_MODEL_ID,
+    GRAPHITI_LLM_MODEL_ID,
+    GraphitiConfig,
+    GraphitiOSS,
+    build_graphiti_source_identity,
+    clean_graphiti_conversation_state,
+    validate_graphiti_variant,
+)
 from .lightmem_adapter import (
     LightMem,
     LightMemConfig,
@@ -156,6 +166,8 @@ class MethodRegistration:
         build_identity_resolver: 可选回调，从 ``config.to_manifest()`` 解析当前 build
             的完整身份声明。method/profile 分类与 concrete embedding 事实只在注册表
             维护一次；config_track 只负责把声明与 readout 资产组合。
+        variant_validator: 可选 method × benchmark × concrete variant 预运行校验；
+            必须在 output/runtime/API 构造前调用，用于拒绝无法诚实表达的组合。
     """
 
     name: str
@@ -194,6 +206,7 @@ class MethodRegistration:
     build_identity_resolver: (
         Callable[[dict[str, Any]], BuildIdentityDeclaration] | None
     ) = None
+    variant_validator: Callable[[str, str], None] | None = None
 
     @property
     def profile_names(self) -> frozenset[str]:
@@ -225,6 +238,12 @@ class MethodRegistration:
                 "consume_granularity_resolver"
             )
         return self.consume_granularity_resolver(benchmark_name)
+
+    def validate_variant(self, benchmark_name: str, variant: str) -> None:
+        """执行可选 method-specific variant 门；未声明时保持 no-op。"""
+
+        if self.variant_validator is not None:
+            self.variant_validator(benchmark_name, variant)
 
 
 def _turn_consume_granularity(_benchmark_name: str | None) -> ConsumeGranularity:
@@ -347,6 +366,24 @@ def _build_everos_system(context: MethodBuildContext) -> BaseMemorySystem:
             conversation.conversation_id
             for conversation in context.completed_conversations
         },
+    )
+
+
+def _build_graphiti_system(context: MethodBuildContext) -> BaseMemorySystem:
+    """根据统一 build context 构造 Graphiti OSS product adapter。"""
+
+    if not isinstance(context.config, GraphitiConfig):
+        raise ConfigurationError("Graphiti factory requires GraphitiConfig")
+    if context.openai_settings is None:
+        raise ConfigurationError("Graphiti factory requires OpenAI settings")
+    return GraphitiOSS(
+        config=context.config,
+        path_settings=context.path_settings,
+        storage_root=context.storage_root,
+        openai_settings=context.openai_settings,
+        benchmark_name=context.benchmark_name,
+        session_memory_report=context.benchmark_name == "halumem",
+        efficiency_collector=context.efficiency_collector,
     )
 
 
@@ -480,6 +517,149 @@ def _everos_build_identity(
                 normalization=None,
                 instruction=None,
                 distance="lancedb-l2",
+                identity_status="declared",
+            ),
+        )
+    return _pending_build_identity(
+        provider=provider,
+        model=model,
+        dimension=dimension,
+    )
+
+
+def _graphiti_model_name(config: Any) -> str:
+    """从 Graphiti 强类型配置读取 build LLM 名称。"""
+
+    if not isinstance(config, GraphitiConfig):
+        raise ConfigurationError("Graphiti model getter requires GraphitiConfig")
+    return config.llm_model
+
+
+def _graphiti_max_workers(config: Any) -> int:
+    """从 Graphiti 强类型配置读取 conversation worker 数。"""
+
+    if not isinstance(config, GraphitiConfig):
+        raise ConfigurationError("Graphiti worker getter requires GraphitiConfig")
+    return config.max_workers
+
+
+def _graphiti_efficiency_model_inventory(
+    config: Any,
+) -> tuple[ModelDescriptor, ...]:
+    """返回 Graphiti build LLM 与本地 embedding 身份。"""
+
+    if not isinstance(config, GraphitiConfig):
+        raise ConfigurationError(
+            "Graphiti model inventory getter requires GraphitiConfig"
+        )
+    return (
+        ModelDescriptor(
+            model_id=GRAPHITI_LLM_MODEL_ID,
+            model_name=config.llm_model,
+            model_role="memory_build_llm",
+            execution_mode="api",
+            tokenizer_name=config.llm_model,
+        ),
+        ModelDescriptor(
+            model_id=GRAPHITI_EMBEDDING_MODEL_ID,
+            model_name=config.embedding_model_path,
+            model_role="embedding",
+            execution_mode="local",
+            revision_or_path=config.embedding_model_path,
+            embedding_dimension=config.embedding_dimension,
+            tokenizer_name=config.embedding_model_path,
+        ),
+    )
+
+
+def _graphiti_efficiency_instrumentation_identity(
+    path_settings: PathSettings,
+    config: Any,
+    source_identity: dict[str, Any],
+) -> dict[str, object]:
+    """返回 Graphiti endpoint/embedder worker 的纯观测身份。"""
+
+    if not isinstance(config, GraphitiConfig):
+        raise ConfigurationError(
+            "Graphiti instrumentation identity getter requires GraphitiConfig"
+        )
+    adapter_path = Path("src/memory_benchmark/methods/graphiti_adapter.py")
+    worker_path = Path("src/memory_benchmark/methods/graphiti_worker.py")
+    bootstrap_path = Path("scripts/bootstrap_graphiti_runtime.sh")
+    return {
+        "collector_schema": 1,
+        "wrapper_path": adapter_path.as_posix(),
+        "wrapper_sha256": _sha256_file(path_settings.project_root / adapter_path),
+        "worker_path": worker_path.as_posix(),
+        "worker_sha256": _sha256_file(path_settings.project_root / worker_path),
+        "bootstrap_path": bootstrap_path.as_posix(),
+        "bootstrap_sha256": _sha256_file(
+            path_settings.project_root / bootstrap_path
+        ),
+        "method_source_sha256": source_identity.get("source_sha256"),
+        "exact_api_usage": "chat-completions-response-usage-required-v1",
+        "embedding_observation": "sentence-transformer-tokenizer+wall-clock-v1",
+        "build_llm_response_contract": GRAPHITI_BUILD_LLM_RESPONSE_CONTRACT,
+        "retrieval_observation": "product-search-wall-clock-v1",
+    }
+
+
+def _clean_graphiti_failed_ingest_state(
+    context: MethodBuildContext,
+    conversation: Conversation,
+    failed_state: dict[str, Any],
+) -> None:
+    """物理 root 级清理 Graphiti failed-ingest conversation。"""
+
+    run_id = context.storage_root.parent.name
+    storage_root = _resolve_clean_retry_storage_root(context, failed_state)
+    clean_context = MethodBuildContext(
+        config=context.config,
+        openai_settings=context.openai_settings,
+        path_settings=context.path_settings,
+        storage_root=storage_root,
+        benchmark_name=context.benchmark_name,
+    )
+    system = _build_graphiti_system(clean_context)
+    if not isinstance(system, GraphitiOSS):
+        raise ConfigurationError("Graphiti clean hook failed to build adapter")
+    isolation_key = f"{run_id}_{conversation.conversation_id}"
+    try:
+        clean_graphiti_conversation_state(
+            provider=system,
+            isolation_key=isolation_key,
+        )
+    finally:
+        system.cleanup()
+
+
+def _graphiti_build_identity(
+    config_manifest: dict[str, Any],
+) -> BuildIdentityDeclaration:
+    """解析 Graphiti controlled MiniLM + FalkorDB cosine build。"""
+
+    provider = _manifest_text(config_manifest, "embedding_provider")
+    model = _manifest_text(config_manifest, "embedding_model_path")
+    dimension = _manifest_dimension(config_manifest, "embedding_dimension")
+    model_key = "" if model is None else model.strip().split("/")[-1].lower()
+    if (
+        provider == "sentence-transformers-local"
+        and model_key == "all-minilm-l6-v2"
+        and dimension == 384
+    ):
+        return BuildIdentityDeclaration(
+            implementation_variant="product",
+            embedding_profile="controlled_embedding_v1",
+            historical_controlled_build_equivalent_to_current_main=False,
+            embedding=EmbeddingIdentity(
+                provider=provider,
+                model=model,
+                dimension=dimension,
+                revision=None,
+                revision_status="local_unpinned",
+                normalization="l2-normalized",
+                instruction=None,
+                distance="falkordb-cosine",
                 identity_status="declared",
             ),
         )
@@ -1726,6 +1906,42 @@ _REGISTRATIONS = {
         supports_shared_instance_parallelism=False,
         clean_failed_ingest_state=_clean_everos_failed_ingest_state,
         build_identity_resolver=_everos_build_identity,
+    ),
+    "graphiti": MethodRegistration(
+        name="graphiti",
+        task_families=frozenset({TaskFamily.CONVERSATION_QA}),
+        provided_capabilities=frozenset(
+            {
+                MethodCapability.CONVERSATION_ADD,
+                MethodCapability.MEMORY_RETRIEVAL,
+            }
+        ),
+        profile_sections=(
+            ("smoke", "smoke"),
+            ("official-full", "official_full"),
+        ),
+        profile_relative_path=Path("configs/methods/graphiti.toml"),
+        config_type=GraphitiConfig,
+        requires_api=True,
+        system_factory=_build_graphiti_system,
+        source_identity_factory=build_graphiti_source_identity,
+        model_name_getter=_graphiti_model_name,
+        max_workers_getter=_graphiti_max_workers,
+        display_name="Graphiti OSS",
+        protocol_version="v3",
+        consume_granularity_resolver=_turn_consume_granularity,
+        provenance_granularity="turn",
+        retrieval_evidence_contract_version="v1",
+        allow_smoke_worker_override=True,
+        efficiency_model_inventory_getter=_graphiti_efficiency_model_inventory,
+        efficiency_instrumentation_identity_getter=(
+            _graphiti_efficiency_instrumentation_identity
+        ),
+        retrieval_observation_contract_getter=_separable_retrieval_contract,
+        supports_shared_instance_parallelism=False,
+        clean_failed_ingest_state=_clean_graphiti_failed_ingest_state,
+        build_identity_resolver=_graphiti_build_identity,
+        variant_validator=validate_graphiti_variant,
     ),
     "mem0": MethodRegistration(
         name="mem0",

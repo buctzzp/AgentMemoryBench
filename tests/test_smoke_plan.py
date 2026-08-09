@@ -126,6 +126,36 @@ def test_mem0_plan_emits_allowed_worker_override() -> None:
     assert _flag_value(plan.predict_argv, "--workers") == "2"
 
 
+def test_graphiti_variant_gate_rejects_membench_100k_but_plans_0_10k(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Graphiti 缺时 variant 应在 secret/runtime 前失败，其余 MemBench 可规划。"""
+
+    monkeypatch.delenv("OPENCODEGO_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(
+        ConfigurationError,
+        match="does not support MemBench variant '100k'",
+    ):
+        build_smoke_execution_plan(
+            project_root=PROJECT_ROOT,
+            method_name="graphiti",
+            benchmark_name="membench",
+            variant="100k",
+            run_id="graphiti-membench-100k-rejected",
+        )
+
+    plan = build_smoke_execution_plan(
+        project_root=PROJECT_ROOT,
+        method_name="graphiti",
+        benchmark_name="membench",
+        variant="0_10k",
+        run_id="graphiti-membench-0-10k-ready",
+    )
+    assert plan.prediction_run_id == "graphiti-membench-0-10k-ready-0-10k"
+    assert plan.method == "graphiti"
+
+
 def test_operation_level_plan_rejects_parallel_request() -> None:
     """HaluMem operation-level runner 的 W1 门也应在 planner 前置。"""
 

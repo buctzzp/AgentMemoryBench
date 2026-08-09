@@ -1,6 +1,6 @@
 # Graphiti integration
 
-状态：`M1 source/product locked；adapter not implemented`
+状态：`M3 offline accepted；B11 paused on OpenCodeGo region opt-in`
 
 ## 身份
 
@@ -12,37 +12,56 @@
 | license | Apache-2.0 |
 | local source | `third_party/methods/graphiti` |
 | Phase 1 身份 | Graphiti OSS；不是 Zep hosted/product parity |
+| adapter | `graphiti-oss-product-v1` |
+| product surface | direct `Graphiti.add_episode()` + `Graphiti.search()` |
+| storage | 每 conversation 独占 FalkorDB Lite 物理 root |
+| embedding | local `all-MiniLM-L6-v2`，384 维、L2 normalize、cosine |
 
-Graphiti 于 2026-08-09 经用户裁定接替 source-unavailable 的 Supermemory。Supermemory 旧 blocked
-note 保留为历史证据，但不再占 Phase 1 第十格。
+Graphiti 于 2026-08-09 经用户裁定接替 source-unavailable 的 Supermemory。2026-08-09 再核远端
+tag：`v0.29.3` 仍是最新稳定版，`v0.30.0` 仅有 pre-release。Supermemory 旧 blocked note
+保留为 source-gate 判例，但不再占 Phase 1 第十格。
 
-## 已锁产品接口
+## 产品与配置
 
-- ingest：direct async `Graphiti.add_episode(...)`，每个 source message 一个 episode、逐条 await；
-- retrieve：`Graphiti.search(query, group_ids, num_results)`，默认 edge BM25 + cosine + RRF；
-- result：有序 `EntityEdge` facts，含 temporal validity 与 `episodes` source ids；
-- storage 候选：官方支持的 embedded FalkorDB Lite；
-- cleanup 候选：独占 group/database 的精确 clear + empty verification；
-- HTTP server 只是相同 core 的异步 queue wrapper，completion 更弱，主轨不用 host。
+- ingest：每个 nonblank canonical turn 一次 `add_episode(source=message)`，逐条 await；
+- retrieve：默认 edge BM25 + cosine + RRF；返回有序 EntityEdge fact 与 temporal validity；
+- runtime：不启动 HTTP host，独立 Python 3.12 worker 直调与官方 server 相同的 core；
+- smoke：`.env` 的 `opencodego/deepseek-v4-flash`，Chat Completions + `json_object` +
+  `thinking=disabled`，成功 response 必须带 exact usage；
+- official_full：`primary/gpt-4o-mini` + `json_schema`；
+- cross encoder：主 search 不调用；官方基类 sentinel 一旦被调用即 fail-fast；
+- cleanup：root 外 marker → 固定 tombstone → resumable rmtree，embedded Redis 必须 exact stop；
+  shutdown 未确认后 runtime 永久 fail-closed。
 
-## Official benchmark 边界
+current stable repo 只含 LongMemEval graph-building eval：逐 message `role: content`、session date、
+单 user group。它没有完整 question search/answer/judge，因此只提供 payload parity；LoCoMo、
+HaluMem、BEAM、MemBench 都是 framework extension。Graphiti OSS 也不等于 Zep cloud 产品。
 
-current stable repo 只含 LongMemEval graph-building eval：每个 message 以
-`role: content`、session date、单 user group 逐条 add。它没有 question search/answer/judge/NDCG，
-因此只能锁 payload，不是完整作者结果复现。LoCoMo/HaluMem/BEAM/MemBench 都是 framework
-extension。
+## 五格资格
 
-## 当前待闭合
+| Benchmark | 输入与异常边界 | Retrieval metric | 运行状态 |
+| --- | --- | --- | --- |
+| LoCoMo | speaker_a→user、speaker_b→assistant；真实 speaker 前缀；caption wrapper；逐 turn time | provenance valid/turn；rank valid | W1/W2 plan ready |
+| LongMemEval | raw role/order；逐 turn；不配对、不补 placeholder | provenance valid/turn；rank valid | S/M W1/W2 plan ready |
+| MemBench 0-10k | First/Third canonical turn；原文 place/time 保留，typed time 另传 | provenance valid/turn；rank valid | W1/W2 plan ready |
+| MemBench 100k | source time 可能缺失，Graphiti reference_time 必填 | N/A；禁止造时 | pre-runtime rejected |
+| BEAM | 四 variant 原序；10M orphan/mismatch 不位置配对 | provenance valid/turn；rank valid | 四 variant W1/W2 plan ready |
+| HaluMem | 逐 turn add；session-local current active edge report | extraction/update/QA/memory-type valid | Medium/Long fixed W1 ready |
 
-1. FalkorDB Lite 文件/进程 ownership、group/database isolation、W1/W2 与 clean retry；
-2. OpenCodeGo `OpenAIGenericClient(json_object)` 的结构化输出与 usage/timeout 观测；
-3. 本地 embedding extension 的模型/revision/dimension/normalization/distance；
-4. `EntityEdge.episodes` 在 dedup/update/invalidation 后的 semantic lineage 资格；
-5. HaluMem session-local extraction 与 MemBench 100k missing timestamp；
-6. 五格 dossier、machine plan、真实 smoke 与 artifact gate。
+HaluMem memory-type 是 gold category breakdown，不要求 method 自己输出 Event/Persona/Relationship；
+早期 M2 草稿中的 N/A 已更正。统一 `query_limit=20` 只是容量上限：普通 query 仍用自身 top-k，
+HaluMem QA 的既有请求可完整取 20。
 
-完整一手裁决见
-[`graphiti-v0.29.3-source-product-m1-ruling.md`](../../workstreams/ws02.7-method-track/branches/method-recertification/graphiti/notes/graphiti-v0.29.3-source-product-m1-ruling.md)。
-检查点状态只写入
-[`graphiti-integration-ledger.md`](../../workstreams/ws02.7-method-track/branches/method-recertification/graphiti/notes/graphiti-integration-ledger.md)，
-本页只承载已经架构师验收的稳定摘要。
+## 证据入口
+
+- source/product：[M1 ruling](../../workstreams/ws02.7-method-track/branches/method-recertification/graphiti/notes/graphiti-v0.29.3-source-product-m1-ruling.md)
+- runtime/lineage：[M2 ruling](../../workstreams/ws02.7-method-track/branches/method-recertification/graphiti/notes/graphiti-v0.29.3-product-runtime-m2-ruling.md)
+- adapter/product probes：[M3 implementation](../../workstreams/ws02.7-method-track/branches/method-recertification/graphiti/notes/graphiti-v0.29.3-product-adapter-m3-implementation.md)
+- 五格安全档案：[dossier](../../workstreams/ws02.7-method-track/branches/method-recertification/graphiti/notes/graphiti-five-benchmark-safety-dossier.md)
+- 状态单一事实源：[integration ledger](../../workstreams/ws02.7-method-track/branches/method-recertification/graphiti/notes/graphiti-integration-ledger.md)
+- 首次真实运行：[B11 first live attempt](../../workstreams/ws02.7-method-track/branches/method-recertification/graphiti/notes/graphiti-b11-first-live-attempt.md)
+
+首个 LoCoMo W1 已到达 product build LLM，但 OpenCodeGo workspace 因区域模型尚未显式 opt-in
+返回 HTTP 403；首个 turn 未提交，其余计划未执行。真实 smoke、artifact gate 与 frozen 状态
+仍不能由离线结果或失败 run 代替；外部门解除后按 ledger 的 B11 行从既有 failed-ingest run
+恢复。

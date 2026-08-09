@@ -21,7 +21,7 @@
 恢复/防 API 空烧兜底工程通过验证；已有 LoCoMo full 结果届时在完成后的 5×10
 架构下用新 run_id 重跑。
 
-当前基线（2026-07-29）：5 个 benchmark adapter 全部 frozen-v1；首批 6 个 method adapter
+当前基线（2026-08-09）：5 个 benchmark adapter 全部 frozen-v1；首批 6 个 method adapter
 （Mem0、MemoryOS、A-Mem、LightMem、SimpleMem、MemOS）均已完成五格真实 smoke 与 B1-B11。
 LightMem=`method-frozen-v3`，Mem0=`method-frozen-v2`，MemoryOS/A-Mem/SimpleMem=
 `method-frozen-v1`。A-Mem 与 SimpleMem 各完成 11 个正式真实 run；前者检索 evolution 后
@@ -43,13 +43,16 @@ MemOS=`method-frozen-v1`：官方 `v2.0.25` typed product handler、LoCoMo 双 n
 async exact terminal 与真实 API usage 观测已闭合；framework W2 因共享进程级
 runtime/embedder 的真实竞态判 N/A，主 profile 固定 W1。
 
-缺口：Graphiti OSS 已锁 `v0.29.3@021d3a5` source/product 身份，正在关闭 embedded
-FalkorDB Lite、build/embedding runtime、lineage、HaluMem 与 MemBench missing-time 的 M2 门，
-尚无 adapter。Supermemory 旧 blocked 记录只保留为 source-gate 历史。
+Graphiti OSS 已锁 `v0.29.3@021d3a5` 并完成 direct-core/FalkorDB Lite product adapter、
+build/embedding runtime、lineage、HaluMem、MemBench missing-time、五格 dossier 与 18 份机器
+计划；首个 LoCoMo W1 已到达 OpenCodeGo product build provider，但同样因区域模型尚未显式
+opt-in 返回 403，当前为 `ready_for_smoke / external-paused`。MemBench 100k 因 product
+mandatory source time 诚实 N/A。Supermemory 旧 blocked 记录只保留为 source-gate 历史。
 Letta/MemGPT、LangMem 与 EverOS 均已有 product-faithful adapter、五格 dossier 与机器化 smoke
 plan；用户已批准使用 OpenCodeGo smoke。Letta 首次真实 run 已到达 provider，但该账号需在
-OpenCodeGo workspace 显式启用中国区模型而返回 403，因此三家 B11 目前是
-`PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`，不是代码失败或预算未批。
+OpenCodeGo workspace 显式启用中国区模型而返回 403；Graphiti 首次真实 run 随后也复现同一
+外部门，因此四家 B11 目前都是 `PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`。
+这不是代码失败或预算未批。
 效果参数、作者 builder、真实 resume 与 full 成本 pilot 仍待后续。真实 API
 一律继续由用户确认预算、规模与 run_id。首批 25 格完成后已做一次有边界的
 [架构减重审计](workstreams/ws03-architecture-slimming/notes/2026-07-23-first-25-cell-consolidation-audit.md)：
@@ -72,7 +75,7 @@ LangMem 与 EverOS 的 B11 已获批，当前统一暂停在 OpenCodeGo workspac
 | [ws02.4](workstreams/ws02.4-simplemem/README.md) | simplemem-adapter | accepted | P0 | 历史 T1-T6 已关闭；current text product 的五格重认证与 frozen-v1 见 ws02.7 |
 | [ws02.5](workstreams/ws02.5-method-interface-audit/README.md) | method-interface-audit | done | P0 | 2026-07-09 关闭：5 method 接口审计 + MemoryOS 迁移 + 当时配置归一化；shared embedder 资产保留为 controlled，ws02.7 现审计 product-default 精确身份与迁移/复证面 |
 | [ws02.6](workstreams/ws02.6-first-smoke-hardening/README.md) | first-smoke-hardening | done | P0 | 五 benchmark 全部 frozen-v1 + B6 横向总验收完成（2026-07-12）；method 侧已转 ws02.7 |
-| [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | in-progress | P0 | 首批 6 method frozen；Letta/LangMem/EverOS B11 等 OpenCodeGo opt-in；Graphiti M1 通过、M2 当前动作 |
+| [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | in-progress | P0 | 首批 6 method frozen；Letta/LangMem/EverOS/Graphiti 离线接入完成，四家 B11 因 OpenCodeGo opt-in 暂停 |
 | [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | open | P1 | 结构归一 M0 已关闭；legacy/LLM runtime 等 M1 后续有边界推进，不阻塞 MemOS |
 | [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | open | P2 | isolated 进度心跳、第三方 stdout/tqdm 治理 |
 | [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | open | P1 | 全量实验申请材料：成本估算表 + 结果汇总 + 兜底验证清单（依赖 ws02） |

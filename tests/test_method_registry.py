@@ -15,6 +15,7 @@ from memory_benchmark.core import (
     validate_compatibility,
 )
 from memory_benchmark.methods.everos_adapter import EverOSConfig
+from memory_benchmark.methods.graphiti_adapter import GraphitiConfig
 from memory_benchmark.methods.langmem_adapter import LangMemConfig
 from memory_benchmark.methods.letta_adapter import LettaConfig
 from memory_benchmark.methods.lightmem_adapter import LightMemConfig
@@ -39,6 +40,7 @@ def test_registry_lists_conversation_qa_methods() -> None:
     assert list_methods() == [
         "amem",
         "everos",
+        "graphiti",
         "langmem",
         "letta",
         "lightmem",
@@ -190,6 +192,7 @@ def test_built_in_methods_advertise_memory_retrieval_capability() -> None:
         "memoryos",
         "amem",
         "everos",
+        "graphiti",
         "langmem",
         "letta",
         "lightmem",
@@ -242,6 +245,11 @@ def test_built_in_methods_advertise_memory_retrieval_capability() -> None:
         ("langmem", "membench", "session"),
         ("langmem", "beam", "session"),
         ("langmem", "halumem", "session"),
+        ("graphiti", "locomo", "turn"),
+        ("graphiti", "longmemeval", "turn"),
+        ("graphiti", "membench", "turn"),
+        ("graphiti", "beam", "turn"),
+        ("graphiti", "halumem", "turn"),
     ],
 )
 def test_registration_resolves_concrete_consume_granularity(
@@ -276,6 +284,47 @@ def test_clean_retry_support_is_only_declared_by_methods_with_safe_state_cleanup
     assert get_method_registration("letta").clean_failed_ingest_state is not None
     assert get_method_registration("langmem").clean_failed_ingest_state is not None
     assert get_method_registration("everos").clean_failed_ingest_state is not None
+    assert get_method_registration("graphiti").clean_failed_ingest_state is not None
+
+
+def test_graphiti_registration_declares_direct_core_product_contract() -> None:
+    """Graphiti 注册应固定 turn 粒度、embedded store 与受控 MiniLM。"""
+
+    registration = get_method_registration("graphiti")
+    config = load_method_profile(
+        "graphiti",
+        "smoke",
+        project_root=load_path_settings().project_root,
+    )
+
+    assert isinstance(config, GraphitiConfig)
+    assert registration.profile_names == frozenset({"smoke", "official-full"})
+    assert registration.profile_relative_path == Path("configs/methods/graphiti.toml")
+    assert registration.requires_api is True
+    assert registration.allow_smoke_worker_override is True
+    assert registration.supports_shared_instance_parallelism is False
+    assert registration.provenance_granularity == "turn"
+    assert registration.retrieval_evidence_contract_version == "v1"
+    assert registration.resolve_consume_granularity("locomo") == "turn"
+    assert registration.efficiency_model_inventory_getter is not None
+    inventory = registration.efficiency_model_inventory_getter(config)
+    assert [entry.model_id for entry in inventory] == [
+        "graphiti-build-llm",
+        "graphiti-embedding",
+    ]
+    assert [entry.model_role for entry in inventory] == [
+        "memory_build_llm",
+        "embedding",
+    ]
+    declaration = registration.build_identity_resolver(config.to_manifest())
+    assert declaration.implementation_variant == "product"
+    assert declaration.embedding_profile == "controlled_embedding_v1"
+    assert declaration.embedding.dimension == 384
+    assert declaration.embedding.normalization == "l2-normalized"
+    assert declaration.embedding.distance == "falkordb-cosine"
+    registration.validate_variant("membench", "0_10k")
+    with pytest.raises(ConfigurationError, match="does not support MemBench"):
+        registration.validate_variant("membench", "100k")
 
 
 def test_letta_registration_declares_sleeptime_product_contract() -> None:

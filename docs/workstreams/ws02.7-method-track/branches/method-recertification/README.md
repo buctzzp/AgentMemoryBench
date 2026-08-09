@@ -69,18 +69,21 @@ LightMem 已关闭的异常样本。只有三类触发器允许重开 benchmark 
 10. **Supermemory M1 历史 source gate**：最新稳定 self-host `server-v0.0.6` 只发布
    checksum-pinned binary，公开 MIT tree 没有 server/engine source 或 release build；官方
    issue #1299 仍无维护者技术答复。该 method 已退出 Phase 1，第十格不再等待其开源。
-11. **Graphiti OSS M1 已关闭**：用户裁定以 Apache-2.0 Graphiti 接替第十格，锁
+11. **Graphiti OSS M3 离线门已关闭，B11 外部门暂停**：用户裁定以 Apache-2.0 Graphiti 接替第十格，锁
     `v0.29.3@021d3a5`。Graphiti 与 Zep hosted product 严格分名；direct
     `add_episode/search` 是 product-equivalent surface，current official repo 仅有 LongMemEval
-    graph-build payload anchor。当前只做 M2 FalkorDB Lite、embedding、lineage、HaluMem、
-    missing-time 审计；未经单独预算批准不执行 Graphiti 真实 API。
+    graph-build payload anchor。FalkorDB Lite、local embedding、lineage、HaluMem、missing-time、
+    五格 dossier、18 份 machine plan 与无 API 全量均已闭合；用户批准后首个 LoCoMo W1 已
+    到达 product build provider，但命中与 Letta 相同的 OpenCodeGo 区域 opt-in 403，因此
+    没有继续其余计划。MemBench 100k 因 mandatory source time 判 N/A，不生成命令。
 
 ## 当前状态
 
 LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS 均已冻结；状态与证据从父级
 `../../README.md` 恢复胶囊进入。机器化 smoke plan/preflight 与 ledger v1 强制接入门均已
-落地；Letta/MemGPT、LangMem 与 EverOS 三份 ledger 均已推进到 `ready_for_smoke`。三家 M1/M2、
-五格安全档案、机器计划与无 API 全量回归均已关闭；当前共用外部门是 OpenCodeGo 区域 opt-in，
-不是重新申请预算。Supermemory source gate 保留为历史，Graphiti M1 已通过并成为当前 M2 动作。
+落地；Letta/MemGPT、LangMem、EverOS 与 Graphiti 四份 ledger 均已推进到 `ready_for_smoke`。
+四家 M1/M2/M3、五格安全档案、机器计划与无 API 全量回归均已关闭；当前共用外部门是 OpenCodeGo 区域 opt-in，
+不是重新申请预算。Supermemory source gate 保留为历史；Graphiti 首次真实 run 也已复现同一
+外部门，当前四家统一等待 opt-in，不重复空烧。
 继续复用五个 benchmark 稳定层，不重做 dataset census。
 权威实时动作仍看父级恢复胶囊与最新断点。

@@ -366,6 +366,17 @@ def run_registered_conversation_qa_prediction(
         method_task_families=method_registration.task_families,
         provided_capabilities=method_registration.provided_capabilities,
     )
+    variant_validator = getattr(method_registration, "variant_validator", None)
+    selected_variants: tuple[str, ...] | None = None
+    if variant_validator is not None:
+        if not callable(variant_validator):
+            raise ConfigurationError("method variant_validator must be callable")
+        selected_variants = resolve_variant_selector(
+            benchmark_registration,
+            variant,
+        )
+        for concrete_variant in selected_variants:
+            variant_validator(benchmark_name, concrete_variant)
     method_registration.resolve_profile_section(profile_name)
     _confirm_prediction_cost(
         method_display_name=method_registration.display_name,
@@ -430,8 +441,12 @@ def run_registered_conversation_qa_prediction(
         )
     )
     run_scope = _resolve_profile_run_scope(config.profile_name)
+    if selected_variants is None:
+        selected_variants = resolve_variant_selector(
+            benchmark_registration,
+            variant,
+        )
     selector = variant or benchmark_registration.default_variant
-    selected_variants = resolve_variant_selector(benchmark_registration, variant)
     selected_run_ids = _resolve_batch_run_ids(
         method_name=method_name,
         benchmark_name=benchmark_name,

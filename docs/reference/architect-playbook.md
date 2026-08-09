@@ -116,6 +116,10 @@
   enter 的 provider 逆序 exit，并 settle 全部 shutdown error；删除链用 root 外 cleanup marker
   连接 `live → tombstone → deleted`，不能把 live path 消失当作完成。若产品用 CLI scaffold 生成
   root，精确模板和 bootstrap wrapper 也属于算法身份。EverOS v1.2.3 M2 是组合判例。
+- 独立 runtime 的“安装成功”只证明 distribution resolver 完成，不证明 adapter 的真实 import
+  与产品构造可达。先从生产代码抄出 exact import symbol，再做 initialize/close；若产品对 client
+  用 Pydantic/ABC 做 nominal type 校验，负能力 sentinel 必须继承官方基类，不能只靠 duck typing。
+  Graphiti v0.29.3 的 FalkorDB Lite import 与 cross-encoder sentinel 是同一类假绿判例。
 - 声明性模型身份与运行时可达性是两件事。配置中的 reranker 可能只服务 agent 分支，而主
   chat/Episode 路径永远不调用；此时正确验收不是删掉模型身份，也不是臆造 token，而是在 lazy
   singleton/capability 构造前装透传探针，证明成功 operation 的调用账恒为空并对非空 fail-fast。
