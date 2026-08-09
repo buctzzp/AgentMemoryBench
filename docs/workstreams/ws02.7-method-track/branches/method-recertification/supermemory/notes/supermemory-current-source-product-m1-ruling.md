@@ -1,6 +1,7 @@
 # Supermemory current source / product identity M1 裁决
 
 日期：2026-08-02
+最近复核：2026-08-09
 状态：`BLOCKED_SOURCE_UNAVAILABLE_LOCAL_BINARY`
 范围：锁定当前官方来源、stable self-host release、官方 benchmark harness 与 Phase 1
 资格边界；不实现 adapter，不下载/启动 binary，不调用 cloud 或模型 API。
@@ -84,6 +85,25 @@ source-unavailable self-hosted binary
 ```
 
 不宣称它一定是 proprietary，也不接受仅凭文档标签把它判成完整 OSS。
+
+### 2.4 2026-08-09 remote 增量复核
+
+为避免把 2026-08-02 的快照永久当成现状，架构师重新读取官方 Git refs、release、完整递归
+tree 与 issue：
+
+- remote `HEAD` 已前进到 `2731de5c06c3680eb629e9175cc53ef1e7d1c08c`；
+- stable tag 仍是 `server-v0.0.6@566be208`，`server-v0.0.7-rc.2@816b85d7` 仍标
+  prerelease；
+- GitHub recursive tree 返回 `truncated=false`、`entries=1359`。按路径筛选
+  `server|engine|memory-engine|self-host`，命中项只有 self-host 文档/图片和 `apps/mcp/src/server`
+  的 MCP transport；没有 self-host memory engine/runtime source；
+- `.github/workflows/` 当前 11 个入口仍只覆盖 CI、Claude、SDK/tools/memory-graph publish，
+  没有 server binary 的可复现 build/release workflow；
+- issue `#1299` 仍为 `Open`，页面没有 maintainer 技术回复、关联 branch 或 pull request。
+
+因此 main 的 UI/SDK/MCP 增量没有解除承重 source gate；本 note 的 stable lock、三条解锁分支与
+`BLOCKED_SUPERMEMORY_M1` 判词保持不变。复核用的是官方 Git refs 与 GitHub tree/release/issue，
+不是搜索摘要。
 
 ## 3. B0 官方 benchmark harness matrix
 
