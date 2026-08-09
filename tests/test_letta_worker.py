@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
+from types import ModuleType
 from types import SimpleNamespace
 from typing import Any
 
@@ -109,6 +112,196 @@ def test_letta_worker_rejects_extra_sdk_tagged_passage() -> None:
 
     with pytest.raises(RuntimeError, match="unexpected SDK-tagged passages"):
         asyncio.run(engine._validate_and_initialize_subject("subject-1", agent))
+
+
+def test_letta_worker_creates_and_finishes_official_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真实 agent step 必须携带先创建的 run id，并在成功后提交终态。"""
+
+    engine, records = _tracked_ingest_engine(monkeypatch)
+
+    result = asyncio.run(
+        engine.ingest(
+            {
+                "subject_id": "subject-1",
+                "operation_id": "operation-1",
+                "content": "user: hello",
+            }
+        )
+    )
+
+    assert records["events"] == [
+        "create_run",
+        "step:run-1",
+        "update_run:run-1:completed",
+    ]
+    assert records["created"].agent_id == "agent-1"
+    assert records["created"].metadata == {"run_type": "send_message"}
+    assert records["updated"].stop_reason.value == "tool_rule"
+    assert records["updated"].metadata is None
+    assert result["usage"] == [{"input_tokens": 11, "output_tokens": 3}]
+    assert result["step_count"] == 1
+
+
+def test_letta_worker_marks_tracked_run_failed_when_step_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """agent step 失败必须传播，同时把已创建 run 精确落为 failed。"""
+
+    engine, records = _tracked_ingest_engine(monkeypatch, step_failure=True)
+
+    with pytest.raises(RuntimeError, match="step exploded"):
+        asyncio.run(
+            engine.ingest(
+                {
+                    "subject_id": "subject-1",
+                    "operation_id": "operation-1",
+                    "content": "user: hello",
+                }
+            )
+        )
+
+    assert records["events"] == [
+        "create_run",
+        "step:run-1",
+        "update_run:run-1:failed",
+    ]
+    assert records["updated"].stop_reason is None
+    assert records["updated"].metadata == {"error_type": "RuntimeError"}
+    assert engine._usage_buffer is None
+
+
+def _tracked_ingest_engine(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    step_failure: bool = False,
+) -> tuple[_WorkerEngine, dict[str, Any]]:
+    """构造可锁定 official run 生命周期的 hermetic worker。"""
+
+    records: dict[str, Any] = {"events": []}
+    engine = _WorkerEngine()
+    engine.config = {"max_steps": 3}
+    engine.actor = SimpleNamespace(id="actor-1")
+
+    async def _ensure_subject(_payload: dict[str, Any]) -> dict[str, Any]:
+        """返回已存在的 subject，隔离本测试于 subject 建表细节。"""
+
+        return {
+            "subject_id": "subject-1",
+            "agent_id": "agent-1",
+            "block_ids": ["block-human", "block-summary"],
+            "archive_id": "archive-1",
+        }
+
+    engine.ensure_subject = _ensure_subject
+
+    class _RunManager:
+        """记录 run create/update 的最小 product manager。"""
+
+        async def create_run(self, *, pydantic_run: Any, actor: Any) -> Any:
+            """创建稳定 run id。"""
+
+            assert actor is engine.actor
+            records["events"].append("create_run")
+            records["created"] = pydantic_run
+            return SimpleNamespace(id="run-1")
+
+        async def update_run_by_id_async(
+            self, *, run_id: str, update: Any, actor: Any
+        ) -> Any:
+            """记录 terminal update。"""
+
+            assert actor is engine.actor
+            records["events"].append(f"update_run:{run_id}:{update.status}")
+            records["updated"] = update
+            return SimpleNamespace(id=run_id)
+
+    class _AgentManager:
+        """返回固定 agent。"""
+
+        async def get_agent_by_id_async(self, **_kwargs: Any) -> Any:
+            """返回固定 agent identity。"""
+
+            return SimpleNamespace(id="agent-1")
+
+    engine.server = SimpleNamespace(
+        run_manager=_RunManager(),
+        agent_manager=_AgentManager(),
+    )
+
+    class _RunStatus:
+        """最小 run status 常量。"""
+
+        failed = "failed"
+
+    class _Run:
+        """保存 create_run 构造参数。"""
+
+        def __init__(self, **kwargs: Any) -> None:
+            """复制字段供断言。"""
+
+            vars(self).update(kwargs)
+
+    class _RunUpdate(_Run):
+        """保存 terminal update 字段。"""
+
+    class _RequestConfig:
+        """代表官方默认 request config。"""
+
+    class _MessageCreate(_Run):
+        """保存 official message 字段。"""
+
+    stop_reason = SimpleNamespace(value="tool_rule", run_status="completed")
+
+    class _AgentLoopInstance:
+        """记录 agent step 的 run id，并模拟 usage。"""
+
+        async def step(self, _messages: list[Any], **kwargs: Any) -> Any:
+            """执行成功或注入失败。"""
+
+            records["events"].append(f"step:{kwargs.get('run_id')}")
+            if step_failure:
+                raise RuntimeError("step exploded")
+            engine._capture_usage(
+                {"usage": {"prompt_tokens": 11, "completion_tokens": 3}}
+            )
+            return SimpleNamespace(
+                stop_reason=SimpleNamespace(stop_reason=stop_reason),
+                usage=SimpleNamespace(step_count=1),
+            )
+
+    class _AgentLoop:
+        """返回固定 agent loop。"""
+
+        @staticmethod
+        def load(**_kwargs: Any) -> _AgentLoopInstance:
+            """返回固定 loop。"""
+
+            return _AgentLoopInstance()
+
+    modules = {
+        "letta": ModuleType("letta"),
+        "letta.agents": ModuleType("letta.agents"),
+        "letta.agents.agent_loop": ModuleType("letta.agents.agent_loop"),
+        "letta.schemas": ModuleType("letta.schemas"),
+        "letta.schemas.enums": ModuleType("letta.schemas.enums"),
+        "letta.schemas.job": ModuleType("letta.schemas.job"),
+        "letta.schemas.message": ModuleType("letta.schemas.message"),
+        "letta.schemas.run": ModuleType("letta.schemas.run"),
+    }
+    modules["letta.agents.agent_loop"].AgentLoop = _AgentLoop
+    modules["letta.schemas.enums"].RunStatus = _RunStatus
+    modules["letta.schemas.job"].LettaRequestConfig = _RequestConfig
+    modules["letta.schemas.message"].MessageCreate = _MessageCreate
+    modules["letta.schemas.run"].Run = _Run
+    modules["letta.schemas.run"].RunUpdate = _RunUpdate
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setenv("MEMORY_BENCHMARK_LETTA_BUILD_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    records["original_openai_key"] = os.environ.get("OPENAI_API_KEY")
+    return engine, records
 
 
 def _subject_validation_engine(

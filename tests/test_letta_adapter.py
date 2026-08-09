@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 from typing import Any
 
 import pytest
 
+import memory_benchmark.methods.letta_adapter as letta_adapter_module
 from memory_benchmark.config import OpenAISettings, PathSettings, load_path_settings
 from memory_benchmark.core import ConfigurationError
 from memory_benchmark.core.provider_protocol import (
@@ -279,6 +281,72 @@ def test_letta_runtime_enables_pgvector_before_schema_migration() -> None:
             ],
             True,
         )
+    ]
+
+
+def test_letta_runtime_waits_for_final_tcp_sql_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """初始化临时 Unix server 不得被误认成最终 product-ready。"""
+
+    runtime = object.__new__(LettaRuntime)
+    runtime._container_name = "owned-letta-postgres"
+    runtime.config = _config(postgres_startup_timeout_seconds=1.0)
+    calls: list[tuple[list[str], bool]] = []
+    responses = iter(
+        [
+            subprocess.CompletedProcess([], 1, "", "connection refused"),
+            subprocess.CompletedProcess([], 0, "1\n", ""),
+            subprocess.CompletedProcess([], 0, "127.0.0.1:49152\n", ""),
+        ]
+    )
+
+    def _fake_docker(
+        args: list[str], *, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        """模拟临时 server 拒绝 TCP，最终 server 随后就绪。"""
+
+        calls.append((args, check))
+        return next(responses)
+
+    runtime._docker = _fake_docker
+    monkeypatch.setattr(letta_adapter_module, "sleep", lambda _: None)
+
+    assert runtime._wait_for_postgres() == 49152
+    assert calls == [
+        (
+            [
+                "exec",
+                "owned-letta-postgres",
+                "psql",
+                "-h",
+                "127.0.0.1",
+                "-Atqc",
+                "SELECT 1",
+                "-U",
+                "letta",
+                "-d",
+                "letta",
+            ],
+            False,
+        ),
+        (
+            [
+                "exec",
+                "owned-letta-postgres",
+                "psql",
+                "-h",
+                "127.0.0.1",
+                "-Atqc",
+                "SELECT 1",
+                "-U",
+                "letta",
+                "-d",
+                "letta",
+            ],
+            False,
+        ),
+        (["port", "owned-letta-postgres", "5432/tcp"], True),
     ]
 
 

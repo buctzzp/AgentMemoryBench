@@ -482,19 +482,38 @@ class _WorkerEngine:
         )
 
         from letta.agents.agent_loop import AgentLoop
+        from letta.schemas.enums import RunStatus
+        from letta.schemas.job import LettaRequestConfig
         from letta.schemas.message import MessageCreate
+        from letta.schemas.run import Run as PydanticRun
+        from letta.schemas.run import RunUpdate
 
         api_key_name = "MEMORY_BENCHMARK_LETTA_BUILD_API_KEY"
         api_key = _required_text(os.environ.get(api_key_name), api_key_name)
         previous = os.environ.get("OPENAI_API_KEY")
+        run = await self.server.run_manager.create_run(
+            pydantic_run=PydanticRun(
+                agent_id=state["agent_id"],
+                background=False,
+                metadata={"run_type": "send_message"},
+                request_config=LettaRequestConfig(),
+            ),
+            actor=self.actor,
+        )
+        response = None
+        run_status = RunStatus.failed
+        run_update_metadata = None
+        stop_reason_object = None
         self._begin_usage()
         try:
             os.environ["OPENAI_API_KEY"] = api_key
             response = await AgentLoop.load(agent_state=agent, actor=self.actor).step(
                 [MessageCreate(role="user", content=content, otid=operation_id)],
                 max_steps=self.config["max_steps"],
+                run_id=run.id,
             )
-            stop_reason = getattr(response.stop_reason.stop_reason, "value", response.stop_reason.stop_reason)
+            stop_reason_object = response.stop_reason.stop_reason
+            stop_reason = getattr(stop_reason_object, "value", stop_reason_object)
             if stop_reason not in _SUCCESS_STOP_REASONS:
                 raise RuntimeError(f"Letta agent stopped non-terminally: {stop_reason}")
             usage = self._finish_usage()
@@ -503,14 +522,25 @@ class _WorkerEngine:
                     "Letta per-call usage count does not match response step_count: "
                     f"calls={len(usage)}, step_count={response.usage.step_count}"
                 )
-        except BaseException:
+            run_status = stop_reason_object.run_status
+        except BaseException as exc:
             self._discard_usage()
+            run_update_metadata = {"error_type": type(exc).__name__}
             raise
         finally:
             if previous is None:
                 os.environ.pop("OPENAI_API_KEY", None)
             else:
                 os.environ["OPENAI_API_KEY"] = previous
+            await self.server.run_manager.update_run_by_id_async(
+                run_id=run.id,
+                update=RunUpdate(
+                    status=run_status,
+                    metadata=run_update_metadata,
+                    stop_reason=stop_reason_object,
+                ),
+                actor=self.actor,
+            )
         return {
             **state,
             "stop_reason": str(stop_reason),

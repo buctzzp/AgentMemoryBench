@@ -1,8 +1,8 @@
 # Letta/MemGPT 五 benchmark 安全档案
 
 日期：2026-08-02
-状态：`READY_FOR_B11_REAL_SMOKE_APPROVAL`
-适用实现：`letta-sleeptime-product-v1`
+状态：`PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`
+适用实现：`letta-sleeptime-product-v2`
 
 ## 0. 怎么使用这份档案
 
@@ -174,7 +174,7 @@ judge，不依赖这两个条件，必须独立判 valid；不要再把“Recall
 `formatted_memory`、answer prompt、prediction、efficiency 与 evaluator-private labels 必须各自
 落标准 artifact；zero hit 用非空 sentinel，不能与 backend/worker error 混淆。
 
-## 8. B11 machine plan（已生成，未执行真实 API）
+## 8. B11 machine plan（已生成；首份真实请求被外部 opt-in 门拒绝）
 
 所有计划 `contract_version=smoke-plan-v1`，method=`letta`，profile=`smoke`，W1。
 11 份未经手写改造的原始 planner 输出保存在
@@ -219,7 +219,9 @@ Error: Letta/MemGPT does not support smoke worker override from configured 1 to 
 
 ## 10. 当前判词
 
-五格离线 payload、安全与 metric 资格已经闭合，真实 B11 尚未执行：
+五格离线 payload、安全与 metric 资格已经闭合。第一份真实 LoCoMo plan 已揪出并修复
+Postgres ready 竞态与 official run lifecycle 缺失，但 OpenCodeGo 随后以 workspace 未完成
+China-hosted model opt-in 的 HTTP 403 拒绝请求；因此真实 B11 仍未完成：
 
 ```text
 LOCOMO_READY_FOR_B11
@@ -229,3 +231,6 @@ BEAM_READY_FOR_B11
 HALUMEM_READY_FOR_B11
 LETTA_NOT_FROZEN_UNTIL_REAL_SMOKE_AND_ARTIFACT_GATE
 ```
+
+恢复与失败资产见
+[`letta-b11-first-live-attempt-r1.md`](letta-b11-first-live-attempt-r1.md)。

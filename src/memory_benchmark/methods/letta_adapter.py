@@ -45,7 +45,7 @@ from memory_benchmark.observability.efficiency import (
 from memory_benchmark.storage import atomic_write_json
 
 
-LETTA_ADAPTER_VERSION = "letta-sleeptime-product-v1"
+LETTA_ADAPTER_VERSION = "letta-sleeptime-product-v2"
 LETTA_METHOD_DIRECTORY = "letta"
 LETTA_UPSTREAM_URL = "https://github.com/letta-ai/letta.git"
 LETTA_RELEASE_TAG = "0.16.8"
@@ -461,7 +461,13 @@ class LettaRuntime:
             self._docker(["start", self._container_name])
 
     def _wait_for_postgres(self) -> int:
-        """等待 ``pg_isready``，并返回随机映射的 localhost 端口。"""
+        """等待最终 PostgreSQL TCP server 可执行 SQL，再返回映射端口。
+
+        官方 Postgres image 初始化时会短暂启动一个只监听 Unix socket 的临时
+        server；单独依赖 ``pg_isready`` 会把这个阶段误判为 product-ready，随后
+        ``psql`` 恰逢临时 server 关闭便产生竞态。这里改用容器内 TCP + ``SELECT
+        1``，只接受最终 server 的真实查询成功。
+        """
 
         deadline = monotonic() + self.config.postgres_startup_timeout_seconds
         while monotonic() < deadline:
@@ -469,7 +475,11 @@ class LettaRuntime:
                 [
                     "exec",
                     self._container_name,
-                    "pg_isready",
+                    "psql",
+                    "-h",
+                    "127.0.0.1",
+                    "-Atqc",
+                    "SELECT 1",
                     "-U",
                     LETTA_POSTGRES_USER,
                     "-d",

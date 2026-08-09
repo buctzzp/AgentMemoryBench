@@ -249,7 +249,7 @@ def test_letta_registered_prediction_runs_five_benchmarks_through_generic_runner
     assert manifest["method"]["provenance_granularity"] == "none"
     assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"
     config = manifest["method"]["config"]
-    assert config["adapter_version"] == "letta-sleeptime-product-v1"
+    assert config["adapter_version"] == "letta-sleeptime-product-v2"
     assert config["product_contract"] == "ai-memory-sdk-v0.2.0"
     assert config["embedding_provider"] is None
     assert config["build_llm_response_contract"] == (

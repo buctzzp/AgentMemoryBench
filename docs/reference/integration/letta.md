@@ -3,7 +3,9 @@
 > 稳定页：只记录经架构师复核的承重结论。完整证据、争议、零 API stdout 与五格反例见
 > `docs/workstreams/ws02.7-method-track/branches/method-recertification/letta/`。
 >
-> 状态：product adapter M2 离线门已闭合，已到 B11 真实 smoke 批准门；**尚未冻结**。
+> 状态：product adapter M2 离线门已闭合；B11 已获批并到达 OpenCodeGo endpoint，但账号
+> 尚未完成区域 opt-in 而返回 HTTP 403，当前为
+> `PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`；**尚未冻结**。
 
 ## 1. Source identity
 
@@ -17,7 +19,7 @@
 | 本地路径 | `third_party/methods/letta` |
 | adapter | `src/memory_benchmark/methods/letta_adapter.py` |
 | worker | `src/memory_benchmark/methods/letta_worker.py` |
-| adapter version | `letta-sleeptime-product-v1` |
+| adapter version | `letta-sleeptime-product-v2` |
 
 active Letta Code `v0.30.1` 是完整 agent harness，与本项目要复现的 legacy MemGPT/Letta V1
 sleeptime-memory 产品链属于 `ALGORITHM_VARIANT`，不能静默替换。Phase 1 五 benchmark 在
@@ -160,8 +162,11 @@ resume。named volume 是本机外部状态：跨机器只复制 outputs 不足�
 initializer、namespace deletion、`close_db`、container/volume 收尾全部实证。11 个 concrete
 variant 的 machine smoke plan 已生成，W2 请求会在 runtime/API 前拒绝。
 
-尚未执行：真实 build/answer/judge API、artifact 开箱、最终全量冻结门。因此当前判词是
-`READY_FOR_B11_REAL_SMOKE_APPROVAL`，不是 `method-frozen-v1`。
+首份真实 LoCoMo machine plan 已执行到 OpenCodeGo endpoint，并在过程中修复了 Postgres image
+初始化临时 server 假就绪与缺失 official `Run` lifecycle 两项产品链 bug。修复后的请求因
+workspace 尚未完成 China-hosted model opt-in 被 HTTP 403 拒绝；它不是成功 smoke，后续计划
+也未继续。因此当前判词是 `PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`，不是
+`method-frozen-v1`。
 
 ## 8. 证据入口
 
@@ -170,3 +175,4 @@ variant 的 machine smoke plan 已生成，W2 请求会在 runtime/API 前拒绝
 - [M2 implementation](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-m2-adapter-implementation.md)
 - [Five-benchmark safety dossier](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-five-benchmark-safety-dossier.md)
 - [11 concrete variant machine plans](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-smoke-plans-v1.json)
+- [B11 first live attempt and R1 fixes](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-b11-first-live-attempt-r1.md)

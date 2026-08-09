@@ -1,7 +1,7 @@
 # Letta/MemGPT sleeptime-memory adapter M2 检查点
 
 日期：2026-08-02
-状态：`READY_FOR_B11_REAL_SMOKE_APPROVAL`
+状态：`PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`
 用途：跨 task / compaction 的最小恢复入口；完整证据见 M1、M2 实现记录与五格安全档案。
 
 ## 1. 已锁身份
@@ -16,7 +16,7 @@
   retrieve 不消费 query，读取全部 blocks。
 - W1-only；TOML、registry 与 `plan-smoke` 都在 runtime/API 前拒绝 W2。
 
-## 2. M2 已完成
+## 2. M2/R1 已完成
 
 1. `scripts/bootstrap_letta_runtime.sh` 用 vendored lock 构建 Python 3.12 runtime，并显式固定
    `asyncpg/pg8000/pgvector/asn1crypto/scramp` 补充依赖；
@@ -30,6 +30,9 @@
    粒度校验先于资源启动；
 6. 五格 payload、异常、隐私与 metric 资格已收进
    [安全档案](letta-five-benchmark-safety-dossier.md)。
+7. 首次真实 plan 揪出并关闭 Postgres 临时初始化 server 假就绪与 official run lifecycle 缺失；
+   adapter 已升 `letta-sleeptime-product-v2`，见
+   [B11 首次真实链路记录](letta-b11-first-live-attempt-r1.md)。
 
 ## 3. Metric 最终裁决
 
@@ -60,16 +63,20 @@ BEAM 4、HaluMem 2；全部 W1。croppable 格为 history/isolation/question=1�
 4 sessions / 1 isolation / 1 QA。原始 planner 输出见
 [`letta-smoke-plans-v1.json`](letta-smoke-plans-v1.json)。
 
-最新门：扩展定向 `458 passed in 9.94s`；主树全量
+M2 基线门：扩展定向 `458 passed in 9.94s`；主树全量
 `1968 passed, 3 deselected, 13 warnings, 29 subtests passed in 131.45s`；compileall、diff、
 ledger、plan JSON、vendored source identity 与零 API product chain 全通过。完整命令/警告归因见
 [M2 实现记录](letta-m2-adapter-implementation.md#8-验证记录)，不得从本热层猜旧数字。
 
+R1 直接相关回归为 `120 passed in 2.16s`，compileall exit 0、diff check clean。修复后真实请求已
+抵达 OpenCodeGo，但因 workspace 尚未完成 China-hosted model opt-in 被 HTTP 403 拒绝；没有
+一份 B11 run 完成，也没有继续运行 LangMem/EverOS。
+
 ## 5. 当前唯一主动作
 
-1. 把 planner 生成的预算、规模、run ids 交用户批准；
-2. 真实 B11 predict/evaluate → artifact gate → frozen note；
-3. 未获新批准前不得调用真实 API。
+1. 等用户本人完成 OpenCodeGo workspace 地域 opt-in；
+2. 重跑 planner 的第一份 Letta LoCoMo W1 plan 并先开箱；
+3. 第一份通过后再执行其余 Letta predict/evaluate → artifact gate → frozen note。
 
 ## 6. 压缩后恢复顺序
 
