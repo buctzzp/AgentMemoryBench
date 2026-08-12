@@ -467,11 +467,19 @@ def test_lightmem_native_config_track_flows_through_both_official_grids(
         assert manifest["method"]["consume_granularity"] == (
             "pair" if benchmark == "longmemeval" else "turn"
         )
+        expected_max_tokens = 4096 if benchmark == "locomo" else 2000
         assert (
             reader.answer_settings.temperature,
             reader.answer_settings.max_tokens,
             reader.answer_settings.top_p,
-        ) == (0.0, 2000, 0.8)
+        ) == (0.0, expected_max_tokens, 0.8)
+        assert manifest["method"]["answer_reader"].get(
+            "provider_compatibility"
+        ) == (
+            "opencodego_locomo_explicit_completion_cap_4096_v3"
+            if benchmark == "locomo"
+            else None
+        )
         assert prompts[0]["prompt_messages"] == [
             message.to_dict() for message in reader.messages[0]
         ]

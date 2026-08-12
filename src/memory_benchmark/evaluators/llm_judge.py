@@ -345,6 +345,7 @@ class LLMJudgeEvaluator:
         *,
         api_input: Any,
         tokenizer_prompt_text: str,
+        chat_completions_response_format: dict[str, str] | None = None,
     ) -> JudgeModelResponse:
         """以给定 API input 调用 judge 模型并解析 token usage。
 
@@ -353,6 +354,10 @@ class LLMJudgeEvaluator:
         只在 API usage 缺失时供 tokenizer 回退估算，不影响真实请求内容。本方法只负责计量，
         不记录 observation，由调用方在 judge scope 内自行调用 `_record_judge_llm_call`，
         保证每次真实调用恰好计一次、不因外壳叠套而双计。
+
+        `chat_completions_response_format` 只约束 Chat Completions 的传输层输出格式；
+        Responses 正式轨保持原请求不变。调用方只能在自身 parser 本来就要求对应结构时
+        传入，不能借此改变 benchmark 的评分语义。
         """
 
         client = self._get_client()
@@ -365,11 +370,16 @@ class LLMJudgeEvaluator:
                 temperature=0,
             )
         elif api_settings.judge_transport == CHAT_COMPLETIONS_JUDGE_TRANSPORT:
+            request_overrides = api_settings.chat_completions_request_overrides()
+            if chat_completions_response_format is not None:
+                request_overrides["response_format"] = dict(
+                    chat_completions_response_format
+                )
             response = client.chat.completions.create(
                 model=model,
                 messages=_judge_chat_messages(api_input),
                 temperature=0,
-                **api_settings.chat_completions_request_overrides(),
+                **request_overrides,
             )
         else:  # pragma: no cover - OpenAISettings 已在构造期封闭枚举
             raise ConfigurationError(

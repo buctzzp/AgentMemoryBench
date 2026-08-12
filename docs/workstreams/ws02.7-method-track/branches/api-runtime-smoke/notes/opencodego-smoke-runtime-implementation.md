@@ -77,3 +77,24 @@ git diff --check exit 0
 warning 画像与 MemOS M4 基线相同：vendored LightMem Pydantic deprecation、MemOS
 `datetime.utcnow()` deprecation 与 MemOS config Pydantic serialization warning；无新增
 warning 类别。最终 commit 快照由父 ws02.7 README 记录。
+
+## 6. 2026-08-11 LoCoMo completion cap R1
+
+本节只追加新证据，不改写上方 2026-07-27 的历史记录；上方“低于 128 时仅在 smoke
+抬到 128”的口径自本节起 superseded。
+
+临时调查使用 `enable_thinking=false` 时仍观察到 reasoning tokens，但 current framework
+实际发送的是 `thinking={"type":"disabled"}`。架构师用生产
+`OpenAICompatibleAnswerLLMClient` 做两次最小真调用：
+
+```text
+max_tokens=256 finish_reason=stop content='pong' completion_tokens=2 reasoning_tokens=None
+max_tokens=32  finish_reason=stop content='pong' completion_tokens=2 reasoning_tokens=None
+```
+
+因此“current 生产 answer 一定被 reasoning 吃光 32”被否证，runtime manifest 的
+`thinking_mode=disabled` 仍有当前一手支撑。但 32 对 provider 漂移过于脆弱，且用户明确
+裁定放开 LoCoMo answer 上限；新契约按 `provider=opencodego + benchmark=locomo` 把
+`max_tokens is None or <4096` 变为显式 4096，compatibility identity 为
+`opencodego_locomo_explicit_completion_cap_4096_v3`。primary LoCoMo 仍为官方 32，其他
+benchmark 不受影响，官方 prompt 字节不变。

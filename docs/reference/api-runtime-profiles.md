@@ -48,15 +48,25 @@ prediction/evaluate 必须在真实调用前 fail-fast，不能静默覆盖。
 message list 原样复制；不会先尝试 Responses 再隐藏回落。`primary` runtime 的通用
 judge 继续走 Responses，LoCoMo/LongMemEval 等已有官方 Chat Completions 调用形状不改。
 
-`deepseek-v4-flash` 的 reasoning token 与可见回答共享 completion budget。仅在
-`smoke + opencodego` 且官方 `max_tokens < 128` 时，框架把上限抬到 128，并在
-answer manifest 写：
+`deepseek-v4-flash` 在未成功关闭 thinking 时，reasoning token 与可见回答共享
+completion budget。2026-08-11 用生产代码实际发送的
+`thinking={"type":"disabled"}` 分别以 `max_tokens=32/256` 做最小真调用，二者均返回
+`finish_reason=stop`、可见 `pong`、`completion_tokens=2`，且 usage 中没有 reasoning
+tokens；这与临时调查中测试的 `enable_thinking=false` 不是同一种请求形状，不能混为
+一谈。
+
+即便当前生产 override 有效，LoCoMo 官方的 32-token 小上限仍会把 smoke 绑定在一个
+脆弱的 provider 行为上。用户裁定后，框架对 **OpenCodeGo + LoCoMo** 把未设置或低于
+4096 的 answer 上限改成显式 4096；prompt、temperature、top-p 与 primary 正式轨均不改。
+4096 是几乎不触发的可复现安全阀，不是 API 默认的无限预算。answer manifest 写：
 
 ```text
-provider_compatibility = "opencodego_reasoning_completion_floor_128_v1"
+provider_compatibility = "opencodego_locomo_explicit_completion_cap_4096_v3"
 ```
 
-正式 profile 不应用该兼容层，其他 decoding 参数也不改变。
+该兼容层按 provider + benchmark 判定，不靠 `smoke` 字符串猜运行身份；当前
+`official_full` 固定使用 primary，因此继续保留 LoCoMo 官方 `max_tokens=32`。其他
+benchmark、primary provider，以及已经显式高于 4096 的配置均保持原值。
 
 ## 4. Manifest 与 resume
 

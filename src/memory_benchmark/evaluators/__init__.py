@@ -23,6 +23,7 @@ from .registry import (
     get_evaluator_registration,
     list_metrics,
     load_evaluator_profile,
+    order_metrics_for_evaluation,
 )
 
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     "get_evaluator_registration",
     "list_metrics",
     "load_evaluator_profile",
+    "order_metrics_for_evaluation",
     "normalize_answer",
     "normalize_qa_answer",
     "normalized_tokens",

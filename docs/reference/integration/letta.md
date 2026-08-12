@@ -3,9 +3,9 @@
 > 稳定页：只记录经架构师复核的承重结论。完整证据、争议、零 API stdout 与五格反例见
 > `docs/workstreams/ws02.7-method-track/branches/method-recertification/letta/`。
 >
-> 状态：product adapter M2 离线门已闭合；B11 已获批并到达 OpenCodeGo endpoint，但账号
-> 尚未完成区域 opt-in 而返回 HTTP 403，当前为
-> `PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`；**尚未冻结**。
+> 状态：product adapter M2 离线门已闭合；B11 已获批并到达 OpenCodeGo endpoint。历史
+> 首跑曾被区域 opt-in 403 阻断，用户已于 2026-08-11 解除该外部门；当前为
+> `READY_FOR_SMOKE / LIVE_QUEUED`，**尚未冻结**。
 
 ## 1. Source identity
 
@@ -164,9 +164,9 @@ variant 的 machine smoke plan 已生成，W2 请求会在 runtime/API 前拒绝
 
 首份真实 LoCoMo machine plan 已执行到 OpenCodeGo endpoint，并在过程中修复了 Postgres image
 初始化临时 server 假就绪与缺失 official `Run` lifecycle 两项产品链 bug。修复后的请求因
-workspace 尚未完成 China-hosted model opt-in 被 HTTP 403 拒绝；它不是成功 smoke，后续计划
-也未继续。因此当前判词是 `PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`，不是
-`method-frozen-v1`。
+workspace 当时尚未完成 China-hosted model opt-in 而被 HTTP 403 拒绝；它不是成功 smoke，
+后续计划也未继续。用户现已解除该外部门，但在真实重跑与 artifact gate 完成前，当前判词
+仍只是 `READY_FOR_SMOKE / LIVE_QUEUED`，不是 `method-frozen-v1`。
 
 ## 8. 证据入口
 

@@ -84,7 +84,20 @@ source episodes 与本 session 有交集的 facts。
 medium/long 各一份固定 W1 plan，任何 rounds/conversations/questions/workers override 都由 planner
 拒绝。
 
-## 7. 失效触发器
+## 7. 真实 B11 结果
+
+18 份 v2 machine plan 已全部执行：35 conversation、35 question、88 个真实 Graphiti product
+episode。所有 croppable variant 的 W1/W2、HaluMem Medium/Long fixed W1 均完成；artifact
+gate 与从 FalkorDB 反查真实 Episodic payload 的 parity gate 均通过。具体运行矩阵、N/A
+解释、效率 observation 和声明缺口见
+[Graphiti method-frozen-v1](./graphiti-frozen-v1.md)。
+
+本次默认 BEAM 10M smoke 未命中两处已知 orphan/mismatch 的具体位置；该形状仍由稳定数据
+census、canonical contract 与 production 强反例覆盖，不能把默认样本写成 live anomaly
+sentinel。LongMemEval M 选到 official no-target 问题、BEAM 选到 abstention，故对应 retrieval
+summary 为 N/A；这两项都不推翻 provider `valid/turn/stable` 的运行时证据。
+
+## 8. 失效触发器
 
 出现下列任一项必须重开本 dossier 对应格，不得沿用绿灯：
 
@@ -95,4 +108,5 @@ medium/long 各一份固定 W1 plan，任何 rounds/conversations/questions/work
 5. sidecar/operation digest/cleanup schema/adapter version 改变；
 6. MemBench 100k 获得真实 source timestamp 契约——届时只能重新审计，不得直接解除 N/A。
 
-真实 smoke、artifact 开箱与冻结状态只看 integration ledger；本文件的离线安全结论不替代 B11。
+真实 smoke、artifact 开箱与冻结状态只看 integration ledger 与 frozen note；本文件的安全结论
+不替代 B11。

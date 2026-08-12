@@ -36,7 +36,11 @@ class HalumemJudgeEvaluatorBase(LLMJudgeEvaluator):
             if not isinstance(payload, dict):
                 raise JudgeOutputError("fake HaluMem judge must return a dict")
             return payload
-        model_response = self._call_model_with_usage(prompt)
+        model_response = self._invoke_judge_model(
+            api_input=prompt,
+            tokenizer_prompt_text=prompt,
+            chat_completions_response_format={"type": "json_object"},
+        )
         self._record_judge_llm_call(model_response)
         return _parse_json_object(model_response.text)
 

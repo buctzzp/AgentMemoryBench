@@ -1,6 +1,6 @@
 # Graphiti integration
 
-状态：`M3 offline accepted；B11 paused on OpenCodeGo region opt-in`
+状态：`method-frozen-v1`
 
 ## 身份
 
@@ -41,12 +41,12 @@ HaluMem、BEAM、MemBench 都是 framework extension。Graphiti OSS 也不等于
 
 | Benchmark | 输入与异常边界 | Retrieval metric | 运行状态 |
 | --- | --- | --- | --- |
-| LoCoMo | speaker_a→user、speaker_b→assistant；真实 speaker 前缀；caption wrapper；逐 turn time | provenance valid/turn；rank valid | W1/W2 plan ready |
-| LongMemEval | raw role/order；逐 turn；不配对、不补 placeholder | provenance valid/turn；rank valid | S/M W1/W2 plan ready |
-| MemBench 0-10k | First/Third canonical turn；原文 place/time 保留，typed time 另传 | provenance valid/turn；rank valid | W1/W2 plan ready |
+| LoCoMo | speaker_a→user、speaker_b→assistant；真实 speaker 前缀；caption wrapper；逐 turn time | provenance valid/turn；rank valid | W1/W2 live passed |
+| LongMemEval | raw role/order；逐 turn；不配对、不补 placeholder | provenance valid/turn；rank valid | S/M W1/W2 live passed |
+| MemBench 0-10k | First/Third canonical turn；原文 place/time 保留，typed time 另传 | provenance valid/turn；rank valid | W1/W2 live passed |
 | MemBench 100k | source time 可能缺失，Graphiti reference_time 必填 | N/A；禁止造时 | pre-runtime rejected |
-| BEAM | 四 variant 原序；10M orphan/mismatch 不位置配对 | provenance valid/turn；rank valid | 四 variant W1/W2 plan ready |
-| HaluMem | 逐 turn add；session-local current active edge report | extraction/update/QA/memory-type valid | Medium/Long fixed W1 ready |
+| BEAM | 四 variant 原序；10M orphan/mismatch 不位置配对 | provenance valid/turn；rank valid | 四 variant W1/W2 live passed |
+| HaluMem | 逐 turn add；session-local current active edge report | extraction/update/QA/memory-type valid | Medium/Long fixed W1 passed |
 
 HaluMem memory-type 是 gold category breakdown，不要求 method 自己输出 Event/Persona/Relationship；
 早期 M2 草稿中的 N/A 已更正。统一 `query_limit=20` 只是容量上限：普通 query 仍用自身 top-k，
@@ -60,8 +60,10 @@ HaluMem QA 的既有请求可完整取 20。
 - 五格安全档案：[dossier](../../workstreams/ws02.7-method-track/branches/method-recertification/graphiti/notes/graphiti-five-benchmark-safety-dossier.md)
 - 状态单一事实源：[integration ledger](../../workstreams/ws02.7-method-track/branches/method-recertification/graphiti/notes/graphiti-integration-ledger.md)
 - 首次真实运行：[B11 first live attempt](../../workstreams/ws02.7-method-track/branches/method-recertification/graphiti/notes/graphiti-b11-first-live-attempt.md)
+- 冻结验收：[method-frozen-v1](../../workstreams/ws02.7-method-track/branches/method-recertification/graphiti/notes/graphiti-frozen-v1.md)
 
-首个 LoCoMo W1 已到达 product build LLM，但 OpenCodeGo workspace 因区域模型尚未显式 opt-in
-返回 HTTP 403；首个 turn 未提交，其余计划未执行。真实 smoke、artifact gate 与 frozen 状态
-仍不能由离线结果或失败 run 代替；外部门解除后按 ledger 的 B11 行从既有 failed-ingest run
-恢复。
+18 份 v2 plan 已于 2026-08-12 全部真实完成：35 conversation、35 question、88 个真实
+Graphiti product episode。artifact gate 与 FalkorDB payload parity 均机器通过，所有 croppable
+variant 的 W1/W2 都有真实物理隔离证据；旧 v1 403 run 仅保留为失败边界历史。MemBench 100k、
+默认 BEAM abstention 与 LongMemEval M no-target 的 N/A 边界，以及 full/cost/author calibration
+等声明缺口，均见 frozen note，不从极小 smoke 分数推断效果。

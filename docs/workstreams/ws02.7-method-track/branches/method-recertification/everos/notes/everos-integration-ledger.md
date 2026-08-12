@@ -47,7 +47,7 @@ frozen_note: none
 | GRID-HALUMEM | 固定 shape、session-local delta、四类 operation、最终 payload、指标、隐私与 W1 独立闭合 | PASS | evidence=stable=[HaluMem 稳定页](../../../../../../reference/integration/halumem.md) / payload=[dossier §6](./everos-five-benchmark-safety-dossier.md#6-halumem) / metric=[dossier §6](./everos-five-benchmark-safety-dossier.md#6-halumem) / privacy=[dossier §6](./everos-five-benchmark-safety-dossier.md#6-halumem) / smoke=[plan](./everos-smoke-plans-v1.json) / operations=extraction valid candidate, update valid candidate, qa valid candidate, memory_type N/A; ruling=fixed session/W1；flush+exact drain 后 session-filtered public get，累计 search 支持 update/QA，type 不猜; next=none |
 | B11-DOSSIER | 一份 living dossier 已按五 benchmark 分章并链接承重 note、异常处置和失效触发器 | PASS | evidence=[EverOS 五格安全档案](./everos-five-benchmark-safety-dossier.md); ruling=五格异常、payload、隐私、metric、机器计划与失效触发器在一份 living dossier 分章闭合; next=none |
 | B11-SMOKE-PLAN | 每个 concrete variant 的 smoke-plan-v1 已无 API 生成、审阅并保存，命令未手写 | PASS | evidence=[20 份原始 machine plan](./everos-smoke-plans-v1.json); ruling=9 个 croppable variant 各 W1/W2，2 个 HaluMem fixed variant 各 W1；全部由 registry/TOML 生成且 evaluator 未手删; next=none |
-| B11-REAL-SMOKE | planner 生成的全部 predict 与适用 evaluator 已真实执行，固定 shape 未误传裁剪参数 | PENDING | evidence=未获本 method 新预算批准; ruling=本批零 API; next=离线门完成后请求用户批准 |
+| B11-REAL-SMOKE | planner 生成的全部 predict 与适用 evaluator 已真实执行，固定 shape 未误传裁剪参数 | PENDING | evidence=用户已批准OpenCodeGo smoke; ruling=真实API可按已保存machine plan进入live队列，但尚无成功artifact; next=执行首份W1并开箱后再继续 |
 | B11-ARTIFACT-GATE | manifest、prediction、formatted_memory、private labels、efficiency、state 与 summary 已逐 run 开箱 | PENDING | evidence=依赖真实 smoke; ruling=零报错不等于通过; next=真实 smoke 后逐 run 开箱 |
 | B11-PARALLEL-GATE | 每个适用 variant 的 W1/W2 已实测，或 W1-only 的产品硬约束和 CLI 预启动拒绝已证明 | PENDING | evidence=[offline ownership](./everos-m2-adapter-implementation.md#9-observability-与并行-ownership) / [plans](./everos-smoke-plans-v1.json); ruling=离线 runner 已证两套 provider/worker/root，9 个 croppable variant 真实 W1/W2仍待 B11；HaluMem fixed W1; next=用户批准后逐 plan 实测 |
 | B11-REGRESSION-GATE | 定向强反例、全量 pytest、compileall、diff check 与第三方 patch identity 均通过 | PASS | evidence=[M2 §10](./everos-m2-adapter-implementation.md#10-离线验收与当前门); ruling=扩展定向 480 passed；全量 2078 passed/3 deselected/13 existing warnings/29 subtests；compileall、双层 diff check、patch reverse-check、source identity 与 official lifespan 零 API 探针均通过; next=none |
@@ -56,7 +56,7 @@ frozen_note: none
 
 ## 架构师最终签字
 
-- 当前 ledger 状态：`ready_for_smoke`（离线门已闭合，等待真实 B11 新预算批准）
+- 当前 ledger 状态：`ready_for_smoke / live-queued`（离线门已闭合，真实 B11 已批准待执行）
 - 最后一次一手证据复核 commit：EverOS
   `48fc9084888bc17100053227284f939a5aca5e91`；EverAlgo runtime tags 见 M1-R1 §3
-- 架构师判词：`EVEROS_M2_READY_FOR_B11_REAL_SMOKE_APPROVAL`。
+- 架构师判词：`EVEROS_M2_READY_FOR_B11_REAL_SMOKE_LIVE_QUEUED`。

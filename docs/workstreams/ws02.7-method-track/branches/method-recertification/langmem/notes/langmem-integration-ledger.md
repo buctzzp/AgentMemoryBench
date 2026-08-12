@@ -47,7 +47,7 @@ frozen_note: none
 | GRID-HALUMEM | 固定 shape、session-local delta、四类 operation、最终 payload、指标、隐私与 W1 独立闭合 | PASS | evidence=stable=[HaluMem 稳定页](../../../../../../reference/integration/halumem.md) / payload=[dossier §6](./langmem-five-benchmark-safety-dossier.md#6-halumem) / metric=[dossier §6](./langmem-five-benchmark-safety-dossier.md#6-halumem) / privacy=[dossier §6](./langmem-five-benchmark-safety-dossier.md#6-halumem) / smoke=[plan JSON](./langmem-smoke-plans-v1.json) / operations=extraction N/A, update valid, QA valid, memory_type N/A; ruling=fixed 4-session/W1 shape，session 一次 async 完成；current state 可测 update/QA，changed puts 不冒充 extraction point; next=none |
 | B11-DOSSIER | 一份 living dossier 已按五 benchmark 分章并链接承重 note、异常处置和失效触发器 | PASS | evidence=[LangMem 五格安全档案](./langmem-five-benchmark-safety-dossier.md); ruling=五格异常、payload、隐私、metric、计划与失效触发器在一份 living dossier 分章闭合; next=none |
 | B11-SMOKE-PLAN | 每个 concrete variant 的 smoke-plan-v1 已无 API 生成、审阅并保存，命令未手写 | PASS | evidence=[20 份原始 machine plan](./langmem-smoke-plans-v1.json); ruling=9 个 croppable variant 各 W1/W2，2 个 HaluMem fixed variant 各 W1；全部由 registry/TOML 生成，child suffix 与 evaluator 清单未手改; next=none |
-| B11-REAL-SMOKE | planner 生成的全部 predict 与适用 evaluator 已真实执行，固定 shape 未误传裁剪参数 | PENDING | evidence=尚未获用户批准; ruling=真实 API 需新预算、规模、run id 批准; next=离线门完成后请求批准 |
+| B11-REAL-SMOKE | planner 生成的全部 predict 与适用 evaluator 已真实执行，固定 shape 未误传裁剪参数 | PENDING | evidence=用户已批准OpenCodeGo smoke; ruling=真实API可按已保存machine plan进入live队列，但尚无成功artifact; next=执行首份W1并开箱后再继续 |
 | B11-ARTIFACT-GATE | manifest、prediction、formatted_memory、private labels、efficiency、state 与 summary 已逐 run 开箱 | PENDING | evidence=依赖真实 smoke; ruling=零报错不等于通过; next=真实 smoke 后开箱 |
 | B11-PARALLEL-GATE | 每个适用 variant 的 W1/W2 已实测，或 W1-only 的产品硬约束和 CLI 预启动拒绝已证明 | PENDING | evidence=[W2 offline ownership](./langmem-m2-adapter-implementation.md#6-并行-ownership) / [20 plans](./langmem-smoke-plans-v1.json); ruling=离线 runner 已证两个独占 worker/model/store/state root，9 个 croppable variant 的真实 W1/W2 仍待 B11；HaluMem 固定 W1; next=用户批准后逐 plan 实测并开箱资源与隔离 |
 | B11-REGRESSION-GATE | 定向强反例、全量 pytest、compileall、diff check 与第三方 patch identity 均通过 | PASS | evidence=[M2 §9](./langmem-m2-adapter-implementation.md#9-当前离线验证); ruling=扩展定向 473 passed，主树 2021 passed/3 deselected/13 个既有 warning/29 subtests，compileall、diff、ledger、plan JSON、nested source identity 与零 API product readout 全通过; next=none |
@@ -60,4 +60,4 @@ frozen_note: none
 - 最后一次一手证据复核 commit：`56d85939d80bb731bd5e237567148d817d7bfd16`
 - 当前事实边界：M1 source/product 与 M2 adapter/runtime/persistence/五格/metric/机器计划已闭合；
   真实 build/answer/judge smoke、artifact 开箱、真实 W1/W2 与 freeze sync 尚未执行。
-- 架构师判词：`LANGMEM_M2_OFFLINE_ACCEPTED_READY_FOR_B11_APPROVAL`。
+- 架构师判词：`LANGMEM_M2_OFFLINE_ACCEPTED_B11_LIVE_QUEUED`。

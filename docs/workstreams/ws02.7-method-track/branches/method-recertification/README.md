@@ -55,8 +55,8 @@ LightMem 已关闭的异常样本。只有三类触发器允许重开 benchmark 
    terminal 与 B7 observation 已冻结；framework W2 因共享 runtime/embedder 判 N/A。
 7. **Letta/MemGPT M2 离线门已完成**：11 个 concrete plan 已获批执行；首次真实 run
    依次暴露并修复 PostgreSQL 临时 init-server readiness 与 official run lifecycle 两个缺口，
-   当前已到达 OpenCodeGo provider，但因账号未完成区域 opt-in 返回 403。外部门解除后从同一
-   planner plan 重跑；真实 artifact gate 关闭后方可冻结。
+   当前已到达 OpenCodeGo provider，历史上曾因账号未完成区域 opt-in 返回 403；用户现已解除
+   外部门，转入真实重跑队列。真实 artifact gate 关闭后方可冻结。
 8. **LangMem M2 离线门已完成**：current source/product/official-harness、background-manager
    产品 adapter、原子状态、五格 dossier、W2 ownership 与 20 份机器计划均已验收；
    [ledger](langmem/notes/langmem-integration-ledger.md) 为 `ready_for_smoke`。Letta 与 LangMem
@@ -65,25 +65,28 @@ LightMem 已关闭的异常样本。只有三类触发器允许重开 benchmark 
    EverAlgo runtime packages 均有 Apache-2.0 public source。official lifespan 内 typed-product
    adapter、exact drain、五格 dossier、20 份 machine plan 与全量回归均已闭合，ledger 为
    `ready_for_smoke`。公开 harness 只有 LoCoMo；LongMemEval 仅论文报告、其余三格为
-   framework extension；与 LangMem 一样暂停在共用 OpenCodeGo opt-in 外部门。
+   framework extension；共用 OpenCodeGo opt-in 外部门已解除，真实 B11 尚待执行。
 10. **Supermemory M1 历史 source gate**：最新稳定 self-host `server-v0.0.6` 只发布
    checksum-pinned binary，公开 MIT tree 没有 server/engine source 或 release build；官方
    issue #1299 仍无维护者技术答复。该 method 已退出 Phase 1，第十格不再等待其开源。
-11. **Graphiti OSS M3 离线门已关闭，B11 外部门暂停**：用户裁定以 Apache-2.0 Graphiti 接替第十格，锁
+11. **Graphiti OSS 已冻结为 `method-frozen-v1`**：用户裁定以 Apache-2.0 Graphiti 接替第十格，锁
     `v0.29.3@021d3a5`。Graphiti 与 Zep hosted product 严格分名；direct
     `add_episode/search` 是 product-equivalent surface，current official repo 仅有 LongMemEval
     graph-build payload anchor。FalkorDB Lite、local embedding、lineage、HaluMem、missing-time、
     五格 dossier、18 份 machine plan 与无 API 全量均已闭合；用户批准后首个 LoCoMo W1 已
-    到达 product build provider，但命中与 Letta 相同的 OpenCodeGo 区域 opt-in 403，因此
-    没有继续其余计划。MemBench 100k 因 mandatory source time 判 N/A，不生成命令。
+    到达 product build provider，但当时命中与 Letta 相同的 OpenCodeGo 区域 opt-in 403，因此
+    没有继续其余计划。用户解除外部门后，旧 smoke 未 resume；planner 生成全新 v2 identity，
+    18/18 run、35 question、88 product episodes、全部 croppable W1/W2 与两道机器门均通过。
+    MemBench 100k 因 mandatory source time 判 N/A，不生成命令。最终证据见
+    [frozen-v1](graphiti/notes/graphiti-frozen-v1.md)。
 
 ## 当前状态
 
-LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS 均已冻结；状态与证据从父级
+LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS、Graphiti 均已冻结；状态与证据从父级
 `../../README.md` 恢复胶囊进入。机器化 smoke plan/preflight 与 ledger v1 强制接入门均已
-落地；Letta/MemGPT、LangMem、EverOS 与 Graphiti 四份 ledger 均已推进到 `ready_for_smoke`。
-四家 M1/M2/M3、五格安全档案、机器计划与无 API 全量回归均已关闭；当前共用外部门是 OpenCodeGo 区域 opt-in，
-不是重新申请预算。Supermemory source gate 保留为历史；Graphiti 首次真实 run 也已复现同一
-外部门，当前四家统一等待 opt-in，不重复空烧。
+落地；Letta/MemGPT、LangMem、EverOS 三份 ledger 均为 `ready_for_smoke`，Graphiti ledger 已
+推进为 `frozen`。三家 M1/M2、五格安全档案、机器计划与无 API 全量回归均已关闭；OpenCodeGo
+区域 opt-in 外部门已解除，当前三家进入真实 B11 队列，但不能提前升级 PASS。Supermemory source gate
+保留为历史；Graphiti 旧失败 run 只作外部门与 checkpoint 证据，不重复或续跑。
 继续复用五个 benchmark 稳定层，不重做 dataset census。
 权威实时动作仍看父级恢复胶囊与最新断点。

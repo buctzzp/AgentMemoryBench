@@ -16,6 +16,10 @@ from memory_benchmark.core import (
     Session,
     Turn,
 )
+from memory_benchmark.config import (
+    CHAT_COMPLETIONS_JUDGE_TRANSPORT,
+    OpenAISettings,
+)
 from memory_benchmark.evaluators.halumem_extraction import (
     HalumemExtractionEvaluator,
     build_halumem_dialogue_str,
@@ -809,6 +813,68 @@ class _FakeHalumemResponsesClient:
                 output_tokens=self._output_tokens,
             ),
         )
+
+
+class _FakeHalumemChatClient:
+    """记录 HaluMem OpenCodeGo Chat Completions 请求并返回结构化结果。"""
+
+    def __init__(self) -> None:
+        """初始化请求记录与 OpenAI SDK 同形入口。"""
+
+        self.calls: list[dict[str, Any]] = []
+        self.chat = SimpleNamespace(
+            completions=SimpleNamespace(create=self._create)
+        )
+
+    def _create(self, **kwargs: Any) -> object:
+        """记录完整 kwargs，并返回带 API usage 的合法 JSON 文本。"""
+
+        self.calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content='{"score": "2", "reasoning": "covered"}'
+                    )
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=12, completion_tokens=5),
+        )
+
+
+def test_halumem_opencodego_judge_requires_json_mode_and_disables_thinking() -> None:
+    """HaluMem JSON parser 在 OpenCodeGo 上必须由传输层锁定 JSON object。"""
+
+    client = _FakeHalumemChatClient()
+    settings = OpenAISettings(
+        api_key="sk-test",
+        base_url="https://opencode.example/v1",
+        model="deepseek-v4-flash",
+        provider="opencodego",
+        judge_transport=CHAT_COMPLETIONS_JUDGE_TRANSPORT,
+    )
+    evaluator = HalumemExtractionEvaluator(
+        model=settings.model,
+        client=client,
+        openai_settings=settings,
+    )
+
+    payload = evaluator._judge_json(
+        'Return one JSON object such as {"score": "2"}.'
+    )
+
+    assert payload["score"] == "2"
+    assert len(client.calls) == 1
+    request = client.calls[0]
+    assert request["response_format"] == {"type": "json_object"}
+    assert request["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert request["temperature"] == 0
+    assert request["messages"] == [
+        {
+            "role": "user",
+            "content": 'Return one JSON object such as {"score": "2"}.',
+        }
+    ]
 
 
 def test_halumem_extraction_records_session_scoped_observations(tmp_path: Path) -> None:

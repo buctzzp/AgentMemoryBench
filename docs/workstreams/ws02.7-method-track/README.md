@@ -1,7 +1,7 @@
 ---
 id: ws02.7
 parent: ws02
-status: in-progress（首批 6 method frozen；其余 4 method B11 共用外部门暂停）
+status: in-progress（7 method frozen；Letta/LangMem/EverOS 进入真实 B11 队列）
 created: 2026-07-12
 ---
 # ws02.7 Method Track M0
@@ -27,26 +27,23 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 禁止为恢复全局而全文读取历史账、全部 workstream 或两本经验手册。若本节与 Git
 冲突，以 Git 和最新 ruling 为准。
 
-- **稳定离线基线（2026-08-09）**：5 benchmark × 首批 6 method 的真实 smoke 与
+- **稳定基线（2026-08-12）**：5 benchmark × 7 method 的真实 smoke 与
   B1-B11 已关闭；ws03
   [结构归一 M0](../ws03-architecture-slimming/notes/2026-07-23-structural-normalization-m0-ruling.md)
-  已通过守恒门；Letta/LangMem/EverOS 三家 M2 adapter 与 Graphiti M3 adapter 均处于
-  `ready_for_smoke`。最新无 API 全量：
-  `2133 passed, 3 deselected, 13 warnings, 29 subtests passed in 156.70s`；compileall exit 0。
-  warning 全来自既有 vendored LightMem/MemOS 依赖。
-- **当前动作**：**Graphiti OSS v0.29.3 已完成 M3 product adapter；首个真实 LoCoMo W1
-  已到达 OpenCodeGo build provider，但命中与 Letta 相同的区域 opt-in 403，B11 暂停**。
+-  已通过守恒门；Graphiti OSS v0.29.3 已完成 18 份真实 v2 run 与冻结验收；
+  Letta/LangMem/EverOS 三家 M2 adapter 仍为 `ready_for_smoke`。最新无 API 全量为
+  `2142 passed, 3 deselected, 13 warnings, 29 subtests passed in 176.65s`；compileall exit 0。
+- **当前动作**：**Graphiti 已冻结为 `method-frozen-v1`；下一家转 Letta/MemGPT 真实 B11**。
   压缩恢复只读一份
-  [Graphiti 首次真实尝试](branches/method-recertification/graphiti/notes/graphiti-b11-first-live-attempt.md)；
-  其内再按需要链接 M3/dossier/ledger，不在恢复时并读。主轨身份是 Graphiti OSS，不是 Zep
-  hosted product；18 份 machine plan 已保存，MemBench 100k 因 mandatory source time 判 N/A。
-  在 workspace 完成 opt-in 前不得重复重试；解除后先按既有队列恢复 Letta，再
-  LangMem、EverOS、Graphiti。
-- **其他未冻结状态**：Letta/MemGPT、LangMem、EverOS 与 Graphiti 的 adapter/plan 已离线闭合。用户已批准
-  使用 `.env` OpenCodeGo smoke；Letta 首次真实 run 已到 provider，但账号返回“需显式区域
-  opt-in”的 403，Graphiti 首次真实 run 随后复现同一门，因此四家统一暂停为
-  `PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`。这不是预算未批，
-  也不应继续重试烧同一外部门。Supermemory 退出第十格，blocked note 仅作 source-gate 历史。
+  [Letta 首次真实尝试 R1](branches/method-recertification/letta/notes/letta-b11-first-live-attempt-r1.md)；
+  其内再按需要链接 adapter/dossier/ledger，不在恢复时并读。恢复执行必须重新从 current
+  `plan-smoke`/CLI 资格出发；失败 smoke 不允许 resume。Graphiti 的 18 run、35 question、
+  88 episode 与声明缺口见其
+  [frozen-v1](branches/method-recertification/graphiti/notes/graphiti-frozen-v1.md)。
+- **其他未冻结状态**：Letta/MemGPT、LangMem、EverOS 的 adapter/plan 已离线闭合，用户已批准
+  使用 `.env` OpenCodeGo smoke，区域 opt-in 外部门也已解除。三家为
+  `ready_for_smoke / live-queued`，尚未因“门已解除”自动获得任何 B11 PASS。Supermemory 退出
+  第十格，blocked note 只作 source-gate 历史。
 
 ## 历史恢复记录（冷层；压缩恢复默认不读）
 
@@ -145,14 +142,14 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 | A-Mem | `method-frozen-v1` | [frozen-v1](branches/method-recertification/amem/notes/amem-frozen-v1.md) | evolution 后 current memory；Recall/Precision/NDCG N/A |
 | SimpleMem | `method-frozen-v1` | [frozen-v1](branches/method-recertification/simplemem/notes/simplemem-frozen-v1.md) | 合成 MemoryEntry；provenance N/A；build 串行 |
 | MemOS | `method-frozen-v1` | [frozen-v1](branches/method-recertification/memos/notes/memos-frozen-v1.md) | typed product handlers；LoCoMo 双视角；framework W2 N/A |
-| Letta/MemGPT | `ready_for_smoke / external-paused` | [首次真实尝试](branches/method-recertification/letta/notes/letta-b11-first-live-attempt-r1.md) | sleeptime core blocks；W1-only；运行时修复已闭合，OpenCodeGo opt-in 403 |
-| LangMem | `ready_for_smoke / external-paused` | [M2 checkpoint](branches/method-recertification/langmem/notes/langmem-m2-adapter-checkpoint.md) | async background manager；stable rank valid；evolved provenance N/A；croppable W2 |
-| EverOS | `ready_for_smoke / external-paused` | [M2 checkpoint](branches/method-recertification/everos/notes/everos-m2-adapter-checkpoint.md) | typed product lifespan；Episode semantic provenance N/A；croppable W2；HaluMem fixed W1 |
-| Graphiti | `ready_for_smoke / external-paused` | [首次真实尝试](branches/method-recertification/graphiti/notes/graphiti-b11-first-live-attempt.md) | Graphiti OSS 非 Zep；direct core + FalkorDB Lite；首个 build 请求命中 OpenCodeGo opt-in 403；MemBench 100k N/A |
+| Letta/MemGPT | `ready_for_smoke / live-queued` | [首次真实尝试](branches/method-recertification/letta/notes/letta-b11-first-live-attempt-r1.md) | sleeptime core blocks；W1-only；旧 403 外部门已解除，真实 B11 尚待重跑 |
+| LangMem | `ready_for_smoke / live-queued` | [M2 checkpoint](branches/method-recertification/langmem/notes/langmem-m2-adapter-checkpoint.md) | async background manager；stable rank valid；evolved provenance N/A；croppable W2 |
+| EverOS | `ready_for_smoke / live-queued` | [M2 checkpoint](branches/method-recertification/everos/notes/everos-m2-adapter-checkpoint.md) | typed product lifespan；Episode semantic provenance N/A；croppable W2；HaluMem fixed W1 |
+| Graphiti | `method-frozen-v1` | [frozen-v1](branches/method-recertification/graphiti/notes/graphiti-frozen-v1.md) | Graphiti OSS 非 Zep；18 run/35 question/88 episode；W1/W2；MemBench 100k N/A |
 
-尚未冻结：Letta/LangMem/EverOS/Graphiti 均已完成离线 adapter，但因共用 OpenCodeGo 区域
-opt-in 外部门暂停。Supermemory 的 source-blocked ledger/note 保留为历史判例，不再占 Phase 1
-格子。
+尚未冻结：Letta/LangMem/EverOS 均已完成离线 adapter；共用 OpenCodeGo 区域 opt-in
+已解除，但真实 smoke/artifact/parallel 门尚未关闭。Supermemory 的 source-blocked ledger/note
+保留为历史判例，不再占 Phase 1 格子。
 
 ## 现行长期裁决
 
@@ -195,7 +192,8 @@ opt-in 外部门暂停。Supermemory 的 source-blocked ledger/note 保留为历
 6. [x] 机器化 smoke 规划/预检；
 7. [x] 新 method 强制接入 ledger；
 8. [x] Letta/LangMem/EverOS/Graphiti 离线 product adapter + machine plan；
-9. [ ] OpenCodeGo workspace 区域 opt-in 后完成四家真实 B11、artifact gate 与冻结同步。
+9. [ ] OpenCodeGo workspace 区域 opt-in 已解除；Graphiti 已冻结，继续完成 Letta/LangMem/EverOS
+   真实 B11、artifact gate 与冻结同步。
 
 M0 红线：零真实 API、零 third-party 算法改动、零 metric/prompt/artifact 语义变化；
 旧 import path 在迁移期保留薄兼容层。
@@ -216,7 +214,7 @@ M0 红线：零真实 API、零 third-party 算法改动、零 metric/prompt/art
 - [x] 首批 5 method × 5 benchmark 真实 smoke 与 B1-B11
 - [x] 结构归一 M0
 - [x] MemOS
-- [ ] Letta/MemGPT（离线门闭合；B11 外部门暂停）
-- [ ] LangMem（离线门闭合；B11 外部门暂停）
-- [ ] EverOS（离线门闭合；B11 外部门暂停）
-- [ ] Graphiti OSS（M3 离线门闭合；首个真实 run 命中同一外部门）
+- [ ] Letta/MemGPT（离线门闭合；真实 B11 queued）
+- [ ] LangMem（离线门闭合；真实 B11 queued）
+- [ ] EverOS（离线门闭合；真实 B11 queued）
+- [x] Graphiti OSS（`method-frozen-v1`；18 份 v2 live run + artifact/payload machine gates）

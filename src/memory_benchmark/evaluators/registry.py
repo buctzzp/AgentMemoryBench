@@ -54,6 +54,8 @@ class EvaluatorRegistration:
         profile_relative_path: 相对项目根的 TOML profile 路径。
         config_type: TOML section 对应的强类型配置；离线指标为空。
         factory: 每次运行构造新 evaluator 的无状态 factory。
+        artifact_prerequisites: 同一次多 metric evaluate 中必须先落盘的 metric；
+            planner 只对同时选中的依赖做稳定拓扑排序，缺席依赖仍可由既有 artifact 满足。
     """
 
     cli_name: str
@@ -64,6 +66,7 @@ class EvaluatorRegistration:
     profile_relative_path: Path | None
     config_type: type[Any] | None
     factory: EvaluatorFactory
+    artifact_prerequisites: tuple[str, ...] = ()
 
 
 def _build_beam_rubric_judge(
@@ -304,6 +307,7 @@ _REGISTRATIONS = {
         profile_relative_path=None,
         config_type=None,
         factory=_build_halumem_memory_type,
+        artifact_prerequisites=("halumem-extraction", "halumem-update"),
     ),
     "halumem-update": EvaluatorRegistration(
         cli_name="halumem-update",
@@ -466,6 +470,43 @@ def get_evaluator_registration(metric_name: str) -> EvaluatorRegistration:
         ) from exc
 
 
+def order_metrics_for_evaluation(metric_names: list[str]) -> tuple[str, ...]:
+    """按 artifact 依赖稳定排序一组互异 metric 名称。
+
+    只对本次同时选择的 prerequisite 建边；如果 prerequisite 未选择，调用方仍可依赖
+    先前已经落盘的 artifact。重复名称会被拒绝，避免同一次命令重复调用付费 judge。
+    """
+
+    if len(metric_names) != len(set(metric_names)):
+        raise ConfigurationError("Evaluation metric names must be unique")
+    selected = set(metric_names)
+    ordered: list[str] = []
+    states: dict[str, str] = {}
+
+    def visit(metric_name: str) -> None:
+        """深度优先追加当前 metric 及本次选中的 prerequisite。"""
+
+        state = states.get(metric_name)
+        if state == "done":
+            return
+        if state == "visiting":
+            raise ConfigurationError(
+                f"Evaluator artifact dependency cycle includes '{metric_name}'"
+            )
+        states[metric_name] = "visiting"
+        registration = get_evaluator_registration(metric_name)
+        for prerequisite in registration.artifact_prerequisites:
+            get_evaluator_registration(prerequisite)
+            if prerequisite in selected:
+                visit(prerequisite)
+        states[metric_name] = "done"
+        ordered.append(metric_name)
+
+    for metric_name in metric_names:
+        visit(metric_name)
+    return tuple(ordered)
+
+
 def create_evaluator(
     metric_name: str,
     benchmark_name: str,
@@ -568,4 +609,5 @@ __all__ = [
     "get_evaluator_registration",
     "list_metrics",
     "load_evaluator_profile",
+    "order_metrics_for_evaluation",
 ]

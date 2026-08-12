@@ -615,6 +615,7 @@ def _answer_operation_question(
         _answer_prompt_record(
             retrieval=retrieval,
             retrieval_result=retrieval_result,
+            retrieval_query_top_k=query.top_k,
         )
     )
     prediction_records[question.question_id] = {
@@ -747,8 +748,9 @@ def _answer_prompt_record(
     *,
     retrieval: AnswerPromptResult,
     retrieval_result: RetrievalResult,
+    retrieval_query_top_k: int,
 ) -> dict[str, Any]:
-    """构造 QA answer prompt artifact 记录。"""
+    """构造 QA answer prompt artifact 记录，并保留实际请求的 top-k。"""
 
     record = {
         "question_id": retrieval.question_id,
@@ -760,6 +762,7 @@ def _answer_prompt_record(
         "retrieved_items": [
             asdict(item) for item in retrieval_result.items or ()
         ],
+        "retrieval_query_top_k": retrieval_query_top_k,
         "retrieval_evidence": (
             asdict(retrieval_result.evidence)
             if retrieval_result.evidence is not None

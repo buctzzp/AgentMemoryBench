@@ -16,6 +16,7 @@ from memory_benchmark.core import ConfigurationError, validate_compatibility
 from memory_benchmark.evaluators import (
     get_evaluator_registration,
     list_metrics,
+    order_metrics_for_evaluation,
 )
 from memory_benchmark.methods import (
     get_method_registration,
@@ -223,18 +224,21 @@ def build_smoke_execution_plan(
         variant=selected_variant,
         registration=benchmark_registration,
     )
-    metrics: list[SmokeMetricPlan] = []
+    metrics_by_name: dict[str, SmokeMetricPlan] = {}
     for metric_name in list_metrics():
         evaluator_registration = get_evaluator_registration(metric_name)
         if benchmark_name not in evaluator_registration.supported_benchmarks:
             continue
-        metrics.append(
+        metrics_by_name[metric_name] = (
             SmokeMetricPlan(
                 name=metric_name,
                 requires_api=evaluator_registration.requires_api,
             )
         )
-    metric_plan = tuple(metrics)
+    metric_plan = tuple(
+        metrics_by_name[metric_name]
+        for metric_name in order_metrics_for_evaluation(list(metrics_by_name))
+    )
     if not metric_plan:
         raise ConfigurationError(
             f"{benchmark_name} does not have any registered evaluators"

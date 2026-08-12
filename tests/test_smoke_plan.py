@@ -54,6 +54,19 @@ def test_halumem_plan_omits_every_crop_flag_and_uses_child_run_id() -> None:
         "halumem-update",
         "halumem-qa",
     }
+    metric_names = [metric.name for metric in plan.metrics]
+    assert metric_names.index("halumem-extraction") < metric_names.index(
+        "halumem-memory-type"
+    )
+    assert metric_names.index("halumem-update") < metric_names.index(
+        "halumem-memory-type"
+    )
+    evaluate_metrics = [
+        plan.evaluate_argv[index + 1]
+        for index, argument in enumerate(plan.evaluate_argv)
+        if argument == "--metric"
+    ]
+    assert evaluate_metrics == metric_names
 
 
 def test_halumem_plan_rejects_crop_override_before_runtime() -> None:

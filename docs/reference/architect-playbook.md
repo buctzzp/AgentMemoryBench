@@ -56,7 +56,13 @@
 12. **完成前对表**：宣布 frozen/closed 前重新读取 checklist 与 integration 状态。
 13. **不要把人脑当 preflight**：同类命令第二次因固定 shape、variant suffix 或 worker
    资格撞墙，就把约束升格为 registry/schema，并由机器生成命令。B11 smoke 一律先跑
-   `plan-smoke`，禁止复制上一格命令再人工删参数。
+   `plan-smoke`，禁止复制上一格命令再人工删参数。恢复命令也必须重新经过当前 CLI/profile
+   preflight：底层 runner 有 clean/resume 能力，不代表 `predict smoke` 允许 resume；上层明确
+   拒绝时，失败 smoke 只留作证据并换新 run identity，不能凭底层实现反推命令资格。
+14. **依赖要在执行器里成立，不只在计划里好看**：composite metric 依赖其他 artifact 时，
+    prerequisite 写进 evaluator registry；planner 与 direct executor 必须共用同一拓扑排序。
+    同理，generic 与 operation runner 的公开 artifact schema 要对表，真实请求字段不能只在一条
+    runner 里落盘。否则一份正确 machine plan 仍会被手写 CLI 或另一 runner 绕开。
 
 完整 33 条历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

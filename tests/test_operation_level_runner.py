@@ -510,6 +510,7 @@ def test_operation_level_runner_writes_retrieval_evidence_and_stamps_contract(
     manifest = json.loads((context.run_dir / "manifest.json").read_text())
 
     assert answer_prompts
+    assert answer_prompts[0]["retrieval_query_top_k"] == 20
     payload = answer_prompts[0]["retrieval_evidence"]
     assert payload["semantic_provenance"]["status"] == "valid"
     assert payload["provenance_granularity"] == "session"

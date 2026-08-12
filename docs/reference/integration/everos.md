@@ -1,7 +1,7 @@
 # EverOS 接入实例（B1-B11 逐项）
 
 > 判据模板：`../method-integration-checklist.md` §B；勾选总表：`../integration-status.md`。
-> 当前状态：**M2 离线 adapter 门已关闭，等待 B11 真实 smoke 新预算批准**；尚未冻结。
+> 当前状态：**M2 离线 adapter 门已关闭，B11 真实 smoke 已批准并进入 live 队列**；尚未冻结。
 
 - 主 source：官方稳定版 `EverOS v1.2.3@48fc9084888bc17100053227284f939a5aca5e91`，
   Apache-2.0；本地路径 `third_party/methods/EverOS/` 为 local-only，可由
@@ -72,5 +72,6 @@ candidate 仍需真实 B11 artifact gate 才能转为最终通过；不会为了
 - [机器 smoke plans](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-smoke-plans-v1.json)
 - [EverOS 接入支线](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/README.md)
 
-当前判词：`READY_FOR_B11_REAL_SMOKE_APPROVAL`。当前环境缺
-`EVEROS_DEEPINFRA_API_KEY`，且本 method 未获新预算批准，因此没有启动真实 API。
+当前判词：`READY_FOR_B11_REAL_SMOKE / LIVE_QUEUED`。用户已批准 OpenCodeGo smoke；实际启动前
+仍须由 machine plan/preflight 复核 current runtime 所需环境，不因旧 note 曾记录缺少
+`EVEROS_DEEPINFRA_API_KEY` 就假定今天仍缺，也不在未实跑前升级 B11。

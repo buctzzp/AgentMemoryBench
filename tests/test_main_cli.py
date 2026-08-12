@@ -395,6 +395,62 @@ def test_execute_evaluate_runs_offline_f1_without_loading_openai(
     assert calls == [(run_dir, evaluator, "locomo")]
 
 
+def test_execute_evaluate_orders_selected_metrics_by_artifact_dependency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """直接 evaluate 也必须在 memory-type 前产出 extraction/update artifact。"""
+
+    _write_manifest(tmp_path, "halumem-order", benchmark="halumem")
+    created: list[str] = []
+    executed: list[str] = []
+
+    def fake_create(metric_name: str, benchmark_name: str, **kwargs: object) -> object:
+        """记录 evaluator 的真实构造顺序。"""
+
+        assert benchmark_name == "halumem"
+        created.append(metric_name)
+        return SimpleNamespace(metric_name=metric_name)
+
+    monkeypatch.setattr(commands, "create_evaluator", fake_create)
+    monkeypatch.setattr(
+        commands,
+        "load_evaluator_profile",
+        lambda **kwargs: SimpleNamespace(mode="compact", model="gpt-4o-mini"),
+    )
+    monkeypatch.setattr(
+        commands,
+        "run_artifact_evaluation",
+        lambda run_dir, evaluator, benchmark, max_workers=1: (
+            executed.append(evaluator.metric_name)
+            or SimpleNamespace(metric_name=evaluator.metric_name)
+        ),
+    )
+
+    execute_evaluate(
+        EvaluateCommand(
+            project_root=tmp_path,
+            run_id="halumem-order",
+            metrics=(
+                "halumem-memory-type",
+                "halumem-qa",
+                "halumem-update",
+                "halumem-extraction",
+            ),
+            confirm_api=True,
+        )
+    )
+
+    expected = [
+        "halumem-extraction",
+        "halumem-update",
+        "halumem-memory-type",
+        "halumem-qa",
+    ]
+    assert created == expected
+    assert executed == expected
+
+
 def test_execute_evaluate_uses_prediction_api_runtime_for_judge(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

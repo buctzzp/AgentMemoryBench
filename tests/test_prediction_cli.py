@@ -1803,9 +1803,9 @@ def test_registered_prediction_builds_framework_answer_reader(
         "answer_parameters": {
             "message_role": "user",
             "temperature": 0.0,
-            # opencodego 显式关闭 thinking；smoke 兼容层只把官方 LoCoMo 的
-            # 32-token 上限抬到 128，给简短可见答案留出稳定余量。
-            "max_tokens": 128,
+            # LoCoMo 官方 prompt 保持不变；OpenCodeGo runtime 只把易截断的
+            # 32-token 小上限改为显式 4096 安全阀。
+            "max_tokens": 4096,
             "top_p": 1.0,
             "timeout_seconds": 60.0,
             "max_retries": 8,
@@ -1818,7 +1818,7 @@ def test_registered_prediction_builds_framework_answer_reader(
             "judge_transport": "chat_completions",
             "thinking_mode": "disabled",
         },
-        "provider_compatibility": "opencodego_non_thinking_completion_floor_128_v2",
+        "provider_compatibility": "opencodego_locomo_explicit_completion_cap_4096_v3",
     }
     assert {
         descriptor.model_id for descriptor in runner_calls[0]["model_inventory"]
@@ -1832,12 +1832,53 @@ def test_registered_prediction_builds_framework_answer_reader(
             model="deepseek-v4-flash",
             message_role="user",
             temperature=0.0,
-            max_tokens=128,
+            max_tokens=4096,
             top_p=1.0,
             timeout_seconds=60.0,
             max_retries=8,
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("provider", "benchmark_name", "configured_max_tokens", "expected", "note"),
+    (
+        (
+            "opencodego",
+            "locomo",
+            32,
+            4096,
+            "opencodego_locomo_explicit_completion_cap_4096_v3",
+        ),
+        (
+            "opencodego",
+            "LoCoMo",
+            None,
+            4096,
+            "opencodego_locomo_explicit_completion_cap_4096_v3",
+        ),
+        ("opencodego", "longmemeval", 32, 32, None),
+        ("primary", "locomo", 32, 32, None),
+        ("opencodego", "locomo", 8192, 8192, None),
+    ),
+)
+def test_provider_answer_compatibility_is_locomo_and_provider_scoped(
+    provider: str,
+    benchmark_name: str,
+    configured_max_tokens: int | None,
+    expected: int | None,
+    note: str | None,
+) -> None:
+    """4096 兼容上限不得污染 primary、其他 benchmark 或更高显式上限。"""
+
+    settings, compatibility = prediction_cli._apply_provider_answer_compatibility(
+        answer_settings=AnswerLLMSettings(max_tokens=configured_max_tokens),
+        api_provider=provider,
+        benchmark_name=benchmark_name,
+    )
+
+    assert settings.max_tokens == expected
+    assert compatibility == note
 
 
 def test_registered_prediction_rejects_cost_before_loading_settings(

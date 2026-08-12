@@ -42,6 +42,7 @@ from memory_benchmark.evaluators.registry import (
     get_evaluator_registration,
     list_metrics,
     load_evaluator_profile,
+    order_metrics_for_evaluation,
 )
 
 
@@ -71,6 +72,36 @@ def test_registry_lists_only_currently_supported_unified_metrics() -> None:
         "normalized-em",
         "substring-em",
     ]
+
+
+def test_halumem_memory_type_declares_and_obeys_artifact_prerequisites() -> None:
+    """memory-type 必须排在 extraction/update 之后，且不硬编码到 planner。"""
+
+    registration = get_evaluator_registration("halumem-memory-type")
+    assert registration.artifact_prerequisites == (
+        "halumem-extraction",
+        "halumem-update",
+    )
+    assert order_metrics_for_evaluation(
+        [
+            "halumem-memory-type",
+            "halumem-qa",
+            "halumem-update",
+            "halumem-extraction",
+        ]
+    ) == (
+        "halumem-extraction",
+        "halumem-update",
+        "halumem-memory-type",
+        "halumem-qa",
+    )
+
+
+def test_metric_dependency_order_rejects_duplicate_paid_metric() -> None:
+    """同一计划不得重复调用同一个付费 judge。"""
+
+    with pytest.raises(ConfigurationError, match="must be unique"):
+        order_metrics_for_evaluation(["halumem-update", "halumem-update"])
 
 
 def test_locomo_f1_registration_is_offline_and_locomo_only() -> None:

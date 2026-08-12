@@ -1,7 +1,7 @@
 # Letta B11 首次真实链路尝试与 R1 修复
 
 日期：2026-08-09
-状态：`PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`
+状态：`SUPERSEDED_EXTERNAL_GATE_RESOLVED；READY_FOR_FRESH_SMOKE`
 adapter：`letta-sleeptime-product-v2`
 
 ## 1. 判词
@@ -121,11 +121,13 @@ canonical run 目录已移出，所有 owner-labeled container/volume 在核对 
 `compileall` exit 0，`git diff --check` clean。真实 B11 仍为 PENDING：HTTP 403 不是成功 run，不能
 用“请求曾到达 endpoint”冒充 smoke 通过。
 
-## 7. 恢复动作
+## 7. 恢复动作（2026-08-11 外部门解除后）
 
-用户完成 opt-in 并明确回复后：
+用户已完成 opt-in。current `predict smoke` 不支持 resume，且 LoCoMo OpenCodeGo answer
+compatibility 已改为显式 4096；因此旧失败 run 只保留作四段失败边界证据，不复用其
+checkpoint/state。后续动作是：
 
-1. 只重跑 planner JSON 的第一份 Letta LoCoMo W1 plan；
+1. 用 current planner 生成新 identity 的 Letta plans，先执行全新 LoCoMo W1；
 2. 对 prediction、manifest、formatted memory、efficiency 与 evaluator artifact 开箱；
 3. 第一份通过后再按 JSON 顺序运行其余 10 份 Letta plan；
 4. Letta 关闭 B11 后，再执行 LangMem/EverOS，避免共享外部阻点造成批量失败资产。

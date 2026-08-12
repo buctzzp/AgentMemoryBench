@@ -87,6 +87,10 @@ SUPPORTED_BENCHMARK = "locomo"
 SUPPORTED_METHOD = "mem0"
 DEFAULT_SMOKE_TURN_LIMIT = 20
 MAX_SMOKE_WORKERS = 10
+OPENCODEGO_LOCOMO_MAX_TOKENS = 4096
+OPENCODEGO_LOCOMO_COMPATIBILITY = (
+    "opencodego_locomo_explicit_completion_cap_4096_v3"
+)
 
 
 @dataclass(frozen=True)
@@ -524,7 +528,7 @@ def run_registered_conversation_qa_prediction(
         ) = _apply_provider_answer_compatibility(
             answer_settings=base_answer_settings,
             api_provider=api_provider,
-            profile_name=profile_name,
+            benchmark_name=benchmark_registration.name,
         )
     answer_reader_manifest = (
         _build_answer_reader_manifest(
@@ -961,7 +965,7 @@ def _run_custom_conversation_qa_prediction(
     ) = _apply_provider_answer_compatibility(
         answer_settings=base_answer_settings,
         api_provider=api_provider,
-        profile_name=profile_name,
+        benchmark_name=benchmark_name,
     )
     answer_reader_manifest = _build_answer_reader_manifest(
         project_root=project_root,
@@ -1828,19 +1832,24 @@ def _apply_provider_answer_compatibility(
     *,
     answer_settings: AnswerLLMSettings,
     api_provider: str,
-    profile_name: str,
+    benchmark_name: str,
 ) -> tuple[AnswerLLMSettings, str | None]:
-    """为 reasoning smoke 保留官方可见答案预算，不改 formal/official 参数。"""
+    """为 provider 与 benchmark 的已证兼容差异生成显式 answer 参数。"""
 
     if (
-        profile_name == "smoke"
-        and api_provider == OPENCODEGO_API_PROVIDER
-        and answer_settings.max_tokens is not None
-        and answer_settings.max_tokens < 128
+        api_provider == OPENCODEGO_API_PROVIDER
+        and benchmark_name.strip().lower() == "locomo"
+        and (
+            answer_settings.max_tokens is None
+            or answer_settings.max_tokens < OPENCODEGO_LOCOMO_MAX_TOKENS
+        )
     ):
         return (
-            replace(answer_settings, max_tokens=128),
-            "opencodego_non_thinking_completion_floor_128_v2",
+            replace(
+                answer_settings,
+                max_tokens=OPENCODEGO_LOCOMO_MAX_TOKENS,
+            ),
+            OPENCODEGO_LOCOMO_COMPATIBILITY,
         )
     return answer_settings, None
 

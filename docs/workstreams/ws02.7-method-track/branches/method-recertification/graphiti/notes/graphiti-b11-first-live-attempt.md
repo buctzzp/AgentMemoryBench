@@ -2,7 +2,14 @@
 
 日期：2026-08-09
 
-状态：`PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`
+状态：`SUPERSEDED_BY_GRAPHITI_FROZEN_V1；FAILED_SMOKE_NONRESUMABLE`
+
+> **2026-08-11 架构师勘误**：本 note 首版 §4 错把 formal 的 failed-ingest
+> resume 能力套给了 `predict smoke`。current CLI 在
+> `src/memory_benchmark/cli/main.py::_normalize_smoke_prediction_args()` 明确拒绝
+> `--resume` 和 `--retry-failed`，对应强反例也已存在。旧失败 run 只保留作 403 与
+> checkpoint 边界证据，不得续跑。区域 opt-in 已由用户解除；LoCoMo answer identity 又从
+> 128 改为显式 4096，因此下一次必须使用新 machine plan 与新 run_id。
 
 ## 1. 判词
 
@@ -70,35 +77,38 @@ outputs/runs/graphiti/locomo/smoke/unified/graphiti-locomo-v1-r1q1-w1/
 上述状态不能升级 B11 real-smoke/artifact/parallel gate；它只证明真实 runtime 已到 provider，且
 失败边界、checkpoint 与 cleanup 前置状态诚实。
 
-## 4. 恢复方式
+## 4. 恢复方式（首版口径撤回）
 
-外部区域 opt-in 完成后，先恢复这个既有 run，不创建同名新 run：
+`predict smoke` 不能 resume；首版写出的命令会在 CLI 归一化阶段直接报：
 
-```bash
-uv run memory-benchmark predict smoke \
-  --root /Users/wz/Desktop/memoryBenchmark \
-  --method graphiti \
-  --benchmark locomo \
-  --variant locomo10 \
-  --config-track unified \
-  --run-id graphiti-locomo-v1-r1q1-w1 \
-  --allow-api \
-  --rounds 1 \
-  --conversations 1 \
-  --questions-per-conversation 1 \
-  --resume \
-  --retry-failed-conversations
+```text
+predict smoke does not support --resume
 ```
 
-该恢复必须先看到 physical clean hook 删除旧 conversation root，再重新 ingest。predict 成功后才
-执行 machine plan 自带的 evaluate 命令和逐 run artifact gate；随后继续剩余计划。若区域门仍为
-403，再次停止，不把相同错误当新证据反复付费。
+正确路径是：
+
+1. 保留 `graphiti-locomo-v1-r1q1-w1` 作为失败证据，不删除、不改写；
+2. 用 `plan-smoke` 重新生成
+   [v2 machine plans](./graphiti-smoke-plans-v2.json)，新 LoCoMo W1 run_id 为
+   `graphiti-locomo-v2-r1q1-w1`；
+3. 新 run 的物理 root 按 run identity 独立，不复用 v1 的 failed checkpoint 或 state；
+4. 先执行 v2 LoCoMo W1，成功开箱后才继续 W2 与其他 variant；
+5. 如果同一外部门再次出现，只停一次并记录，不循环重试。
+
+physical clean + retry 仍是 formal failed-ingest resume 的合法能力，但不是 smoke B11 的恢复
+机制。两者必须由 CLI/profile 资格决定，不能仅因 runner 底层有 clean hook 就推断上层命令可用。
 
 ## 5. 当前关系
 
 - M3 离线 adapter 结论保持有效；
-- Graphiti ledger 仍为 `ready_for_smoke`，但 B11 外部状态为
-  `PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`；
-- Graphiti 尚未 frozen；
-- Letta、LangMem、EverOS 与 Graphiti 共用同一外部门。解除后按已记录的队列先恢复 Letta，
-  再 LangMem、EverOS，最后恢复本 run，避免四条支线各自发明新的顺序。
+- 当时 Graphiti ledger 仍为 `ready_for_smoke`；区域 opt-in 已解除，B11 进入 v2 新 run 队列；
+- 当时 Graphiti 尚未 frozen；2026-08-12 的后续状态见 §6；
+- 旧 v1 失败 run 与 v2 新 run 不可合并比较；v2 使用 OpenCodeGo + LoCoMo 显式 4096 answer
+  completion cap，manifest 必须写对应 compatibility identity。
+
+## 6. 后续结果（2026-08-12）
+
+本 note 只保留首次失败与 smoke-resume 勘误。区域门解除后，架构师从 planner 生成的全新 v2
+identity 执行 18/18 predict/evaluate，随后完成 artifact/隐私/效率/物理隔离与真实 FalkorDB
+payload 两道机器门。最终结论、运行规模、N/A 边界与回归证据已迁入
+[Graphiti method-frozen-v1](./graphiti-frozen-v1.md)；本页的 failed v1 run 不参与 frozen 结果。

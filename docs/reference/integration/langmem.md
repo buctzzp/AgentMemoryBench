@@ -1,6 +1,6 @@
 # LangMem 接入说明
 
-状态：`M2 offline implementation accepted；awaiting B11 real smoke approval`。本页只保存
+状态：`M2 offline implementation accepted；B11 real smoke approved/live queued`。本页只保存
 跨会话仍需复用的稳定接口事实；逐格状态与下一动作见
 [LangMem integration ledger](../../workstreams/ws02.7-method-track/branches/method-recertification/langmem/notes/langmem-integration-ledger.md)，
 五格异常与 payload 见
@@ -83,6 +83,6 @@
 ## 当前门
 
 M2 adapter、runtime、强反例、五格 dossier 与机器计划已经完成离线验收；当前不是 frozen。
-真实 build/answer/judge API、每个 child run 的 artifact 开箱及最终冻结仍需用户单独批准预算、
-规模与 planner 生成的 run id。任何 current source/`uv.lock`、manager factory、store/ranking、
+用户已批准使用 OpenCodeGo 执行真实 smoke，现进入 live 队列；每个 child run 的 artifact 开箱
+及最终冻结仍须实际通过。任何 current source/`uv.lock`、manager factory、store/ranking、
 message/time policy 或 benchmark stable contract 漂移，都必须重开 ledger 对应门。

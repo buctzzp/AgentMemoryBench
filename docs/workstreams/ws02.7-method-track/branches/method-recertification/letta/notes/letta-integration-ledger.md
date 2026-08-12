@@ -47,7 +47,7 @@ frozen_note: none
 | GRID-HALUMEM | 固定 shape、session-local delta、四类 operation、最终 payload、指标、隐私与 W1 独立闭合 | PASS | evidence=stable=[HaluMem 稳定页](../../../../../../reference/integration/halumem.md) / payload=[dossier §6](./letta-five-benchmark-safety-dossier.md#6-halumem) / metric=[dossier §6.2](./letta-five-benchmark-safety-dossier.md#62-letta-四类-operation) / privacy=[dossier §6](./letta-five-benchmark-safety-dossier.md#6-halumem) / smoke=[plan JSON](./letta-smoke-plans-v1.json) / operations=extraction N/A, update valid, QA valid, memory_type N/A; ruling=fixed 4-session operation 顺序保持，session report 缺失只阻塞 extraction，current-state readout 可测 update/QA，private memory point 不进 build; next=none |
 | B11-DOSSIER | 一份 living dossier 已按五 benchmark 分章并链接承重 note、异常处置和失效触发器 | PASS | evidence=[Letta 五格安全档案](./letta-five-benchmark-safety-dossier.md); ruling=五格异常、payload、隐私、metric、机器计划与失效触发器均在同一 living dossier 分章闭合; next=none |
 | B11-SMOKE-PLAN | 每个 concrete variant 的 smoke-plan-v1 已无 API 生成、审阅并保存，命令未手写 | PASS | evidence=[11 份原始 machine plan](./letta-smoke-plans-v1.json); ruling=LoCoMo 1、LongMemEval 2、MemBench 2、BEAM 4、HaluMem 2 全部由 registry/TOML 生成，multi-variant 后缀由 planner 管理且 HaluMem 无非法裁剪旗标; next=none |
-| B11-REAL-SMOKE | planner 生成的全部 predict 与适用 evaluator 已真实执行，固定 shape 未误传裁剪参数 | PENDING | evidence=[B11 首次真实链路记录](./letta-b11-first-live-attempt-r1.md); ruling=用户已批准 opencodego smoke；首份 LoCoMo plan 修复两个本地链路 bug 后抵达 endpoint，但被 workspace China-hosted model opt-in 的 HTTP 403 拒绝，未产生成功 run，后续计划已暂停; next=用户本人完成 opt-in 后重跑第一份 machine plan并先开箱 |
+| B11-REAL-SMOKE | planner 生成的全部 predict 与适用 evaluator 已真实执行，固定 shape 未误传裁剪参数 | PENDING | evidence=[B11 首次真实链路记录](./letta-b11-first-live-attempt-r1.md); ruling=用户已批准 opencodego smoke；首份 LoCoMo plan 修复两个本地链路 bug 后抵达 endpoint，但当时被 workspace China-hosted model opt-in 的 HTTP 403 拒绝；用户现已解除外部门; next=按current machine plan重跑第一份并先开箱 |
 | B11-ARTIFACT-GATE | manifest、prediction、formatted_memory、private labels、efficiency、state 与 summary 已逐 run 开箱 | PENDING | evidence=[artifact 判据](../../../../../../reference/method-integration-checklist.md#b11-主配置-smoke--冻结); ruling=没有真实 run 前不以零 API fixture 冒充开箱; next=真实 smoke 后按每个 child run 逐项机器验货与人工抽查 |
 | B11-PARALLEL-GATE | 每个适用 variant 的 W1/W2 已实测，或 W1-only 的产品硬约束和 CLI 预启动拒绝已证明 | N/A | evidence=[dossier §1、§8](./letta-five-benchmark-safety-dossier.md); ruling=跨 worker 共享数据库 ownership 未获产品证明，主 profile 明确 W1-only；TOML、registry、planner 在 runtime/API 前拒绝 W2，不以复制 runtime 偷换实现; next=none |
 | B11-REGRESSION-GATE | 定向强反例、全量 pytest、compileall、diff check 与第三方 patch identity 均通过 | PASS | evidence=[M2 §8](./letta-m2-adapter-implementation.md#8-验证记录); ruling=扩展定向 458 passed；主树 1968 passed、3 deselected、13 warnings、29 subtests；compileall/diff/json/source identity 与零 API product chain 均通过; next=none |
@@ -58,5 +58,5 @@ frozen_note: none
 
 - 当前 ledger 状态：`ready_for_smoke`
 - 当前事实边界：M1 source/product identity 与 M2 adapter/lifecycle/五格/metric/离线回归已闭合；
-  B11-R1 两项真实链路 bug 已修，当前只被 OpenCodeGo workspace 地域 opt-in 外部门暂停。
-- 架构师判词：`LETTA_M2_R1_ACCEPTED_B11_PAUSED_EXTERNAL_OPT_IN`。
+  B11-R1 两项真实链路 bug 已修，OpenCodeGo workspace 地域 opt-in 外部门已解除，真实重跑待执行。
+- 架构师判词：`LETTA_M2_R1_ACCEPTED_B11_LIVE_QUEUED`。

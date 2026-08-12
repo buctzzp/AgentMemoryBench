@@ -2,7 +2,7 @@
 
 日期：2026-08-09
 
-状态：`M3_ACCEPTED；B11_PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`
+状态：`M3_ACCEPTED；SUPERSEDED_BY_METHOD_FROZEN_V1`
 
 ## 1. 实现判词
 
@@ -111,6 +111,23 @@ HaluMem medium/long 各固定 W1。MemBench 100k 没有生成命令，而是在 
 
 用户批准后已逐字执行 machine plan 的首个 LoCoMo W1。运行到首次 product build LLM 请求时，
 OpenCodeGo 返回区域模型尚未显式 opt-in 的 HTTP 403；其余计划与 evaluator 均未继续执行。
-failed-ingest checkpoint、空 sidecar、保留的物理 root、无进程残留与恢复命令见
+failed-ingest checkpoint、空 sidecar、保留的物理 root、无进程残留与当时恢复说明见
 [B11 首次真实尝试](./graphiti-b11-first-live-attempt.md)。M3 离线结论不变，但不得在外部门解除前
 把 Graphiti 标为 frozen，也不得重复请求相同 403。
+
+## 9. 2026-08-11 v2 live restart
+
+用户已解除 OpenCodeGo 区域 opt-in。架构师复核 current CLI 后撤回“既有 smoke run
+resume+retry”口径：`predict smoke` 在入口明确拒绝两项旗标。旧 v1 run/plan 保持历史证据；
+LoCoMo answer compatibility 改为显式 4096 后，已由 `plan-smoke` 重新生成
+[18 份 v2 plans](./graphiti-smoke-plans-v2.json)。其中 8 个 croppable variant 各 W1/W2，
+HaluMem medium/long 各 fixed W1，无非法裁剪参数；MemBench 100k 继续 N/A。
+
+## 10. 2026-08-12 B11 关闭
+
+18/18 v2 predict/evaluate 已完成。35 conversation、35 question、88 个真实 product episode
+通过 artifact/隐私/效率/物理隔离机器门；从 FalkorDB 直接读取的 Episodic
+`name/content/valid_at` 又与 production renderer 重建值逐字一致。运行中关闭的 LoCoMo
+OpenCodeGo cap、HaluMem JSON transport、metric artifact prerequisite 与 operation-level top-k
+serializer 均是通用 framework 修复。最终冻结身份、缺口与回归证据见
+[Graphiti method-frozen-v1](./graphiti-frozen-v1.md)。

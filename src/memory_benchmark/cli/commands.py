@@ -21,6 +21,7 @@ from memory_benchmark.evaluators.registry import (
     create_evaluator,
     get_evaluator_registration,
     load_evaluator_profile,
+    order_metrics_for_evaluation,
 )
 from memory_benchmark.evaluators.locomo_judge import LoCoMoJudgeEvaluator
 from memory_benchmark.methods.config_track import (
@@ -204,7 +205,7 @@ def execute_evaluate(command: EvaluateCommand) -> tuple[Any, ...]:
     results: list[Any] = []
     run_api_settings: OpenAISettings | None = None
     api_settings_resolved = False
-    for metric_name in command.metrics:
+    for metric_name in order_metrics_for_evaluation(list(command.metrics)):
         registration = get_evaluator_registration(metric_name)
         if registration.requires_api and not command.confirm_api:
             raise ConfigurationError(

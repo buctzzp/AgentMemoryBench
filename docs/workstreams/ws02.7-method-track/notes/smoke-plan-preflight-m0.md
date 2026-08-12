@@ -111,4 +111,27 @@ warnings 画像未新增：vendored LightMem Pydantic V2 deprecation、MemOS
 - [x] predict/evaluate 命令与 multi-variant child id 同源；
 - [x] B11 与架构师热手册写入“不得手写”；
 - [x] 主树全量 pytest + compileall；
-- [ ] commit + push。
+- [x] commit + push（初版 `5c015a7`）；后续 R1 由 Graphiti frozen 批次提交。
+
+## 7. 2026-08-12 evaluator dependency / operation artifact R1
+
+Graphiti × HaluMem Long 的真实 evaluate 暴露两个共用契约缺口：
+
+1. `halumem-memory-type` 读取 extraction/update 的既有 score artifact，但原 registry 没有表达
+   依赖；人工给 metric 排序偶然可用，换一次参数顺序就可能先跑 composite；
+2. generic prediction artifact 已写 `retrieval_query_top_k`，operation-level HaluMem 实际请求
+   虽为 update=10、QA=20，answer-prompt serializer 却漏写该字段。
+
+现行修复：
+
+- `EvaluatorRegistration.artifact_prerequisites` 是依赖单一事实源；memory-type 声明
+  `halumem-extraction + halumem-update`；
+- `order_metrics_for_evaluation()` 对**本次同时选择的**依赖做稳定拓扑排序，未选择的依赖仍可
+  由既有 artifact 满足；重复 metric 直接拒绝，避免同一命令重复烧付费 judge；
+- planner 与 direct `execute_evaluate()` 都调用同一排序器，不能只保证机器计划正确而允许手写
+  evaluate 绕过；
+- operation-level answer-prompt artifact 写入实际 `query.top_k`，与产品请求同源。
+
+既有已付费 HaluMem v2 artifact 不回写历史字段；current 生产请求、source 与测试共同证明实际
+top-k，新 run 从当前 serializer 起完整记录。该修复不改变任何 evaluator 公式、Graphiti search
+参数或旧分数。

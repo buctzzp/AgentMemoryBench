@@ -603,7 +603,7 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
             "answer_parameters": {
                 "message_role": "user",
                 "temperature": 0.0,
-                "max_tokens": 128,
+                "max_tokens": 4096,
                 "top_p": 1.0,
                 "timeout_seconds": 60.0,
                 "max_retries": 8,
@@ -619,7 +619,7 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
                 "judge_transport": "chat_completions",
                 "thinking_mode": "disabled",
             },
-            "provider_compatibility": "opencodego_non_thinking_completion_floor_128_v2",
+            "provider_compatibility": "opencodego_locomo_explicit_completion_cap_4096_v3",
         },
         "config": _FakeMemoryOS.instances[0].config.to_manifest(),
         "consume_granularity": "session",

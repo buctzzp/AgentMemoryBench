@@ -1,6 +1,6 @@
 # Graphiti method 重认证支线
 
-状态：`M3_ACCEPTED；B11_PAUSED_EXTERNAL_OPENCODEGO_REGION_OPT_IN`
+状态：`METHOD_FROZEN_V1`
 
 ## 范围
 
@@ -10,20 +10,20 @@ method。这里接入的是 **Graphiti OSS**，不是 Zep hosted product，也�
 ## 恢复入口
 
 1. 父级 [`ws02.7 README`](../../../README.md) 热胶囊；
-2. [`Graphiti v0.29.3 M3 implementation`](notes/graphiti-v0.29.3-product-adapter-m3-implementation.md)；
-3. [`B11 首次真实尝试`](notes/graphiti-b11-first-live-attempt.md)；
-4. [`Graphiti 五格 dossier`](notes/graphiti-five-benchmark-safety-dossier.md)；
-5. [`Graphiti integration ledger`](notes/graphiti-integration-ledger.md)；
-6. 稳定页 [`docs/reference/integration/graphiti.md`](../../../../../reference/integration/graphiti.md)。
+2. [`Graphiti method-frozen-v1`](notes/graphiti-frozen-v1.md)；
+3. [`Graphiti integration ledger`](notes/graphiti-integration-ledger.md)；
+4. 需要追溯时再读 [`M3 implementation`](notes/graphiti-v0.29.3-product-adapter-m3-implementation.md)、
+   [`B11 首次真实尝试`](notes/graphiti-b11-first-live-attempt.md) 或
+   [`五格 dossier`](notes/graphiti-five-benchmark-safety-dossier.md)；
+5. 稳定页 [`docs/reference/integration/graphiti.md`](../../../../../reference/integration/graphiti.md)。
 
 ## 当前动作
 
-M3 离线 adapter、五格强反例与 18 份 machine plan 已闭合。首个 LoCoMo W1 已到达
-OpenCodeGo product build 请求，但 workspace 因区域模型尚未显式 opt-in 返回 HTTP 403；其余
-计划没有继续。当前不得重复请求相同外部门。opt-in 完成后按
-[`B11 首次真实尝试`](notes/graphiti-b11-first-live-attempt.md) 的恢复命令，从既有 failed-ingest
-run 执行 physical clean + retry；成功后再逐 run artifact gate。MemBench 100k 是明确 N/A，
-没有命令，也不得补造时间。
+18 份 v2 machine plan 已完成真实 predict/evaluate；机器验收覆盖 35 conversation、35 question、
+88 个真实 product episode，并对 FalkorDB payload 做字节级反查。所有 croppable variant 的
+W1/W2 与 HaluMem Medium/Long 固定 W1 均通过；MemBench 100k 因 mandatory source time
+继续 N/A。当前无 Graphiti 施工动作；冻结身份、缺口与解冻触发器以
+[`graphiti-frozen-v1.md`](notes/graphiti-frozen-v1.md) 为准。
 
 ## 稳定依赖顺序
 
