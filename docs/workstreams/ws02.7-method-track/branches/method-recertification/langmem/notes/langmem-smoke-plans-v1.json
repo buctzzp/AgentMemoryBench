@@ -1543,15 +1543,15 @@
         "requires_api": true
       },
       {
+        "name": "halumem-update",
+        "requires_api": true
+      },
+      {
         "name": "halumem-memory-type",
         "requires_api": false
       },
       {
         "name": "halumem-qa",
-        "requires_api": true
-      },
-      {
-        "name": "halumem-update",
         "requires_api": true
       },
       {
@@ -1598,18 +1598,18 @@
       "--metric",
       "halumem-extraction",
       "--metric",
+      "halumem-update",
+      "--metric",
       "halumem-memory-type",
       "--metric",
       "halumem-qa",
-      "--metric",
-      "halumem-update",
       "--metric",
       "normalized-em",
       "--metric",
       "substring-em",
       "--allow-api"
     ],
-    "evaluate_command": "uv run memory-benchmark evaluate --root /Users/wz/Desktop/memoryBenchmark --run-id langmem-halumem-v1-r1-w1-medium --metric f1 --metric halumem-extraction --metric halumem-memory-type --metric halumem-qa --metric halumem-update --metric normalized-em --metric substring-em --allow-api"
+    "evaluate_command": "uv run memory-benchmark evaluate --root /Users/wz/Desktop/memoryBenchmark --run-id langmem-halumem-v1-r1-w1-medium --metric f1 --metric halumem-extraction --metric halumem-update --metric halumem-memory-type --metric halumem-qa --metric normalized-em --metric substring-em --allow-api"
   },
   {
     "contract_version": "smoke-plan-v1",
@@ -1641,15 +1641,15 @@
         "requires_api": true
       },
       {
+        "name": "halumem-update",
+        "requires_api": true
+      },
+      {
         "name": "halumem-memory-type",
         "requires_api": false
       },
       {
         "name": "halumem-qa",
-        "requires_api": true
-      },
-      {
-        "name": "halumem-update",
         "requires_api": true
       },
       {
@@ -1696,17 +1696,17 @@
       "--metric",
       "halumem-extraction",
       "--metric",
+      "halumem-update",
+      "--metric",
       "halumem-memory-type",
       "--metric",
       "halumem-qa",
-      "--metric",
-      "halumem-update",
       "--metric",
       "normalized-em",
       "--metric",
       "substring-em",
       "--allow-api"
     ],
-    "evaluate_command": "uv run memory-benchmark evaluate --root /Users/wz/Desktop/memoryBenchmark --run-id langmem-halumem-v1-r1-w1-long --metric f1 --metric halumem-extraction --metric halumem-memory-type --metric halumem-qa --metric halumem-update --metric normalized-em --metric substring-em --allow-api"
+    "evaluate_command": "uv run memory-benchmark evaluate --root /Users/wz/Desktop/memoryBenchmark --run-id langmem-halumem-v1-r1-w1-long --metric f1 --metric halumem-extraction --metric halumem-update --metric halumem-memory-type --metric halumem-qa --metric normalized-em --metric substring-em --allow-api"
   }
 ]

@@ -16,8 +16,9 @@ smoke 与冻结。五家 benchmark 的 raw schema、canonical id、已知异常�
 3. M2 离线门已完成：provider v3 adapter、独立 runtime、原子状态、五格 production-path
    强反例、living dossier 与 20 份机器 smoke plan 均已验收；最小恢复入口见
    [M2 检查点](notes/langmem-m2-adapter-checkpoint.md)。
-4. 当前停在 B11 真实 smoke 批准门；真实 API 仍须用户另行批准预算、规模与 run id。
+4. B11 已完成：20 份真实 OpenCodeGo smoke、47 个 conversation/question、全部适用 evaluator、
+   artifact/效率/隐私/state 与 W1/W2 ownership 机器门通过；见
+   [method-frozen-v1](notes/langmem-frozen-v1.md)。
 
-Letta/MemGPT 已完成离线 M2，仍独立停在真实 B11 批准门；LangMem 的离线施工不代替也不
-取消该批准门。LangMem 当前 ledger 也已为 `ready_for_smoke`，但不是 frozen；父级
-`../README.md` 与 ws02.7 恢复胶囊保存权威动态状态，本页只作支线索引。
+LangMem 当前 ledger 已为 `frozen`。EverOS 的离线施工与真实 B11 仍是独立门，LangMem 的
+通过不替代它。父级 `../README.md` 与 ws02.7 恢复胶囊保存权威动态状态，本页只作支线索引。

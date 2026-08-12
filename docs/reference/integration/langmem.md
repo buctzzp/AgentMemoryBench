@@ -1,6 +1,6 @@
 # LangMem 接入说明
 
-状态：`M2 offline implementation accepted；B11 real smoke approved/live queued`。本页只保存
+状态：`method-frozen-v1`。本页只保存
 跨会话仍需复用的稳定接口事实；逐格状态与下一动作见
 [LangMem integration ledger](../../workstreams/ws02.7-method-track/branches/method-recertification/langmem/notes/langmem-integration-ledger.md)，
 五格异常与 payload 见
@@ -80,9 +80,11 @@
   gold answer/evidence/target/memory-point label 不进入 worker payload。
 - zero hit 返回空 `items=()` 加非空 sentinel；backend/协议失败一律抛错，不降级成空记忆。
 
-## 当前门
+## 当前冻结边界
 
-M2 adapter、runtime、强反例、五格 dossier 与机器计划已经完成离线验收；当前不是 frozen。
-用户已批准使用 OpenCodeGo 执行真实 smoke，现进入 live 队列；每个 child run 的 artifact 开箱
-及最终冻结仍须实际通过。任何 current source/`uv.lock`、manager factory、store/ranking、
-message/time policy 或 benchmark stable contract 漂移，都必须重开 ledger 对应门。
+M1/M2 与 B11 已全部闭合，冻结证书见
+[LangMem method-frozen-v1](../../workstreams/ws02.7-method-track/branches/method-recertification/langmem/notes/langmem-frozen-v1.md)：
+20 份 current run、47 个 conversation/question、9 个 croppable variant 的真实 W1/W2、2 个
+HaluMem fixed W1 以及 artifact/效率/隐私/state 机器门均通过。任何 current source/`uv.lock`、
+manager factory、store/ranking、message/time policy、wrapper identity 或 benchmark stable contract
+的实质漂移，都必须重开 ledger 对应门；lock-only upstream drift 先做影响审计，不机械重烧。

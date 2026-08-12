@@ -8,10 +8,10 @@
 contract_version: method-integration-ledger-v1
 method_id: langmem
 display_name: LangMem
-ledger_state: ready_for_smoke
+ledger_state: frozen
 integration_page: docs/reference/integration/langmem.md
 dossier: docs/workstreams/ws02.7-method-track/branches/method-recertification/langmem/notes/langmem-five-benchmark-safety-dossier.md
-frozen_note: none
+frozen_note: docs/workstreams/ws02.7-method-track/branches/method-recertification/langmem/notes/langmem-frozen-v1.md
 -->
 
 ## 必填检查点
@@ -47,17 +47,17 @@ frozen_note: none
 | GRID-HALUMEM | 固定 shape、session-local delta、四类 operation、最终 payload、指标、隐私与 W1 独立闭合 | PASS | evidence=stable=[HaluMem 稳定页](../../../../../../reference/integration/halumem.md) / payload=[dossier §6](./langmem-five-benchmark-safety-dossier.md#6-halumem) / metric=[dossier §6](./langmem-five-benchmark-safety-dossier.md#6-halumem) / privacy=[dossier §6](./langmem-five-benchmark-safety-dossier.md#6-halumem) / smoke=[plan JSON](./langmem-smoke-plans-v1.json) / operations=extraction N/A, update valid, QA valid, memory_type N/A; ruling=fixed 4-session/W1 shape，session 一次 async 完成；current state 可测 update/QA，changed puts 不冒充 extraction point; next=none |
 | B11-DOSSIER | 一份 living dossier 已按五 benchmark 分章并链接承重 note、异常处置和失效触发器 | PASS | evidence=[LangMem 五格安全档案](./langmem-five-benchmark-safety-dossier.md); ruling=五格异常、payload、隐私、metric、计划与失效触发器在一份 living dossier 分章闭合; next=none |
 | B11-SMOKE-PLAN | 每个 concrete variant 的 smoke-plan-v1 已无 API 生成、审阅并保存，命令未手写 | PASS | evidence=[20 份原始 machine plan](./langmem-smoke-plans-v1.json); ruling=9 个 croppable variant 各 W1/W2，2 个 HaluMem fixed variant 各 W1；全部由 registry/TOML 生成，child suffix 与 evaluator 清单未手改; next=none |
-| B11-REAL-SMOKE | planner 生成的全部 predict 与适用 evaluator 已真实执行，固定 shape 未误传裁剪参数 | PENDING | evidence=用户已批准OpenCodeGo smoke; ruling=真实API可按已保存machine plan进入live队列，但尚无成功artifact; next=执行首份W1并开箱后再继续 |
-| B11-ARTIFACT-GATE | manifest、prediction、formatted_memory、private labels、efficiency、state 与 summary 已逐 run 开箱 | PENDING | evidence=依赖真实 smoke; ruling=零报错不等于通过; next=真实 smoke 后开箱 |
-| B11-PARALLEL-GATE | 每个适用 variant 的 W1/W2 已实测，或 W1-only 的产品硬约束和 CLI 预启动拒绝已证明 | PENDING | evidence=[W2 offline ownership](./langmem-m2-adapter-implementation.md#6-并行-ownership) / [20 plans](./langmem-smoke-plans-v1.json); ruling=离线 runner 已证两个独占 worker/model/store/state root，9 个 croppable variant 的真实 W1/W2 仍待 B11；HaluMem 固定 W1; next=用户批准后逐 plan 实测并开箱资源与隔离 |
-| B11-REGRESSION-GATE | 定向强反例、全量 pytest、compileall、diff check 与第三方 patch identity 均通过 | PASS | evidence=[M2 §9](./langmem-m2-adapter-implementation.md#9-当前离线验证); ruling=扩展定向 473 passed，主树 2021 passed/3 deselected/13 个既有 warning/29 subtests，compileall、diff、ledger、plan JSON、nested source identity 与零 API product readout 全通过; next=none |
-| B11-FREEZE-SYNC | frozen note、integration page、总表、workstream README、roadmap 和 ledger 状态已同步 | PENDING | evidence=未到冻结门; ruling=真实 B11 前不得冻结; next=完成其余全部检查点 |
+| B11-REAL-SMOKE | planner 生成的全部 predict 与适用 evaluator 已真实执行，固定 shape 未误传裁剪参数 | PASS | evidence=[frozen §3](./langmem-frozen-v1.md#3-五-benchmark-主轨与真实-smoke); ruling=20 份 current plan、47 个 conversation/question 与全部适用 evaluator 已完成；HaluMem 使用 planner fixed shape，smoke 未 resume; next=none |
+| B11-ARTIFACT-GATE | manifest、prediction、formatted_memory、private labels、efficiency、state 与 summary 已逐 run 开箱 | PASS | evidence=[frozen §4](./langmem-frozen-v1.md#4-artifact效率隐私与状态机器门); ruling=20 roots 的 manifest、question/prediction/context、RetrievalEvidence、summary、API/local observation、state、日志与 secret 负空间机器闭合; next=none |
+| B11-PARALLEL-GATE | 每个适用 variant 的 W1/W2 已实测，或 W1-only 的产品硬约束和 CLI 预启动拒绝已证明 | PASS | evidence=[frozen §3-4](./langmem-frozen-v1.md#3-五-benchmark-主轨与真实-smoke); ruling=9 个 croppable concrete variant 均完成真实 W1/W2；每份 W2 确有 worker_0/worker_1 两套 state owner；HaluMem 按产品/runner 固定 W1; next=none |
+| B11-REGRESSION-GATE | 定向强反例、全量 pytest、compileall、diff check 与第三方 patch identity 均通过 | PASS | evidence=[frozen §7](./langmem-frozen-v1.md#7-最终验收门); ruling=M2 强反例保留，冻结同批的 ledger/doc、全量、compileall、diff 与 current source drift 门见 frozen 现场记录; next=none |
+| B11-FREEZE-SYNC | frozen note、integration page、总表、workstream README、roadmap 和 ledger 状态已同步 | PASS | evidence=[frozen-v1](./langmem-frozen-v1.md); ruling=ledger、frozen note、稳定 integration、总表、method branch、父 workstream 与 roadmap 同批同步为 method-frozen-v1; next=none |
 <!-- ledger-checkpoints:end -->
 
 ## 架构师最终签字
 
-- 当前 ledger 状态：`ready_for_smoke`
-- 最后一次一手证据复核 commit：`56d85939d80bb731bd5e237567148d817d7bfd16`
-- 当前事实边界：M1 source/product 与 M2 adapter/runtime/persistence/五格/metric/机器计划已闭合；
-  真实 build/answer/judge smoke、artifact 开箱、真实 W1/W2 与 freeze sync 尚未执行。
-- 架构师判词：`LANGMEM_M2_OFFLINE_ACCEPTED_B11_LIVE_QUEUED`。
+- 当前 ledger 状态：`frozen`
+- 当前事实边界：M1/M2、20 份真实 smoke、47 个独立 namespace、全部适用 evaluator、
+  artifact/效率/隐私/state 与真实 W1/W2 已闭合；semantic provenance、retrieval metric 与
+  HaluMem extraction/memory-type 诚实 N/A。
+- 架构师判词：`LANGMEM_METHOD_FROZEN_V1`。

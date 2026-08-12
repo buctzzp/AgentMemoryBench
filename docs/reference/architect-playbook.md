@@ -174,6 +174,11 @@
 - artifact cardinality 必须由 evaluator contract 决定，不能默认“一题一 score / 一题一 judge”。
   MemBench source summary 会有多行聚合，BEAM 一题也可能同时触发 event-equivalence 与 rubric
   judge；机器门应核 scope/metric/identity 的集合与计数来源，而不是写死直觉中的 1。
+- shell 包装层不能把保留/只读变量当退出码容器（例如 zsh 的 `status`）。执行 machine-plan
+  `argv` 时直接保存子进程 return code；CLI 已成功写完整 summary/artifact 后，包装层自身失败不得
+  触发付费重跑，先由产物门判定业务是否完成。
+- run root 必须从实际 manifest/summary 定位，不能凭 benchmark variant 猜目录。日志若误落孤立
+  路径，只在 source/destination 唯一且目标不存在时归位；不重写实验数据，也不借整理之名重跑 API。
 
 重构的验收标准是行为守恒与未来修改面缩小，不是文件数或行数减少。
 
