@@ -794,6 +794,7 @@ def run_registered_conversation_qa_prediction(
                 efficiency_collector=child.efficiency_collector,
                 model_inventory=child.model_inventory,
                 instrumentation_identity=child.instrumentation_identity,
+                retrieval_observation_contract=child.retrieval_observation_contract,
                 protocol_version=getattr(
                     method_registration, "protocol_version", ""
                 ),

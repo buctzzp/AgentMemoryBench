@@ -82,3 +82,4 @@ def test_halumem_prompt_builder_substitutes_memory_and_question_verbatim() -> No
         PromptMessage(role="user", content=result.answer_prompt)
     ]
     assert result.metadata["official_source"] == HALUMEM_MEMZERO_OFFICIAL_SOURCE
+    assert result.metadata["answer_context"] == memory

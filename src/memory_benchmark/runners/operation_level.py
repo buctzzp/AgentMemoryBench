@@ -33,6 +33,7 @@ from memory_benchmark.observability.efficiency import (
     EfficiencyObservation,
     EfficiencyStage,
     ModelDescriptor,
+    RetrievalObservationContract,
 )
 from memory_benchmark.readers.answer import FrameworkAnswerReader
 from memory_benchmark.runners.conversation_qa import _make_public_question
@@ -47,6 +48,7 @@ from memory_benchmark.runners.prediction import (
     PredictionRunPolicy,
     PredictionRunSummary,
     _conversation_state_status,
+    _build_efficiency_observability_manifest,
     _count_answer_context_tokens,
     _elapsed_ms,
     _manifests_match_for_resume,
@@ -81,6 +83,7 @@ def run_operation_level_predictions(
     efficiency_collector: EfficiencyCollector | None = None,
     model_inventory: tuple[ModelDescriptor, ...] = (),
     instrumentation_identity: dict[str, object] | None = None,
+    retrieval_observation_contract: RetrievalObservationContract | None = None,
     protocol_version: str = "",
     provenance_granularity: str | None = None,
     retrieval_evidence_contract_version: str | None = None,
@@ -105,6 +108,8 @@ def run_operation_level_predictions(
         provenance_granularity: method 注册级 provenance 粒度声明。
         retrieval_evidence_contract_version: method 注册级逐题 retrieval evidence
             契约版本声明；非空时写入 manifest 作为 resume 身份。
+        retrieval_observation_contract: retrieval 效率观测能力契约；启用效率
+            collector 时与模型清单、插桩身份一同写入不可变 manifest。
         clean_failed_ingest_conversation: 可选 conversation 级 clean retry hook，
             与标准 runner 同型；只有内置 method 能证明可安全清理半写入状态时才应
             传入。任一 session 的 ingest/extraction/update/QA/end_conversation 抛错
@@ -141,9 +146,14 @@ def run_operation_level_predictions(
             benchmark_variant=benchmark_variant,
             run_scope=run_scope,
             source_paths=tuple(Path(path) for path in source_paths),
+            efficiency_observability=_build_efficiency_observability_manifest(
+                run_context=run_context,
+                efficiency_collector=efficiency_collector,
+                model_inventory=model_inventory,
+                instrumentation_identity=instrumentation_identity,
+                retrieval_observation_contract=retrieval_observation_contract,
+            ),
         )
-        if instrumentation_identity is not None:
-            manifest["instrumentation_identity"] = instrumentation_identity
         _prepare_operation_run(paths=paths, manifest=manifest, resume=policy.resume)
         _write_operation_input_artifacts(paths, selected_conversations)
 
@@ -899,11 +909,12 @@ def _build_operation_manifest(
     benchmark_variant: str,
     run_scope: RunScope,
     source_paths: tuple[Path, ...],
+    efficiency_observability: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     """构造 operation-level runner manifest。"""
 
     dataset_fingerprint = build_dataset_fingerprint(dataset, list(source_paths))
-    return {
+    manifest: dict[str, Any] = {
         "schema_version": 2,
         "runner": "operation_level_prediction",
         "run_id": run_context.run_id,
@@ -924,6 +935,9 @@ def _build_operation_manifest(
         },
         "method": method_manifest,
     }
+    if efficiency_observability is not None:
+        manifest["efficiency_observability"] = efficiency_observability
+    return manifest
 
 
 def _prepare_operation_run(
@@ -948,14 +962,16 @@ def _prepare_operation_run(
             f"Cannot resume because manifest is missing: {paths.manifest_path}"
         )
     atomic_write_json(paths.manifest_path, manifest)
-    atomic_write_json(
-        paths.redacted_config_path,
-        {
-            "runner": manifest["runner"],
-            "policy": manifest["policy"],
-            "method": manifest["method"],
-        },
-    )
+    redacted_config = {
+        "runner": manifest["runner"],
+        "policy": manifest["policy"],
+        "method": manifest["method"],
+    }
+    if "efficiency_observability" in manifest:
+        redacted_config["efficiency_observability"] = manifest[
+            "efficiency_observability"
+        ]
+    atomic_write_json(paths.redacted_config_path, redacted_config)
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:

@@ -67,6 +67,7 @@ def build_halumem_unified_answer_prompt(
             "prompt_track": "unified",
             "answer_prompt_profile": HALUMEM_MEMZERO_PROMPT_PROFILE,
             "official_source": HALUMEM_MEMZERO_OFFICIAL_SOURCE,
+            "answer_context": retrieval_result.formatted_memory,
         },
     )
 

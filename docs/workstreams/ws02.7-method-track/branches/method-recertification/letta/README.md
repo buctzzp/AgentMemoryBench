@@ -14,10 +14,10 @@ metric 资格、真实 smoke 与冻结。五家 benchmark 的 raw schema、canon
    source、官方五格覆盖、Letta Code 分轨与 sleeptime-memory 主产品接口；lifecycle、namespace、
    readout 和 metric 的生产证据继续由 M2 闭合。
 3. [M2 adapter 检查点](notes/letta-m2-adapter-checkpoint.md)：独立 worker、PostgreSQL
-   ownership、产品 ingest/readout、五格 production-path、离线全量与 11 份 machine plan 已闭合；
-   ledger 现为 `ready_for_smoke`。
-4. 当前只等用户批准 planner 中的真实 API 预算与 run ids，再执行 B11 predict/evaluate、artifact
-   gate 与 frozen note。
+   ownership、产品 ingest/readout、五格 production-path 与离线门。
+4. [method-frozen-v1](notes/letta-frozen-v1.md)：current v3 的 11 份真实 smoke、17 个
+   conversation/question、全 evaluator 与 artifact/效率/隐私/外部状态机器门均已闭合；ledger
+   已转 `frozen`。后续只有 source/contract 漂移、official-full、真实 resume 或效果实验才重开。
 
 父级 `../../README.md` 保存 method 重认证的权威顺序；本页只负责支线索引，不复制动态
 commit、测试数或在途 actor 状态。

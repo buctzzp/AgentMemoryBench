@@ -42,6 +42,7 @@ from memory_benchmark.observability.efficiency import (
     EfficiencyArtifactStore,
     EfficiencyCollector,
     ModelDescriptor,
+    RetrievalObservationContract,
 )
 from memory_benchmark.readers.answer import FakeAnswerLLMClient, FrameworkAnswerReader
 from memory_benchmark.runners.evaluation import run_artifact_evaluation
@@ -232,6 +233,11 @@ def test_halumem_registered_medium_smoke_runs_three_operations_and_four_evaluato
         unified_prompt_builder=registration.unified_prompt_builder,
         efficiency_collector=collector,
         model_inventory=(_fake_answer_model(),),
+        instrumentation_identity={"collector_schema": 1},
+        retrieval_observation_contract=RetrievalObservationContract(
+            required_by_profile=False,
+            supported_by_method=True,
+        ),
     )
     assert summary.completed_conversations == 1
     assert summary.completed_questions == 1
@@ -690,6 +696,11 @@ def test_halumem_operation_level_records_efficiency_observations(
         unified_prompt_builder=build_halumem_unified_answer_prompt,
         efficiency_collector=collector,
         model_inventory=inventory,
+        instrumentation_identity={"collector_schema": 1},
+        retrieval_observation_contract=RetrievalObservationContract(
+            required_by_profile=False,
+            supported_by_method=True,
+        ),
     )
 
     paths = ExperimentPaths.create(run_context.run_dir)
@@ -712,6 +723,8 @@ def test_halumem_operation_level_records_efficiency_observations(
     question_obs = by_type.get("question_efficiency", [])
     assert len(question_obs) == 1
     assert question_obs[0].retrieval_latency_ms is not None
+    assert question_obs[0].injected_memory_context_tokens is not None
+    assert question_obs[0].injected_memory_context_tokens > 0
     assert question_obs[0].answer_generation_latency_ms >= 0.0
 
     # answer LLM 调用被记录（stage=answer）

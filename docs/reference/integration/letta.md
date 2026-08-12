@@ -3,9 +3,10 @@
 > 稳定页：只记录经架构师复核的承重结论。完整证据、争议、零 API stdout 与五格反例见
 > `docs/workstreams/ws02.7-method-track/branches/method-recertification/letta/`。
 >
-> 状态：product adapter M2 离线门已闭合；B11 已获批并到达 OpenCodeGo endpoint。历史
-> 首跑曾被区域 opt-in 403 阻断，用户已于 2026-08-11 解除该外部门；当前为
-> `READY_FOR_SMOKE / LIVE_QUEUED`，**尚未冻结**。
+> 状态：`method-frozen-v1`。current v3 的 11 份真实 smoke、17 个 conversation/question、
+> 全部适用 evaluator、artifact/效率/隐私/外部状态机器门与最终回归均已闭合。历史首跑的
+> Docker、PostgreSQL readiness、Run lifecycle 与区域 opt-in 失败资产只作阶段证据，不混入
+> current run，也不冒充可 resume smoke。
 
 ## 1. Source identity
 
@@ -151,22 +152,26 @@ resume。named volume 是本机外部状态：跨机器只复制 outputs 不足�
 - build LLM 每次真实 response usage 逐调用记录；缺 usage fail-fast；
 - retrieval 记录 wall-clock latency，LLM/embedding 调用应为零；
 - worker env 是 allowlist，build key 只在一次 agent step 的最窄作用域临时变成
-  `OPENAI_API_KEY`。
+  `OPENAI_API_KEY`；
+- worker 在产品构造前给现有 logging handler 安装 key/base URL redaction filter，并把
+  `httpx/httpcore` 降到 warning；parent stderr tail 再做一次同口径脱敏；
+- generic 与 operation runner 使用同一 efficiency-observability manifest contract；BEAM/HaluMem
+  的 builder 明确落 `answer_context`，内容与实际 `formatted_memory` 一致且不改变 prompt 字节。
 
 两 profile 的 model/provider/transport 与 wrapper/source hash 均进入 manifest/resume identity；
 分数不可直接混比。
 
 ## 7. 当前验收状态
 
-零 API 真实产品链已经通过：PostgreSQL migration、subject 重入、两 block、无 embedding
-initializer、namespace deletion、`close_db`、container/volume 收尾全部实证。11 个 concrete
-variant 的 machine smoke plan 已生成，W2 请求会在 runtime/API 前拒绝。
+零 API 产品链与 current 真实链都已通过。current
+[`letta-smoke-plans-v3.json`](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-smoke-plans-v3.json)
+覆盖 LoCoMo 1、LongMemEval 2、MemBench 2、BEAM 4、HaluMem 2 个 concrete variant；全部固定 W1，
+共 17 个 conversation/question。机器验货实数为 build LLM 45、answer 17、judge 24；current
+11 个 owned volume 与 superseded 19 个保留 volume 分账，owned container 残留为 0。公开和历史
+Letta artifact/log 对 API key、base URL、私有 workspace URL 的命中均为 0。
 
-首份真实 LoCoMo machine plan 已执行到 OpenCodeGo endpoint，并在过程中修复了 Postgres image
-初始化临时 server 假就绪与缺失 official `Run` lifecycle 两项产品链 bug。修复后的请求因
-workspace 当时尚未完成 China-hosted model opt-in 而被 HTTP 403 拒绝；它不是成功 smoke，
-后续计划也未继续。用户现已解除该外部门，但在真实重跑与 artifact gate 完成前，当前判词
-仍只是 `READY_FOR_SMOKE / LIVE_QUEUED`，不是 `method-frozen-v1`。
+五格 retrieval qrel/rank、HaluMem extraction/memory-type 继续诚实 N/A；HaluMem update/QA
+valid。冻结只证明 current product pipeline 与评测可达，不代表 smoke 分数具有排名意义。
 
 ## 8. 证据入口
 
@@ -174,5 +179,6 @@ workspace 当时尚未完成 China-hosted model opt-in 而被 HTTP 403 拒绝；
 - [Current product identity M1](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-current-product-identity-m1-ruling.md)
 - [M2 implementation](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-m2-adapter-implementation.md)
 - [Five-benchmark safety dossier](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-five-benchmark-safety-dossier.md)
-- [11 concrete variant machine plans](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-smoke-plans-v1.json)
+- [11 current concrete variant machine plans](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-smoke-plans-v3.json)
 - [B11 first live attempt and R1 fixes](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-b11-first-live-attempt-r1.md)
+- [method-frozen-v1](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-frozen-v1.md)

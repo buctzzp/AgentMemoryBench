@@ -161,6 +161,19 @@
   也必须显式携带 failed count。顶层 batch/run 要聚合该计数并返回非零；组合式 `run`
   不得继续评测失败 child。conversation budget 留下的 pending 不是失败，两者不可用
   `completed < total` 粗暴混算。
+- machine planner 的 `argv` 是执行契约，不是给人重抄的命令范例。执行器应逐项消费原数组；
+  尤其 HaluMem fixed shape、multi-variant child run id 与 worker 资格不得手工补删 flag。若人工
+  转录触发 CLI 预运行拒绝，记录为执行纪律错误，修正 argv 后 fresh run，不能怪 method。
+- generic 与 operation runner 若都产出效率 artifact，必须共享同一 manifest contract builder；
+  model inventory、instrumentation/version、resume identity 任一侧缺失都可能制造“数据有了但
+  身份不等价”的假通过。answer builder 同理：prompt 中实际注入 memory 时，公共 metadata 的
+  `answer_context` 必须来自同一 formatted-memory 值，不能只凭 prompt 字节推断。
+- secret 负空间要覆盖第三方 runtime 自己的日志和 failed-smoke archive，而不只查 framework
+  JSON。应在第三方 logger 构造前安装 handler filter，parent stderr/error 再做第二层脱敏；API
+  key、base URL、账户私有 workspace URL 都属于扫描对象。历史失败资产保留前也必须过同一道门。
+- artifact cardinality 必须由 evaluator contract 决定，不能默认“一题一 score / 一题一 judge”。
+  MemBench source summary 会有多行聚合，BEAM 一题也可能同时触发 event-equivalence 与 rubric
+  judge；机器门应核 scope/metric/identity 的集合与计数来源，而不是写死直觉中的 1。
 
 重构的验收标准是行为守恒与未来修改面缩小，不是文件数或行数减少。
 

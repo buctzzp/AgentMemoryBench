@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections import deque
+from io import StringIO
 import json
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -382,6 +385,37 @@ def test_letta_worker_environment_is_allowlisted_and_scopes_build_key(
     assert with_key["MEMORY_BENCHMARK_LETTA_BUILD_API_KEY"] == "private-build-key"
     assert with_key["HOME"].startswith(str(runtime.storage_root))
     assert with_key["LETTA_PG_URI"].endswith("/letta?sslmode=disable")
+
+
+def test_letta_parent_stderr_tail_redacts_key_and_endpoint() -> None:
+    """worker 已输出的失败尾行也必须在进入架构师错误面前二次脱敏。"""
+
+    runtime = object.__new__(LettaRuntime)
+    api_key = "private-build-key-value"
+    endpoint = "https://private-runtime.example/v1"
+    runtime.openai_settings = OpenAISettings(
+        api_key=api_key,
+        base_url=endpoint,
+        model="deepseek-v4-flash",
+        provider="opencodego",
+        judge_transport="chat_completions",
+    )
+    runtime._worker = SimpleNamespace(
+        stderr=StringIO(
+            f"request={endpoint}/chat/completions key={api_key}\n"
+            "ordinary failure context\n"
+        )
+    )
+    runtime._stderr_tail = deque(maxlen=80)
+
+    runtime._drain_worker_stderr()
+
+    rendered = "\n".join(runtime._stderr_tail)
+    assert api_key not in rendered
+    assert endpoint not in rendered
+    assert "<redacted-api-key>" in rendered
+    assert "<redacted-api-base-url>/chat/completions" in rendered
+    assert "ordinary failure context" in rendered
 
 
 def test_letta_locomo_payload_preserves_speakers_time_caption_and_sdk_wrapper(

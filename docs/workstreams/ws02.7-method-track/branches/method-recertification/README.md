@@ -53,10 +53,11 @@ LightMem 已关闭的异常样本。只有三类触发器允许重开 benchmark 
    B1-B11。
 6. **MemOS（已完成）**：typed product handler、官方 LoCoMo 双视角、async exact
    terminal 与 B7 observation 已冻结；framework W2 因共享 runtime/embedder 判 N/A。
-7. **Letta/MemGPT M2 离线门已完成**：11 个 concrete plan 已获批执行；首次真实 run
-   依次暴露并修复 PostgreSQL 临时 init-server readiness 与 official run lifecycle 两个缺口，
-   当前已到达 OpenCodeGo provider，历史上曾因账号未完成区域 opt-in 返回 403；用户现已解除
-   外部门，转入真实重跑队列。真实 artifact gate 关闭后方可冻结。
+7. **Letta/MemGPT 已冻结为 `method-frozen-v1`**：legacy V1 0.16.8 + official
+   ai-memory-sdk v0.2.0 产品链完成 current v3 的 11 份真实 run、17 个 conversation/question，
+   全 evaluator 与 artifact/效率/隐私/外部状态机器门均闭合；W1-only、retrieval lineage/rank、
+   HaluMem extraction/memory-type 的 N/A 边界见
+   [frozen-v1](letta/notes/letta-frozen-v1.md)。
 8. **LangMem M2 离线门已完成**：current source/product/official-harness、background-manager
    产品 adapter、原子状态、五格 dossier、W2 ownership 与 20 份机器计划均已验收；
    [ledger](langmem/notes/langmem-integration-ledger.md) 为 `ready_for_smoke`。Letta 与 LangMem
@@ -82,11 +83,11 @@ LightMem 已关闭的异常样本。只有三类触发器允许重开 benchmark 
 
 ## 当前状态
 
-LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS、Graphiti 均已冻结；状态与证据从父级
+LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS、Graphiti、Letta/MemGPT 均已冻结；状态与证据从父级
 `../../README.md` 恢复胶囊进入。机器化 smoke plan/preflight 与 ledger v1 强制接入门均已
-落地；Letta/MemGPT、LangMem、EverOS 三份 ledger 均为 `ready_for_smoke`，Graphiti ledger 已
-推进为 `frozen`。三家 M1/M2、五格安全档案、机器计划与无 API 全量回归均已关闭；OpenCodeGo
-区域 opt-in 外部门已解除，当前三家进入真实 B11 队列，但不能提前升级 PASS。Supermemory source gate
+落地；Letta 与 Graphiti ledger 已推进为 `frozen`，LangMem、EverOS 两份 ledger 为
+`ready_for_smoke`。后两家 M1/M2、五格安全档案、机器计划与无 API 全量回归均已关闭；OpenCodeGo
+区域 opt-in 外部门已解除，当前依序进入真实 B11，但不能提前升级 PASS。Supermemory source gate
 保留为历史；Graphiti 旧失败 run 只作外部门与 checkpoint 证据，不重复或续跑。
 继续复用五个 benchmark 稳定层，不重做 dataset census。
 权威实时动作仍看父级恢复胶囊与最新断点。

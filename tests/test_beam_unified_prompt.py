@@ -76,6 +76,7 @@ def test_beam_prompt_builder_substitutes_memory_and_question_verbatim() -> None:
         PromptMessage(role="user", content=result.answer_prompt)
     ]
     assert result.metadata["official_source"] == BEAM_ANSWER_PROMPT_OFFICIAL_SOURCE
+    assert result.metadata["answer_context"] == memory
 
 
 def test_beam_prompt_has_no_unmapped_time_or_date_slot() -> None:

@@ -606,9 +606,16 @@ class LettaRuntime:
         if worker is None or worker.stderr is None:
             return
         for line in worker.stderr:
-            self._stderr_tail.append(
-                line.rstrip().replace(self.openai_settings.api_key, "<redacted>")
+            redacted = line.rstrip().replace(
+                self.openai_settings.api_key,
+                "<redacted-api-key>",
             )
+            if self.openai_settings.base_url:
+                redacted = redacted.replace(
+                    self.openai_settings.base_url,
+                    "<redacted-api-base-url>",
+                )
+            self._stderr_tail.append(redacted)
 
     def _request(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         """发送一条串行 JSON-lines 请求，并对超时/协议污染 fail-fast。"""

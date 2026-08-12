@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import sys
 import traceback
@@ -27,6 +28,30 @@ _EXPECTED_TOOLS = frozenset(
     }
 )
 _SUCCESS_STOP_REASONS = frozenset({"end_turn", "tool_rule"})
+
+
+class _RuntimeSecretRedactionFilter(logging.Filter):
+    """在第三方日志落盘前脱敏 runtime endpoint 与认证值。"""
+
+    def __init__(self, *values: str | None) -> None:
+        """只保存非空且足够长的敏感值，避免替换普通短文本。"""
+
+        super().__init__()
+        self._values = tuple(
+            value for value in values if isinstance(value, str) and len(value) >= 8
+        )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """渲染并脱敏消息，同时清空旧格式化参数避免二次插值。"""
+
+        message = record.getMessage()
+        redacted = message
+        for value in self._values:
+            redacted = redacted.replace(value, "<redacted-runtime-value>")
+        if redacted != message:
+            record.msg = redacted
+            record.args = ()
+        return True
 
 
 def _required_text(value: Any, label: str) -> str:
@@ -110,12 +135,39 @@ class _WorkerEngine:
 
         from letta.server.server import SyncServer
 
+        self._install_runtime_log_redaction()
         self.server = SyncServer(init_with_default_org_and_user=False)
         await self.server.organization_manager.create_default_organization_async()
         self.actor = await self.server.user_manager.create_default_actor_async()
         await self.server.tool_manager.upsert_base_tools_async(actor=self.actor)
         self._install_openai_runtime_patch()
         return {"status": "ready", "actor_id": _plain_id(self.actor.id)}
+
+    def _install_runtime_log_redaction(self) -> None:
+        """在任何产品请求前为第三方 handler 加脱敏，并关闭成功 URL 日志。"""
+
+        redaction_filter = _RuntimeSecretRedactionFilter(
+            self.config.get("model_endpoint"),
+            os.environ.get("MEMORY_BENCHMARK_LETTA_BUILD_API_KEY"),
+        )
+        seen_handlers: set[int] = set()
+        loggers = [logging.getLogger()]
+        loggers.extend(
+            logger
+            for logger in logging.root.manager.loggerDict.values()
+            if isinstance(logger, logging.Logger)
+        )
+        for logger in loggers:
+            for handler in logger.handlers:
+                identity = id(handler)
+                if identity in seen_handlers:
+                    continue
+                handler.addFilter(redaction_filter)
+                seen_handlers.add(identity)
+        for namespace in ("httpx", "httpcore"):
+            logger = logging.getLogger(namespace)
+            if logger.getEffectiveLevel() < logging.WARNING:
+                logger.setLevel(logging.WARNING)
 
     @staticmethod
     def _validate_config(raw: dict[str, Any]) -> dict[str, Any]:

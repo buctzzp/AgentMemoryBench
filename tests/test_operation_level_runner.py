@@ -35,6 +35,8 @@ from memory_benchmark.observability import RunContext
 from memory_benchmark.observability.efficiency import (
     EfficiencyArtifactStore,
     EfficiencyCollector,
+    ModelDescriptor,
+    RetrievalObservationContract,
 )
 from memory_benchmark.readers.answer import FakeAnswerLLMClient, FrameworkAnswerReader
 from memory_benchmark.runners.operation_level import (
@@ -538,6 +540,19 @@ def test_operation_level_update_probe_tolerates_self_recording_provider(
         answer_reader=_reader(),
         unified_prompt_builder=build_halumem_unified_answer_prompt,
         efficiency_collector=collector,
+        model_inventory=(
+            ModelDescriptor(
+                model_id="fake-answer",
+                model_name="fake-answer",
+                model_role="answer_llm",
+                execution_mode="local",
+            ),
+        ),
+        instrumentation_identity={"collector_schema": 1},
+        retrieval_observation_contract=RetrievalObservationContract(
+            required_by_profile=False,
+            supported_by_method=True,
+        ),
     )
 
     observations = EfficiencyArtifactStore.for_prediction(
@@ -550,6 +565,32 @@ def test_operation_level_update_probe_tolerates_self_recording_provider(
     ]
     assert len(provider.update_write_counts) == 2
     assert len(question_records) == 2
+
+    paths = ExperimentPaths.create(context.run_dir)
+    manifest = json.loads(paths.manifest_path.read_text(encoding="utf-8"))
+    redacted_config = json.loads(
+        paths.redacted_config_path.read_text(encoding="utf-8")
+    )
+    expected_identity = {
+        "enabled": True,
+        "model_inventory": [
+            ModelDescriptor(
+                model_id="fake-answer",
+                model_name="fake-answer",
+                model_role="answer_llm",
+                execution_mode="local",
+            ).to_dict()
+        ],
+        "instrumentation_identity": {"collector_schema": 1},
+        "retrieval_observation_contract": {
+            "required_by_profile": False,
+            "supported_by_method": True,
+            "unsupported_reason": None,
+        },
+    }
+    assert manifest["efficiency_observability"] == expected_identity
+    assert redacted_config["efficiency_observability"] == expected_identity
+    assert "instrumentation_identity" not in manifest
 
 
 def test_operation_level_runner_writes_extraction_na_when_no_session_report(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sys
 from types import ModuleType
@@ -11,10 +12,109 @@ from typing import Any
 
 import pytest
 
-from memory_benchmark.methods.letta_worker import _WorkerEngine
+from memory_benchmark.methods.letta_worker import (
+    _RuntimeSecretRedactionFilter,
+    _WorkerEngine,
+)
 
 
 pytestmark = pytest.mark.unit
+
+
+def test_letta_worker_runtime_filter_redacts_endpoint_and_key_with_format_args() -> None:
+    """第三方 `%s` 日志必须在 handler 写文件前同时清除 endpoint 与 key。"""
+
+    endpoint = "https://private-runtime.example/v1"
+    api_key = "secret-runtime-key"
+    record = logging.LogRecord(
+        name="httpx",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="HTTP Request: POST %s key=%s",
+        args=(endpoint, api_key),
+        exc_info=None,
+    )
+
+    assert _RuntimeSecretRedactionFilter(endpoint, api_key).filter(record) is True
+    message = record.getMessage()
+    assert endpoint not in message
+    assert api_key not in message
+    assert message.count("<redacted-runtime-value>") == 2
+
+
+def test_letta_worker_installs_log_redaction_before_server_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """import 完成后必须先装脱敏，再构造可能发起产品请求的 SyncServer。"""
+
+    order: list[str] = []
+
+    class _AsyncManager:
+        """模拟 SyncServer 暴露的最小异步管理器。"""
+
+        async def create_default_organization_async(self) -> None:
+            """模拟默认组织初始化。"""
+
+        async def create_default_actor_async(self) -> SimpleNamespace:
+            """返回最小 actor。"""
+
+            return SimpleNamespace(id="actor-1")
+
+        async def upsert_base_tools_async(self, *, actor: Any) -> None:
+            """模拟工具初始化。"""
+
+            assert actor.id == "actor-1"
+
+    class _SyncServer:
+        """模拟会在构造阶段触发产品日志的同步服务。"""
+
+        def __init__(self, *, init_with_default_org_and_user: bool) -> None:
+            """记录构造顺序并暴露三个异步 manager。"""
+
+            assert init_with_default_org_and_user is False
+            order.append("server")
+            manager = _AsyncManager()
+            self.organization_manager = manager
+            self.user_manager = manager
+            self.tool_manager = manager
+
+    letta_module = ModuleType("letta")
+    server_package = ModuleType("letta.server")
+    server_module = ModuleType("letta.server.server")
+    server_module.SyncServer = _SyncServer  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "letta", letta_module)
+    monkeypatch.setitem(sys.modules, "letta.server", server_package)
+    monkeypatch.setitem(sys.modules, "letta.server.server", server_module)
+
+    engine = _WorkerEngine()
+    monkeypatch.setattr(
+        engine,
+        "_install_runtime_log_redaction",
+        lambda: order.append("redaction"),
+    )
+    monkeypatch.setattr(engine, "_install_openai_runtime_patch", lambda: None)
+    payload = {
+        "config": {
+            "llm_model": "deepseek-v4-flash",
+            "model_endpoint": "https://private-runtime.example/v1",
+            "provider": "opencodego",
+            "context_window": 128000,
+            "max_tokens": 4096,
+            "temperature": 0.0,
+            "max_steps": 50,
+            "timeout_seconds": 60.0,
+            "max_retries": 2,
+            "human_block_limit": 10000,
+            "summary_block_limit": 1000,
+            "runtime_tag": "mb-runtime:test",
+        }
+    }
+
+    result = asyncio.run(engine.initialize(payload))
+
+    assert result == {"status": "ready", "actor_id": "actor-1"}
+    assert order == ["redaction", "server"]
 
 
 def test_letta_worker_opencodego_transport_disables_thinking_without_mutation() -> None:

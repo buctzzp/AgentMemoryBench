@@ -96,9 +96,7 @@ outputs/failed-smoke-attempts/letta-locomo-v1-r1-missing-run-lifecycle-20260809/
 subject/agent/run 创建并抵达真实 OpenAI-compatible endpoint。服务端返回 HTTP 403
 `RegionError`：该 workspace 尚未显式 opt in China-hosted model。服务端给出的用户动作入口为：
 
-```text
-https://opencode.ai/workspace/wrk_01KX5T6KCZ06G534WENSB656KV/go
-```
+用户账户侧的 OpenCodeGo workspace model opt-in 页面（私有 workspace 链接不落仓库）。
 
 这是账户条款/地域选择，必须由用户本人完成；架构师不代点、不更换用户已裁定的 smoke
 provider/model，也不靠无限 retry 消耗预算。失败资产保留在：
