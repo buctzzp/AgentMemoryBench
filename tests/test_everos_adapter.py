@@ -30,6 +30,7 @@ from memory_benchmark.methods.everos_adapter import (
     _parse_timestamp_ms,
     build_everos_source_identity,
     clean_everos_conversation_state,
+    validate_everos_variant,
 )
 
 
@@ -130,10 +131,12 @@ def _config(**overrides: Any) -> EverOSConfig:
         "add_batch_size": 25,
         "embedding_model": "Qwen/Qwen3-Embedding-4B",
         "embedding_dimension": 1024,
+        "embedding_provider": "deepinfra-openai-compatible",
         "embedding_credential_env": "EVEROS_DEEPINFRA_API_KEY",
         "rerank_provider": "deepinfra",
         "rerank_model": "Qwen/Qwen3-Reranker-4B",
         "rerank_credential_env": "EVEROS_DEEPINFRA_API_KEY",
+        "rerank_capability_mode": "configured",
         "app_id": "memorybenchmark",
         "project_id": "phase1",
         "worker_request_timeout_seconds": 30.0,
@@ -229,7 +232,7 @@ def _batch(
     events: list[TurnEvent],
     *,
     session_id: str = "s1",
-    session_time: str | None = None,
+    session_time: str | None = "2026-01-01T00:00:00",
 ) -> SessionBatch:
     """把事件包装成一个 production session ingest unit。"""
 
@@ -249,8 +252,17 @@ def _batch(
         ({"add_batch_size": 2}, "add_batch_size=25"),
         ({"embedding_dimension": 768}, "embedding_dimension=1024"),
         ({"embedding_model": "other"}, "Qwen/Qwen3-Embedding-4B"),
+        ({"embedding_provider": "other"}, "embedding_provider"),
+        (
+            {
+                "embedding_provider": "openrouter-openai-compatible",
+                "embedding_credential_env": "EVEROS_DEEPINFRA_API_KEY",
+            },
+            "credential environment",
+        ),
         ({"rerank_provider": "vllm"}, "rerank provider"),
         ({"rerank_model": "other"}, "rerank model"),
+        ({"rerank_capability_mode": "optional"}, "rerank_capability_mode"),
         ({"max_workers": 0}, "positive integer"),
         ({"drain_timeout_seconds": float("nan")}, "positive and finite"),
         ({"app_id": "../escape"}, "PathSafeId"),
@@ -273,10 +285,162 @@ def test_everos_manifest_contains_public_identity_but_no_secret_value() -> None:
 
     assert manifest["adapter_version"] == EVEROS_ADAPTER_VERSION
     assert manifest["consume_granularity"] == "session"
-    assert manifest["source_time_rendered_in_content"] is False
+    assert manifest["missing_timestamp_policy"] == "require-source-time-v1"
+    assert manifest["timestamp_derivation_policy"] == (
+        "locomo-official-30s-only-v1"
+    )
+    assert manifest["input_content_time_prefix"] is False
+    assert manifest["product_episode_time_policy"] == "source-derived-only-v1"
     serialized = json.dumps(manifest, sort_keys=True)
     assert "sk-test" not in serialized
     assert "base_url" not in serialized
+
+
+def test_everos_openrouter_embedding_transport_is_explicit_and_secret_safe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """smoke transport 必须显式注入 OpenRouter endpoint，且不写进公开 manifest。"""
+
+    config = _config(
+        embedding_provider="openrouter-openai-compatible",
+        embedding_credential_env="openrouter_key",
+        rerank_capability_mode="disabled-zero-call",
+    )
+    monkeypatch.setenv("openrouter_key", "private-openrouter-key")
+    monkeypatch.setenv("openrouter_base_url", "https://openrouter.example/v1")
+    runtime = EverOSRuntime(
+        config=config,
+        openai_settings=OpenAISettings(
+            api_key="private-llm-key",
+            base_url="https://llm.example/v1",
+            model="deepseek-v4-flash",
+            provider="opencodego",
+            judge_transport="chat_completions",
+        ),
+        path_settings=_paths(tmp_path),
+        storage_root=tmp_path / "outputs/run/method_state",
+    )
+
+    environment = runtime._worker_environment(tmp_path / "product")
+    manifest = config.to_manifest()
+
+    assert environment["EVEROS_EMBEDDING__API_KEY"] == "private-openrouter-key"
+    assert environment["EVEROS_EMBEDDING__BASE_URL"] == (
+        "https://openrouter.example/v1"
+    )
+    assert "EVEROS_RERANK__API_KEY" not in environment
+    assert manifest["embedding_provider"] == "openrouter-openai-compatible"
+    serialized = json.dumps(manifest, sort_keys=True)
+    assert "private-openrouter-key" not in serialized
+    assert "https://openrouter.example/v1" not in serialized
+
+
+def test_everos_product_root_omits_endpoint_template_and_keeps_ome_config(
+    tmp_path: Path,
+) -> None:
+    """产品根只落 OME 策略，不得复制含 provider endpoint 的 everos.toml。"""
+
+    paths = _paths(tmp_path)
+    everos_root = paths.third_party_methods_root / "EverOS"
+    config_root = everos_root / "src/everos/config"
+    config_root.mkdir(parents=True)
+    (config_root / "default.toml").write_text(
+        '[llm]\nbase_url = "https://must-not-persist.invalid/v1"\n',
+        encoding="utf-8",
+    )
+    ome_payload = b"[strategies.extract_atomic_facts]\nenabled = true\n"
+    (config_root / "default_ome.toml").write_bytes(ome_payload)
+    runtime = EverOSRuntime(
+        config=_config(),
+        openai_settings=OpenAISettings(
+            api_key="private-llm-key",
+            base_url="https://llm.example/v1",
+            model="deepseek-v4-flash",
+            provider="opencodego",
+            judge_transport="chat_completions",
+        ),
+        path_settings=paths,
+        storage_root=tmp_path / "outputs/run/method_state",
+    )
+
+    product_root, marker = runtime._prepare_product_root("run_conv")
+
+    assert marker["adapter_version"] == EVEROS_ADAPTER_VERSION
+    assert not (product_root / "everos.toml").exists()
+    assert (product_root / "ome.toml").read_bytes() == ome_payload
+    serialized_root = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in product_root.iterdir()
+        if path.is_file()
+    )
+    assert "base_url" not in serialized_root
+    assert "must-not-persist.invalid" not in serialized_root
+    assert "private-llm-key" not in serialized_root
+    assert runtime._prepare_product_root("run_conv") == (product_root, marker)
+
+    (product_root / "ome.toml").write_text("drift", encoding="utf-8")
+    with pytest.raises(ConfigurationError, match="config drifted: ome.toml"):
+        runtime._prepare_product_root("run_conv")
+
+
+def test_everos_openrouter_embedding_requires_its_declared_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """OpenRouter transport 缺 endpoint 时必须在 worker 启动前失败。"""
+
+    config = _config(
+        embedding_provider="openrouter-openai-compatible",
+        embedding_credential_env="openrouter_key",
+        rerank_capability_mode="disabled-zero-call",
+    )
+    monkeypatch.setenv("openrouter_key", "private-openrouter-key")
+    monkeypatch.delenv("openrouter_base_url", raising=False)
+    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
+    runtime = EverOSRuntime(
+        config=config,
+        openai_settings=OpenAISettings(
+            api_key="private-llm-key",
+            base_url="https://llm.example/v1",
+            model="deepseek-v4-flash",
+            provider="opencodego",
+            judge_transport="chat_completions",
+        ),
+        path_settings=_paths(tmp_path),
+        storage_root=tmp_path / "outputs/run/method_state",
+    )
+
+    with pytest.raises(ConfigurationError, match="embedding endpoint is missing"):
+        runtime._worker_environment(tmp_path / "product")
+
+
+def test_everos_configured_reranker_requires_credential_before_worker_start(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """official-full 声明 configured 时，不得让缺 key 降级成 optional capability。"""
+
+    config = _config(
+        embedding_provider="openrouter-openai-compatible",
+        embedding_credential_env="openrouter_key",
+    )
+    monkeypatch.setenv("openrouter_key", "private-openrouter-key")
+    monkeypatch.setenv("openrouter_base_url", "https://openrouter.example/v1")
+    monkeypatch.delenv("EVEROS_DEEPINFRA_API_KEY", raising=False)
+    runtime = EverOSRuntime(
+        config=config,
+        openai_settings=OpenAISettings(
+            api_key="private-llm-key",
+            base_url="https://llm.example/v1",
+            model="gpt-4o-mini",
+        ),
+        path_settings=_paths(tmp_path),
+        storage_root=tmp_path / "outputs/run/method_state",
+    )
+
+    with pytest.raises(ConfigurationError, match="configured rerank capability"):
+        runtime._worker_environment(tmp_path / "product")
 
 
 def test_everos_locomo_uses_real_speakers_all_user_owners_caption_and_30s(
@@ -443,10 +607,10 @@ def test_everos_assistant_only_session_gets_one_source_less_structural_anchor(
     }
 
 
-def test_everos_membench_preserves_tail_time_place_and_audits_missing_time(
+def test_everos_membench_preserves_tail_time_place_and_source_time(
     tmp_path: Path,
 ) -> None:
-    """MemBench 原文不删尾部 time/place；noise 缺时只获 operational time。"""
+    """MemBench 原文不删尾部 time/place，typed 字段另传 source time。"""
 
     provider = _provider(tmp_path, benchmark_name="membench")
     original = (
@@ -470,8 +634,9 @@ def test_everos_membench_preserves_tail_time_place_and_audits_missing_time(
         _event(
             role="assistant",
             speaker="assistant",
-            content="noise without source time or place",
+            content="reply without an embedded suffix",
             turn_id="step-2:assistant",
+            turn_time="2024-10-01 08:01",
         ),
     ]
 
@@ -481,14 +646,56 @@ def test_everos_membench_preserves_tail_time_place_and_audits_missing_time(
     assert messages[0]["content"] == original
     assert original.count("2024-10-01 08:00") == 1
     assert messages[0]["timestamp"] == _parse_timestamp_ms("2024-10-01 08:00")
-    assert messages[1]["content"] == "noise without source time or place"
-    assert messages[1]["timestamp"] == messages[0]["timestamp"] + 1
+    assert messages[1]["content"] == "reply without an embedded suffix"
+    assert messages[1]["timestamp"] == _parse_timestamp_ms("2024-10-01 08:01")
     assert result is not None
-    assert result.metadata["operational_timestamp_count"] == 1
+    assert result.metadata["derived_timestamp_count"] == 0
     sidecar = json.loads(provider._sidecar_path("run_conv").read_text())
     source_rows = next(iter(sidecar["sessions"].values()))["source_rows"]
-    assert source_rows[1]["source_timestamp"] is None
-    assert source_rows[1]["timestamp_kind"] == "missing-source-operational"
+    assert [row["timestamp_kind"] for row in source_rows] == [
+        "source-exact",
+        "source-exact",
+    ]
+
+
+def test_everos_missing_source_time_fails_before_runtime_or_product_write(
+    tmp_path: Path,
+) -> None:
+    """产品 prompt 会渲染 timestamp，缺时必须拒绝而非制造伪日期。"""
+
+    provider = _provider(tmp_path, benchmark_name="membench")
+    events = [
+        _event(
+            role="user",
+            speaker="user",
+            content="noise without time",
+            turn_id="step-1:user",
+        ),
+        _event(
+            role="assistant",
+            speaker="assistant",
+            content="more noise without time",
+            turn_id="step-1:assistant",
+        ),
+    ]
+
+    with pytest.raises(ConfigurationError, match="refusing to fabricate time"):
+        provider.ingest(_batch(events, session_time=None))
+
+    assert _FakeRuntime.instances == []
+    assert not provider._sidecar_path("run_conv").exists()
+
+
+def test_everos_variant_gate_rejects_only_membench_100k() -> None:
+    """100K 缺时 variant 必须拒绝，已有 source-time variants 保持可用。"""
+
+    validate_everos_variant("membench", "0_10k")
+    validate_everos_variant("locomo", "default")
+    validate_everos_variant("longmemeval", "S-cleaned")
+    validate_everos_variant("beam", "100k")
+    validate_everos_variant("halumem", "medium")
+    with pytest.raises(ConfigurationError, match="timestamp fabrication is forbidden"):
+        validate_everos_variant("membench", "100k")
 
 
 def test_everos_beam_preserves_canonical_role_order_and_session_time(
@@ -626,16 +833,28 @@ def test_everos_retrieval_formats_episode_and_declares_truthful_evidence(
     assert result.evidence.stable_ranking.status == "valid"
 
 
-def test_everos_formatted_memory_never_renders_operational_product_time(
+def test_everos_formatted_memory_never_renders_derived_product_time(
     tmp_path: Path,
 ) -> None:
-    """缺失/派生 source time 不得借 metadata 重新泄露进 answer context。"""
+    """LoCoMo 官方派生顺序时间不得借 metadata 进入 answer context。"""
 
-    provider = _provider(tmp_path, benchmark_name="membench")
+    provider = _provider(tmp_path, benchmark_name="locomo")
     provider.ingest(
         _batch(
-            [_event(role="user", speaker="user", content="noise", turn_id="t1")],
-            session_time=None,
+            [
+                _event(
+                    role="user",
+                    speaker="Alice",
+                    content="first fact",
+                    turn_id="t1",
+                ),
+                _event(
+                    role="user",
+                    speaker="Bob",
+                    content="second fact",
+                    turn_id="t2",
+                ),
+            ],
         )
     )
     runtime = _FakeRuntime.instances[0]
@@ -790,9 +1009,9 @@ def test_everos_sidecar_rejects_forged_source_lineage_and_count(
         provider._load_sidecar("run_conv")
 
     session["source_rows"][0]["synthetic_anchor"] = False
-    session["operational_timestamp_count"] = 0
+    session["derived_timestamp_count"] = 1
     path.write_text(json.dumps(sidecar), encoding="utf-8")
-    with pytest.raises(ConfigurationError, match="timestamp count"):
+    with pytest.raises(ConfigurationError, match="derived timestamp count"):
         provider._load_sidecar("run_conv")
 
 

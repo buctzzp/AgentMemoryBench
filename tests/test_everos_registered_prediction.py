@@ -19,6 +19,7 @@ from memory_benchmark.cli import run_prediction as run_prediction_module
 from memory_benchmark.config import AnswerLLMSettings, OpenAISettings, load_path_settings
 from memory_benchmark.core import (
     AnswerPromptResult,
+    ConfigurationError,
     Conversation,
     Dataset,
     GoldAnswerInfo,
@@ -227,7 +228,7 @@ def test_everos_registered_prediction_runs_all_five_benchmarks(
     assert manifest["method"]["provenance_granularity"] == "none"
     assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"
     config = manifest["method"]["config"]
-    assert config["adapter_version"] == "everos-product-chat-v1"
+    assert config["adapter_version"] == "everos-product-chat-v6"
     assert config["product_surface"] == (
         "create_app-lifespan+typed-memorize-search-get"
     )
@@ -244,6 +245,53 @@ def test_everos_registered_prediction_runs_all_five_benchmarks(
     assert public_questions[0]["question_id"] == f"{benchmark_name}:q1"
     assert "gold_answers" not in public_questions[0]
     assert "evidence" not in public_questions[0]
+
+
+def test_everos_membench_100k_fails_before_cost_runtime_and_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """缺时 variant 必须在 config、runtime、API 与 output 前拒绝。"""
+
+    _RegisteredEverOS.instances.clear()
+    _RegisteredFakeRuntime.instances.clear()
+    real_paths = load_path_settings(PROJECT_ROOT)
+    test_paths = replace(real_paths, outputs_root=tmp_path / "outputs")
+    monkeypatch.setattr(
+        run_prediction_module,
+        "load_path_settings",
+        lambda project_root: test_paths,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        run_prediction_module,
+        "_confirm_prediction_cost",
+        lambda **_kwargs: pytest.fail("cost confirmation must not be reached"),
+    )
+    monkeypatch.setattr(
+        run_prediction_module,
+        "load_method_profile",
+        lambda **_kwargs: pytest.fail("method config must not be loaded"),
+    )
+
+    with pytest.raises(
+        ConfigurationError,
+        match="timestamp fabrication is forbidden",
+    ):
+        run_prediction_module.run_registered_conversation_qa_prediction(
+            project_root=PROJECT_ROOT,
+            method_name="everos",
+            benchmark_name="membench",
+            profile_name="smoke",
+            variant="100k",
+            run_id="everos-membench-100k-rejected",
+            confirm_api=True,
+            progress_enabled=False,
+        )
+
+    assert _RegisteredEverOS.instances == []
+    assert _RegisteredFakeRuntime.instances == []
+    assert not (tmp_path / "outputs").exists()
 
 
 def test_everos_registered_w2_uses_independent_provider_runtime_and_state_roots(

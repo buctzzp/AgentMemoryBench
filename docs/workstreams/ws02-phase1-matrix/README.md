@@ -13,7 +13,16 @@ created: 2026-07-05
 完成判据：矩阵覆盖表 + 全矩阵成本估算表（ohmygpt 实价）可交给导师讨论
 全量预算。**本 workstream 不做任何全量实验。**
 
-矩阵现状（2026-07-08）：
+## 当前状态（2026-08-14）
+
+- adapter 与真实 smoke 覆盖已由 [ws02.7](../ws02.7-method-track/README.md) 关闭：5 个
+  benchmark × 10 个 method 均已逐家冻结；不适用组合以 N/A/unsupported 留痕。
+- 本父 workstream 仍保持 `in-progress`，只因为“全矩阵成本估算表 + 导师汇报材料”尚未关闭；
+  它不再表示还有 method adapter 或 B11 smoke 待施工。
+- 后续成本 pilot、指标扩展、作者校准或 official-full 必须新立范围并重新获用户预算批准，
+  不从本页下方历史断点自动续烧 API。
+
+以下表格是 **2026-07-08 历史起点快照，不是 current matrix**：
 
 | | LoCoMo | LongMemEval | HaluMem | BEAM | MemBench |
 | --- | --- | --- | --- | --- | --- |

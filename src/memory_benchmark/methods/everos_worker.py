@@ -14,16 +14,17 @@ import math
 import os
 from pathlib import Path
 import sys
-from time import perf_counter_ns
+from time import monotonic, perf_counter_ns
 import traceback
 from typing import Any
 
 
-EVEROS_ADAPTER_VERSION = "everos-product-chat-v1"
-EVEROS_WORKER_SCHEMA_VERSION = "everos-worker-protocol-v1"
+EVEROS_ADAPTER_VERSION = "everos-product-chat-v6"
+EVEROS_WORKER_SCHEMA_VERSION = "everos-worker-protocol-v2"
 EVEROS_PRODUCT_SURFACE = "create_app-lifespan+typed-memorize-search-get"
 EVEROS_ROOT_MARKER = ".memory-benchmark-everos-root.json"
 _TERMINAL_FAILURES = frozenset({"dead_letter", "crashed"})
+_CASCADE_SETTLE_POLL_SECONDS = 0.05
 
 
 def _required_text(value: Any, label: str) -> str:
@@ -372,14 +373,13 @@ class _WorkerEngine:
             raise RuntimeError("EverOS embedding provider has no observable endpoint")
         rerank_capability = rerank_accessor.get_rerank_capability()
         rerank_provider = rerank_capability.provider
-        if rerank_provider is None:
-            raise RuntimeError("EverOS product profile requires rerank capability")
 
         llm_accessor._llm_client = _ObservedLLMClient(llm_client, self)
         client.embeddings = _ObservedEmbeddingsEndpoint(endpoint, self)
-        rerank_accessor._capability = rerank_capability.__class__(
-            provider=_ObservedRerankProvider(rerank_provider, self)
-        )
+        if rerank_provider is not None:
+            rerank_accessor._capability = rerank_capability.__class__(
+                provider=_ObservedRerankProvider(rerank_provider, self)
+            )
 
     def _require_ready(self) -> None:
         """拒绝初始化前或 shutdown 后的业务命令。"""
@@ -733,7 +733,8 @@ class _WorkerEngine:
 
         total_processed = 0
         stable_zero_passes = 0
-        for _ in range(100):
+        cascade_deadline = monotonic() + timeout
+        while True:
             processed = await cascade.sync_once()
             total_processed += processed
             health = await cascade.health()
@@ -756,8 +757,19 @@ class _WorkerEngine:
                     break
             else:
                 stable_zero_passes = 0
-        else:
-            raise TimeoutError("EverOS Cascade did not reach two stable zero passes")
+            remaining = cascade_deadline - monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    "EverOS Cascade did not reach two stable zero passes "
+                    "before deadline"
+                )
+            # ``health.pending`` includes rows already claimed by the product's
+            # background worker.  A fixed tight loop can exhaust its iteration
+            # budget before that task gets another event-loop turn, then tear
+            # down the operation observation buffer while the task is still
+            # issuing model calls.  Yield under the same wall-clock deadline so
+            # completion remains exact without changing Cascade scheduling.
+            await asyncio.sleep(min(_CASCADE_SETTLE_POLL_SECONDS, remaining))
         if not await engine.wait_idle(timeout=timeout):
             raise TimeoutError("EverOS transitive OME work did not reach idle")
         final_ome = await self._assert_ome_terminal(engine)

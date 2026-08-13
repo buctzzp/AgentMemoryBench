@@ -1,8 +1,8 @@
 # EverOS 五 benchmark 安全档案
 
 日期：2026-08-09
-状态：`READY_FOR_B11_REAL_SMOKE_APPROVAL`
-适用实现：`everos-product-chat-v1`
+状态：`FROZEN_WITH_EVEROS_PRODUCT_CHAT_V6`
+适用实现：`everos-product-chat-v6`
 
 ## 0. 使用方式
 
@@ -24,7 +24,7 @@ observability 证据见 [M2 实现记录](everos-m2-adapter-implementation.md)�
 | unit | `SessionBatch`；内部 batch=25，session 末 flush + exact drain |
 | message | 每个 canonical 非空 event 一条 message；不位置重配 |
 | readout | public HYBRID Episode search；多 owner 稳定合并 |
-| source time | turn → 当前 session → None；缺失只生成不可见 operational ms |
+| source time | turn → 当前 session；LoCoMo 允许官方 `+30s` 排序，其他缺失一律 fail-fast |
 | memory | synthesized Episode + atomic facts |
 | isolation | 每 conversation 物理 root；每 provider 独占 Python worker/lifespan |
 | workers | croppable benchmark isolated W1/W2；HaluMem fixed W1 |
@@ -74,12 +74,14 @@ LME turn/session qrel 存在，但当前 Episode 无 lossless source 映射，�
    EverOS 收完整 session，不把两条重新粘回一条，也不为 ThirdAgent 补假 assistant。
 2. 正常 message 尾部已有 `(place: ...; time: ...)`，原 content 原样保留；抽出的时间同时进入
    typed timestamp，但不再拼第二份 header。
-3. 100k noise 没有 place/time，source time 为 None。产品所需正 ms 来自稳定 operational order，
-   sidecar 标记且 answer context 不渲染该时间。
+3. 100k noise 没有 place/time，source time 为 None；EverOS Episode prompt 会把 typed
+   timestamp 写进记忆，任何 transport sentinel 都会成为 answer-visible 伪事实。因此该 variant
+   在 runtime/API/output 前明确拒绝，状态为 unsupported/N/A。
 4. `target_step_id=[]` 和等于 message 长度的 OOB gold 只由 evaluator-private evidence group
    处理，不影响 ingestion 或 smoke 选样。
 
-First/Third、正常/缺时和 W1/W2 都进入 machine plan；Recall 类指标因 Episode synthesis 为 N/A。
+First/Third 的正常 source-time 数据与 W1/W2 进入 machine plan；Recall 类指标因 Episode
+synthesis 为 N/A。100k 由 registry variant gate 关闭，不生成命令。
 
 ## 5. BEAM
 
@@ -106,10 +108,11 @@ history/conversation/question 裁剪。每 session 完整 add+flush+exact drain 
 | extraction | valid candidate | session-filtered public get；不是全库差分猜测 |
 | update | valid candidate | probe query 读取写入后的累计 current state |
 | QA | valid candidate | framework builder 消费同一 public search |
-| memory type | N/A | `Conversation` 是产品 kind，不等于官方三类 memory taxonomy |
+| memory type | valid | 从合法 extraction/update score artifact 按 evaluator-private gold `memory_type` 分组；不要求产品输出 taxonomy |
 
-真实 B11 前只称 candidate；runner fake-product 强反例已证明 session report、update probe 与 QA
-调用顺序，最终分数/usage/内容须从真实 artifact 验货。
+2026-08-13 Medium 真实 B11 已同时产出 extraction/update/QA 与 Event/Persona/Relationship
+memory-type breakdown。旧口径把产品 `Conversation` kind 与 gold-side 聚合标签混淆，现撤回；
+memory-type 不读取 method 自报类型，也不要求 EverOS 模拟 HaluMem taxonomy。
 
 ## 7. Retrieval evidence 与时间
 
@@ -127,13 +130,21 @@ Episode 都不向 answer builder 渲染产品时间。
 
 ## 8. B11 machine plan
 
-机器计划保存在 [everos-smoke-plans-v1.json](everos-smoke-plans-v1.json)。总数 20：LoCoMo 2、
-LongMemEval 4、MemBench 4、BEAM 8、HaluMem 2。9 个 croppable concrete variant 各 W1 与包含
-2 isolation 的 W2；HaluMem 两 variant 只生成 fixed W1。
+2026-08-12 live preflight 将 smoke embedding transport 从缺失 credential 的 DeepInfra 改为
+OpenRouter OpenAI-compatible endpoint；精确请求已返回官方同名
+`Qwen/Qwen3-Embedding-4B`、1024 维与 usage。OpenCodeGo 仍只承担 Chat Completions，official-full
+仍保留 DeepInfra。首轮 B11 又在 MemBench 100K 暴露 operational sentinel 会进入产品时间语义；
+最终裁决不是换一个更大的伪时间，而是取消这条不诚实能力。v6 同时修复 exact drain 的
+event-loop 饥饿与 run-local endpoint template 泄漏，最终 run 全部 fresh，未 resume v1-v5。
+
+机器计划保存在 [everos-smoke-plans-v1.json](everos-smoke-plans-v1.json)。总数 18：LoCoMo 2、
+LongMemEval 4、MemBench `0-10k` 2、BEAM 8、HaluMem 2。8 个 croppable concrete variant各 W1
+与包含 2 isolation 的 W2；HaluMem 两 variant 只生成 fixed W1。MemBench `100k` 由 registry
+variant gate 在任何 API/output 前拒绝。
 
 `predict_argv/evaluate_argv` 全部来自 `plan-smoke` 原始输出，禁止手写修饰。planner 保留所有
-注册 evaluator；N/A 由 runtime evidence/evaluator 写 null/N/A，不从命令暗删。当前计划尚未
-授权执行真实 API。
+注册 evaluator；N/A 由 runtime evidence/evaluator 写 null/N/A，不从命令暗删。18 份 current
+v6 plan 已全部执行并由 [frozen-v1](everos-frozen-v1.md) 开箱冻结。
 
 ## 9. 失效触发器
 
@@ -150,10 +161,10 @@ LongMemEval 4、MemBench 4、BEAM 8、HaluMem 2。9 个 croppable concrete varia
 ## 10. 当前判词
 
 ```text
-LOCOMO_READY_FOR_B11
-LONGMEMEVAL_READY_FOR_B11
-MEMBENCH_READY_FOR_B11
-BEAM_READY_FOR_B11
-HALUMEM_READY_FOR_B11
-EVEROS_NOT_FROZEN_UNTIL_REAL_SMOKE_AND_ARTIFACT_GATE
+LOCOMO_FROZEN_V1
+LONGMEMEVAL_FROZEN_V1
+MEMBENCH_0_10K_FROZEN_V1_AND_100K_UNSUPPORTED
+BEAM_FROZEN_V1
+HALUMEM_FROZEN_V1
+EVEROS_METHOD_FROZEN_V1
 ```

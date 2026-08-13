@@ -279,7 +279,7 @@ Cascade、W2/resume 后仍一一可达，且 merged/reflected episode 自动降 
 | BEAM | gold 是单 message，但产品 Episode 是 cell；先 pending，不为填表强行宣称 turn exact |
 | HaluMem extraction | valid candidate；flush+drain 后 `/get episode` 按 session_id 读 session delta |
 | HaluMem update / QA | valid candidate；读取 current product Episode/search |
-| HaluMem memory_type | N/A candidate；Episode/Profile 不能偷换 Event/Persona/Relationship gold taxonomy |
+| HaluMem memory_type | **superseded by 2026-08-13 B11**；M1 错把产品 kind 当成 evaluator 输入，现行指标由 extraction/update scores 按私有 gold taxonomy 聚合 |
 
 ## 8. Completion、isolation、resume 与观测门
 

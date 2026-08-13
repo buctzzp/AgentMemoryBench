@@ -1,6 +1,6 @@
 # 项目路线图
 
-更新日期：2026-08-12。本文件是唯一方向文档：Phase 1 目标、workstream 索引与
+更新日期：2026-08-14。本文件是唯一方向文档：Phase 1 目标、workstream 索引与
 全局约束。逐任务状态见各 workstream README；2026-06 的历史阶段记录（Phase E-S）
 已归档到 `archive/status/2026-07-04-current-roadmap.md` 与
 `archive/status/2026-07-04-task-ledger.md`。
@@ -21,9 +21,10 @@
 恢复/防 API 空烧兜底工程通过验证；已有 LoCoMo full 结果届时在完成后的 5×10
 架构下用新 run_id 重跑。
 
-当前基线（2026-08-12）：5 个 benchmark adapter 全部 frozen-v1；9 个 method adapter
-（Mem0、MemoryOS、A-Mem、LightMem、SimpleMem、MemOS、Graphiti、Letta/MemGPT、LangMem）均已完成五格真实 smoke
-与 B1-B11。
+当前基线（2026-08-14）：5 个 benchmark adapter 全部 frozen-v1；Phase 1 十家 method
+（Mem0、MemoryOS、A-Mem、LightMem、SimpleMem、MemOS、Graphiti、Letta/MemGPT、LangMem、
+EverOS）均已完成全部可行格的真实 smoke 与 B1-B11；5×10 smoke 矩阵关闭，不可行组合以 N/A/
+unsupported 留痕，不为填格伪造能力。
 LightMem=`method-frozen-v3`，Mem0=`method-frozen-v2`，MemoryOS/A-Mem/SimpleMem=
 `method-frozen-v1`。A-Mem 与 SimpleMem 各完成 11 个正式真实 run；前者检索 evolution 后
 current memory，后者检索合成 MemoryEntry，turn-evidence retrieval metric 均诚实 N/A。
@@ -37,8 +38,8 @@ TOML 字段，效果实验前再裁共同模型或产品默认，当前 smoke �
 仅作产物兼容，eval fork 不得藏进配置名字。Mem0/LightMem/MemoryOS 的 product default、
 generic/eval/build-axis 与 MemoryOS PyPI/ChromaDB 关系已完成审计和架构裁决；truthful track
 identity M0 已经 R1/R2、严格 resume/evaluate 和全量回归关闭。LightMem → Mem0 → MemoryOS →
-A-Mem → SimpleMem → MemOS → Letta/MemGPT → LangMem 已逐家重认证 B1-B11；EverOS 已关闭
-M2 离线门，位于 B11 真实 smoke 队列，不靠历史 frozen 惯性，也不盲目重烧未变资产。
+A-Mem → SimpleMem → MemOS → Letta/MemGPT → LangMem → EverOS 已逐家重认证 B1-B11，
+不靠历史 frozen 惯性，也不盲目重烧未变资产。
 
 MemOS=`method-frozen-v1`：官方 `v2.0.25` typed product handler、LoCoMo 双 namespace、
 async exact terminal 与真实 API usage 观测已闭合；framework W2 因共享进程级
@@ -51,9 +52,10 @@ N/A；Graphiti 不是 Zep hosted。Supermemory 旧 blocked 记录只保留为 so
 Letta/MemGPT 以 legacy V1 0.16.8 + official ai-memory-sdk v0.2.0 产品链完成 11 份 current
 真实 run、17 question 与 artifact/效率/隐私/volume 机器门，冻结为 `method-frozen-v1`。
 LangMem 以 async background manager 产品链完成 20 份真实 run、47 question、全部 croppable
-W1/W2 与 artifact/效率/隐私/state 机器门，冻结为 `method-frozen-v1`。EverOS 已有
-product-faithful adapter、五格 dossier 与机器化 smoke plan；用户已批准使用 OpenCodeGo smoke，
-workspace 区域 opt-in 外部门已解除，现进入真实 B11。旧
+W1/W2 与 artifact/效率/隐私/state 机器门，冻结为 `method-frozen-v1`。EverOS 以 v1.2.3
+official lifespan typed-product 链完成 18 份 fresh v6 run、35 question、全部可行 variant 的
+W1/W2 与 artifact/效率/隐私/state 门，冻结为 `method-frozen-v1`；MemBench 100k 因 source time
+缺失且产品会把 timestamp 写入 Episode，诚实 unsupported。旧
 Letta/Graphiti 403 run 只保留作失败阶段证据，不冒充可 resume smoke。
 效果参数、作者 builder、真实 resume 与 full 成本 pilot 仍待后续。真实 API
 一律继续由用户确认预算、规模与 run_id。首批 25 格完成后已做一次有边界的
@@ -62,7 +64,8 @@ Letta/Graphiti 403 run 只保留作失败阶段证据，不冒充可 resume smok
 [结构归一 M0](workstreams/ws03-architecture-slimming/notes/2026-07-23-structural-normalization-m0-ruling.md)
 已完成 evaluator/prompt/文档的零语义迁移与全量守恒门；MemOS 随后已冻结，
 registry-backed `plan-smoke` preflight 与新 method ledger v1 强制门也已关闭；Graphiti、Letta 与
-LangMem 已完成真实 B11 与冻结对表，下一步执行 EverOS current machine plan。
+LangMem、EverOS 均已完成真实 B11 与冻结对表。ws02.7 method-track 至此关闭；下一步须由用户
+在成本 pilot、指标扩展、作者校准或 official-full 中选择新 workstream，不沿用本线自动烧 API。
 
 ## Workstream 索引
 
@@ -76,7 +79,7 @@ LangMem 已完成真实 B11 与冻结对表，下一步执行 EverOS current mac
 | [ws02.4](workstreams/ws02.4-simplemem/README.md) | simplemem-adapter | accepted | P0 | 历史 T1-T6 已关闭；current text product 的五格重认证与 frozen-v1 见 ws02.7 |
 | [ws02.5](workstreams/ws02.5-method-interface-audit/README.md) | method-interface-audit | done | P0 | 2026-07-09 关闭：5 method 接口审计 + MemoryOS 迁移 + 当时配置归一化；shared embedder 资产保留为 controlled，ws02.7 现审计 product-default 精确身份与迁移/复证面 |
 | [ws02.6](workstreams/ws02.6-first-smoke-hardening/README.md) | first-smoke-hardening | done | P0 | 五 benchmark 全部 frozen-v1 + B6 横向总验收完成（2026-07-12）；method 侧已转 ws02.7 |
-| [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | in-progress | P0 | 9 method frozen；EverOS 离线接入完成，进入真实 B11 |
+| [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | done | P0 | Phase 1 十家 method 均 frozen；5×10 smoke matrix closed |
 | [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | open | P1 | 结构归一 M0 已关闭；legacy/LLM runtime 等 M1 后续有边界推进，不阻塞 MemOS |
 | [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | open | P2 | isolated 进度心跳、第三方 stdout/tqdm 治理 |
 | [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | open | P1 | 全量实验申请材料：成本估算表 + 结果汇总 + 兜底验证清单（依赖 ws02） |

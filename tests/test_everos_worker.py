@@ -207,6 +207,47 @@ def test_exact_drain_accepts_recovered_attempt_and_requires_two_stable_zero_pass
     assert cascade.calls == 3
 
 
+def test_exact_drain_yields_for_product_background_processing_until_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """已被后台 worker claim 的行须获调度机会，不能被固定紧循环误判超时。"""
+
+    _install_run_status_module(monkeypatch)
+
+    class _BackgroundCascade(_Cascade):
+        """首轮把行交给后台 task，只有 event-loop yield 后才完成。"""
+
+        def __init__(self) -> None:
+            """从一个 processing 行开始。"""
+
+            super().__init__([], pending=1)
+            self.release_task: asyncio.Task[None] | None = None
+
+        async def sync_once(self) -> int:
+            """模拟 foreground drain 看见行已被 background claim。"""
+
+            self.calls += 1
+            if self.release_task is None:
+
+                async def _release() -> None:
+                    """等调用者显式 yield 后提交后台完成。"""
+
+                    await asyncio.sleep(0)
+                    self.pending = 0
+
+                self.release_task = asyncio.create_task(_release())
+            return 0
+
+    cascade = _BackgroundCascade()
+    engine = _ready_engine(_Engine([]), cascade)
+
+    result = asyncio.run(engine._exact_drain())
+
+    assert result["cascade_stable_zero_passes"] == 2
+    assert cascade.pending == 0
+    assert cascade.calls >= 3
+
+
 @pytest.mark.parametrize(
     ("rows", "message"),
     [
@@ -475,6 +516,65 @@ def test_install_observers_wraps_rerank_capability_before_search_manager_build(
     assert llm_accessor._llm_client is llm_client  # type: ignore[attr-defined]
     assert embedding_provider._client.embeddings is embedding_endpoint
     assert rerank_accessor._capability.provider is rerank_provider  # type: ignore[attr-defined]
+
+
+def test_install_observers_allows_absent_optional_reranker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HYBRID Episode 主轨零 rerank 时，不得把未调用的 credential 伪造成启动硬门。"""
+
+    @dataclass(frozen=True)
+    class _Capability:
+        """模拟可空 capability。"""
+
+        provider: Any
+
+    module_names = (
+        "everos",
+        "everos.component",
+        "everos.component.embedding",
+        "everos.component.llm",
+        "everos.component.rerank",
+        "everos.service",
+    )
+    packages = {name: ModuleType(name) for name in module_names}
+    for package in packages.values():
+        package.__path__ = []  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, package.__name__, package)
+    embedding_accessor = ModuleType("everos.component.embedding.accessor")
+    embedding_endpoint = SimpleNamespace(name="embeddings")
+    embedding_provider = SimpleNamespace(
+        _client=SimpleNamespace(embeddings=embedding_endpoint)
+    )
+    embedding_accessor.get_embedding_capability = (  # type: ignore[attr-defined]
+        lambda: _Capability(provider=embedding_provider)
+    )
+    llm_accessor = ModuleType("everos.component.llm.client")
+    llm_accessor._llm_client = SimpleNamespace(model="llm")  # type: ignore[attr-defined]
+    rerank_accessor = ModuleType("everos.component.rerank.accessor")
+    rerank_accessor._capability = _Capability(provider=None)  # type: ignore[attr-defined]
+    rerank_accessor.get_rerank_capability = (  # type: ignore[attr-defined]
+        lambda: rerank_accessor._capability  # type: ignore[attr-defined]
+    )
+    search_module = ModuleType("everos.service.search")
+    search_module._manager = None  # type: ignore[attr-defined]
+    for module in (
+        embedding_accessor,
+        llm_accessor,
+        rerank_accessor,
+        search_module,
+    ):
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+
+    engine = _WorkerEngine()
+    engine._install_observers()
+
+    assert isinstance(llm_accessor._llm_client, _ObservedLLMClient)  # type: ignore[attr-defined]
+    assert isinstance(
+        embedding_provider._client.embeddings,
+        _ObservedEmbeddingsEndpoint,
+    )
+    assert rerank_accessor._capability.provider is None  # type: ignore[attr-defined]
 
 
 def test_initialize_enter_failure_preserves_original_error_and_never_calls_exit(

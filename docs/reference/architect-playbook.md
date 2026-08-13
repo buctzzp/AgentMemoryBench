@@ -154,6 +154,10 @@
   若上游回调发生在线程池，先写 provider-owned、线程安全的原始 observation buffer；只有
   exact business-task terminal 后，才由发起线程回放到原 conversation/question scope。
   禁止用 add/pair 数量猜 LLM call，也禁止把后台 scope 全记成 unknown。
+- async completion 的轮询预算必须是**墙钟 deadline + terminal predicate + 显式调度让步**，不能是
+  “快速循环固定 N 次”。后台 worker 已 claim 一条记录时，前台 tight loop 可能在它再次取得
+  event-loop 时间片前耗尽次数，制造假超时；正确门是每轮检查 health/failure/pending，在同一
+  deadline 内 `yield/sleep`，最后要求业务 terminal 与稳定零。EverOS v6 exact drain 是判例。
 - “runner 为每个 worker 构造 provider”不等于“method runtime 真隔离”。必须继续追
   process-global owner、模型/tokenizer/client cache。若真实 W2 暴露竞态，当前 profile
   可诚实判 parallel N/A，并在 CLI 预启动门锁死；不要用一次偶然成功盖过后续一手失败。
@@ -171,6 +175,10 @@
 - secret 负空间要覆盖第三方 runtime 自己的日志和 failed-smoke archive，而不只查 framework
   JSON。应在第三方 logger 构造前安装 handler filter，parent stderr/error 再做第二层脱敏；API
   key、base URL、账户私有 workspace URL 都属于扫描对象。历史失败资产保留前也必须过同一道门。
+- **不要把第三方默认配置机械复制进 run artifact。**即使模板没有 key，也可能固化 provider
+  endpoint、账号域名或未来 secret-rich 字段；先确认产品是否已经从 package 读取 shipped default，
+  只物化运行时真正要求 root-local watch 的配置。验货应扫描 `.env`/upstream 中受保护值的精确值，
+  不能只搜 `base_url` 字面量——benchmark 对话本身可能合法讨论这个字段。EverOS v5→v6 是判例。
 - artifact cardinality 必须由 evaluator contract 决定，不能默认“一题一 score / 一题一 judge”。
   MemBench source summary 会有多行聚合，BEAM 一题也可能同时触发 event-equivalence 与 rubric
   judge；机器门应核 scope/metric/identity 的集合与计数来源，而不是写死直觉中的 1。

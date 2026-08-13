@@ -20,5 +20,5 @@ smoke 与冻结。五家 benchmark 的 raw schema、canonical id、已知异常�
    artifact/效率/隐私/state 与 W1/W2 ownership 机器门通过；见
    [method-frozen-v1](notes/langmem-frozen-v1.md)。
 
-LangMem 当前 ledger 已为 `frozen`。EverOS 的离线施工与真实 B11 仍是独立门，LangMem 的
-通过不替代它。父级 `../README.md` 与 ws02.7 恢复胶囊保存权威动态状态，本页只作支线索引。
+LangMem 当前 ledger 已为 `frozen`；EverOS 也已独立完成真实 B11 并冻结，二者证据互不替代。
+父级 `../README.md` 与 ws02.7 恢复胶囊保存权威动态状态，本页只作 LangMem 支线索引。

@@ -100,6 +100,12 @@
 - **async context 进入/退出**：`__aenter__` 失败后不得调用对应 `__aexit__` 覆盖原异常；只有确认
   enter 成功的 provider 才进入 reverse-order shutdown。多个 shutdown 都要 settle 后聚合上抛，
   不能首错短路留下后续 provider。EverOS v1.2.3 official lifespan 是判例。
+- **async 后台完成门**：不得用固定次数的 tight polling 冒充 completion；必须采用 wall-clock
+  deadline、逐轮 health/failure/pending 判定和 event-loop yield，最终再核 terminal + 稳定零。
+  已被后台 worker claim 的任务若得不到调度机会，会让“循环 100 次”比“等待 5 秒”更不可靠。
+- **root config 与 artifact 边界**：复制官方 scaffold/template 前，逐字段确认其中是否包含 endpoint、
+  workspace URL 或 secret 默认位。产品已从 package 读取的 default 不得重复物化到 output；只复制
+  runtime 明确要求 root-local 的文件，并用 `.env`/upstream 受保护值做精确值负空间扫描。
 
 ### B2. 注入粒度（consume_granularity）
 - method 原生接口支持的注入单元：turn / pair / session(list) / conversation。

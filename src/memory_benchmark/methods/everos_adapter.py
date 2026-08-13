@@ -50,8 +50,8 @@ from memory_benchmark.observability.efficiency import (
 )
 
 
-EVEROS_ADAPTER_VERSION = "everos-product-chat-v1"
-EVEROS_WORKER_SCHEMA_VERSION = "everos-worker-protocol-v1"
+EVEROS_ADAPTER_VERSION = "everos-product-chat-v6"
+EVEROS_WORKER_SCHEMA_VERSION = "everos-worker-protocol-v2"
 EVEROS_METHOD_DIRECTORY = "EverOS"
 EVEROS_UPSTREAM_URL = "https://github.com/EverMind-AI/EverOS.git"
 EVEROS_COMMIT = "48fc9084888bc17100053227284f939a5aca5e91"
@@ -66,7 +66,7 @@ EVEROS_WRAPPER_LOGICAL_PATH = "src/memory_benchmark/methods/everos_adapter.py"
 EVEROS_WORKER_LOGICAL_PATH = "src/memory_benchmark/methods/everos_worker.py"
 EVEROS_BOOTSTRAP_LOGICAL_PATH = "scripts/bootstrap_everos_runtime.sh"
 EVEROS_PATCH_LOGICAL_PATH = "scripts/patches/everos-product-runtime-observability.patch"
-EVEROS_STATE_SCHEMA_VERSION = "everos-conversation-sidecar-v1"
+EVEROS_STATE_SCHEMA_VERSION = "everos-conversation-sidecar-v2"
 EVEROS_ROOT_MARKER = ".memory-benchmark-everos-root.json"
 EVEROS_SOURCE_MODE = "vendored-v1.2.3-plus-observability-patch"
 EVEROS_SOURCE_FILES = (
@@ -85,13 +85,17 @@ EVEROS_SOURCE_FILES = (
     "src/everos/config/default_ome.toml",
     "src/everos/core/lifespan/factory.py",
 )
+# ``everos.toml`` is deliberately absent.  EverOS already loads its shipped
+# ``default.toml`` from the vendored package and applies ``EVEROS_*``
+# environment variables above it.  Copying the shipped template into an
+# experiment root would persist provider endpoints under ``outputs/`` and
+# violate the framework secret/base-URL boundary.  OME, by contrast, watches
+# a root-local ``ome.toml`` at runtime, so that one template remains required.
 _PRODUCT_ROOT_TEMPLATES = {
-    "everos.toml": "src/everos/config/default.toml",
     "ome.toml": "src/everos/config/default_ome.toml",
 }
 _ALLOWED_ROLES = frozenset({"user", "assistant"})
 _PATH_SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_.@+-]+$")
-_OPERATIONAL_EPOCH_MS = 946_684_800_000
 _WORKER_PASSTHROUGH_ENV_NAMES = frozenset(
     {
         "CURL_CA_BUNDLE",
@@ -122,10 +126,12 @@ class EverOSConfig:
     add_batch_size: int
     embedding_model: str
     embedding_dimension: int
+    embedding_provider: str
     embedding_credential_env: str
     rerank_provider: str
     rerank_model: str
     rerank_credential_env: str
+    rerank_capability_mode: str
     app_id: str
     project_id: str
     worker_request_timeout_seconds: float
@@ -141,10 +147,12 @@ class EverOSConfig:
             "memory_mode",
             "search_method",
             "embedding_model",
+            "embedding_provider",
             "embedding_credential_env",
             "rerank_provider",
             "rerank_model",
             "rerank_credential_env",
+            "rerank_capability_mode",
             "app_id",
             "project_id",
             "profile_name",
@@ -191,6 +199,23 @@ class EverOSConfig:
             raise ConfigurationError(
                 "EverOS LanceDB schema requires embedding_dimension=1024"
             )
+        if self.embedding_provider not in {
+            "deepinfra-openai-compatible",
+            "openrouter-openai-compatible",
+        }:
+            raise ConfigurationError(
+                "EverOS embedding_provider must name an approved "
+                "OpenAI-compatible Qwen transport"
+            )
+        expected_credential_env = {
+            "deepinfra-openai-compatible": "EVEROS_DEEPINFRA_API_KEY",
+            "openrouter-openai-compatible": "openrouter_key",
+        }[self.embedding_provider]
+        if self.embedding_credential_env != expected_credential_env:
+            raise ConfigurationError(
+                "EverOS embedding credential environment does not match "
+                f"{self.embedding_provider}"
+            )
         if self.rerank_provider != "deepinfra":
             raise ConfigurationError(
                 "EverOS current product rerank provider must be deepinfra"
@@ -198,6 +223,14 @@ class EverOSConfig:
         if self.rerank_model != "Qwen/Qwen3-Reranker-4B":
             raise ConfigurationError(
                 "EverOS current product rerank model identity drifted"
+            )
+        if self.rerank_capability_mode not in {
+            "configured",
+            "disabled-zero-call",
+        }:
+            raise ConfigurationError(
+                "EverOS rerank_capability_mode must be configured or "
+                "disabled-zero-call"
             )
         for field_name in ("app_id", "project_id"):
             value = getattr(self, field_name)
@@ -216,13 +249,14 @@ class EverOSConfig:
             "implementation_identity": EVEROS_IMPLEMENTATION_IDENTITY,
             "product_surface": EVEROS_PRODUCT_SURFACE,
             "consume_granularity": "session",
-            "embedding_provider": "deepinfra-openai-compatible",
             "embedding_distance": "lancedb-l2",
             "answer_builder": "framework_benchmark_unified",
-            "missing_timestamp_policy": "deterministic-operational-v1",
+            "missing_timestamp_policy": "require-source-time-v1",
+            "timestamp_derivation_policy": "locomo-official-30s-only-v1",
             "locomo_role_policy": "all-user-real-speaker-owner",
             "owner_merge_policy": "score-desc-owner-order-product-rank-v1",
-            "source_time_rendered_in_content": False,
+            "input_content_time_prefix": False,
+            "product_episode_time_policy": "source-derived-only-v1",
         }
 
 
@@ -359,8 +393,26 @@ class EverOSRuntime:
                 "PYTHONUNBUFFERED": "1",
             }
         )
+        if self.config.embedding_provider == "openrouter-openai-compatible":
+            embedding_base_url = os.environ.get(
+                "openrouter_base_url"
+            ) or os.environ.get("OPENROUTER_BASE_URL")
+            if (
+                not isinstance(embedding_base_url, str)
+                or not embedding_base_url.strip()
+            ):
+                raise ConfigurationError(
+                    "EverOS OpenRouter embedding endpoint is missing: set "
+                    "openrouter_base_url or OPENROUTER_BASE_URL before running"
+                )
+            environment["EVEROS_EMBEDDING__BASE_URL"] = embedding_base_url
         rerank_key = os.environ.get(self.config.rerank_credential_env)
-        if isinstance(rerank_key, str) and rerank_key.strip():
+        if self.config.rerank_capability_mode == "configured":
+            if not isinstance(rerank_key, str) or not rerank_key.strip():
+                raise ConfigurationError(
+                    "EverOS configured rerank capability is missing credential: "
+                    f"set {self.config.rerank_credential_env} before running"
+                )
             environment["EVEROS_RERANK__API_KEY"] = rerank_key
         return environment
 
@@ -379,42 +431,7 @@ class EverOSRuntime:
             raise ConfigurationError(self._worker_failure_text("exited"))
         if self._worker is not None:
             self._shutdown_active()
-        product_root = self._conversation_root(isolation_key)
-        product_root.mkdir(parents=True, exist_ok=True)
-        root_marker = {
-            "adapter_version": EVEROS_ADAPTER_VERSION,
-            "everos_commit": EVEROS_COMMIT,
-            "isolation_hash": _namespace_id(isolation_key),
-            "schema_version": EVEROS_STATE_SCHEMA_VERSION,
-        }
-        marker_path = product_root / EVEROS_ROOT_MARKER
-        if marker_path.is_file():
-            try:
-                existing_marker = json.loads(marker_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                raise ConfigurationError("EverOS product root marker is invalid") from exc
-            if existing_marker != root_marker:
-                raise ConfigurationError("EverOS product root marker identity mismatch")
-        else:
-            if any(product_root.iterdir()):
-                raise ConfigurationError(
-                    "EverOS refused to initialize a non-empty unmarked product root"
-                )
-            for target_name, source_relative in _PRODUCT_ROOT_TEMPLATES.items():
-                source = self._everos_root() / source_relative
-                if not source.is_file():
-                    raise ConfigurationError(
-                        f"EverOS product root template is missing: {source_relative}"
-                    )
-                _atomic_write_bytes(product_root / target_name, source.read_bytes())
-            _atomic_write_json(marker_path, root_marker)
-        for target_name, source_relative in _PRODUCT_ROOT_TEMPLATES.items():
-            target = product_root / target_name
-            source = self._everos_root() / source_relative
-            if not target.is_file() or target.read_bytes() != source.read_bytes():
-                raise ConfigurationError(
-                    f"EverOS product root config drifted: {target_name}"
-                )
+        product_root, root_marker = self._prepare_product_root(isolation_key)
         worker_path = self.path_settings.project_root / EVEROS_WORKER_LOGICAL_PATH
         if not worker_path.is_file():
             raise ConfigurationError(f"EverOS worker file missing: {worker_path}")
@@ -464,6 +481,50 @@ class EverOSRuntime:
             self._active_isolation_key = None
             self._active_root = None
             raise ConfigurationError("EverOS worker initialize identity mismatch")
+
+    def _prepare_product_root(
+        self,
+        isolation_key: str,
+    ) -> tuple[Path, dict[str, str]]:
+        """物化不含 endpoint/credential 的 conversation 产品根目录。"""
+
+        product_root = self._conversation_root(isolation_key)
+        product_root.mkdir(parents=True, exist_ok=True)
+        root_marker = {
+            "adapter_version": EVEROS_ADAPTER_VERSION,
+            "everos_commit": EVEROS_COMMIT,
+            "isolation_hash": _namespace_id(isolation_key),
+            "schema_version": EVEROS_STATE_SCHEMA_VERSION,
+        }
+        marker_path = product_root / EVEROS_ROOT_MARKER
+        if marker_path.is_file():
+            try:
+                existing_marker = json.loads(marker_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ConfigurationError("EverOS product root marker is invalid") from exc
+            if existing_marker != root_marker:
+                raise ConfigurationError("EverOS product root marker identity mismatch")
+        else:
+            if any(product_root.iterdir()):
+                raise ConfigurationError(
+                    "EverOS refused to initialize a non-empty unmarked product root"
+                )
+            for target_name, source_relative in _PRODUCT_ROOT_TEMPLATES.items():
+                source = self._everos_root() / source_relative
+                if not source.is_file():
+                    raise ConfigurationError(
+                        f"EverOS product root template is missing: {source_relative}"
+                    )
+                _atomic_write_bytes(product_root / target_name, source.read_bytes())
+            _atomic_write_json(marker_path, root_marker)
+        for target_name, source_relative in _PRODUCT_ROOT_TEMPLATES.items():
+            target = product_root / target_name
+            source = self._everos_root() / source_relative
+            if not target.is_file() or target.read_bytes() != source.read_bytes():
+                raise ConfigurationError(
+                    f"EverOS product root config drifted: {target_name}"
+                )
+        return product_root, root_marker
 
     def _drain_worker_stderr(self) -> None:
         """持续排空并脱敏保存 worker stderr 尾部。"""
@@ -854,8 +915,8 @@ class EverOS(MemoryProvider):
                     "synthetic_owner_anchor_count": audit[
                         "synthetic_owner_anchor_count"
                     ],
-                    "operational_timestamp_count": audit[
-                        "operational_timestamp_count"
+                    "derived_timestamp_count": audit[
+                        "derived_timestamp_count"
                     ],
                 },
             )
@@ -900,8 +961,8 @@ class EverOS(MemoryProvider):
                 "synthetic_owner_anchor_count": audit[
                     "synthetic_owner_anchor_count"
                 ],
-                "operational_timestamp_count": audit[
-                    "operational_timestamp_count"
+                "derived_timestamp_count": audit[
+                    "derived_timestamp_count"
                 ],
                 "exact_drain": _required_bool(result.get("exact_drain"), "exact_drain"),
             },
@@ -916,7 +977,7 @@ class EverOS(MemoryProvider):
         locomo = self.benchmark_name == "locomo"
         conversation_owner = _product_owner_id(unit.isolation_key, "user")
         assistant_sender = _product_owner_id(unit.isolation_key, "assistant")
-        timestamp_rows = _operational_timestamps(
+        timestamp_rows = _product_timestamps(
             unit.events,
             session_time=unit.session_time,
             locomo_official_sequence=locomo,
@@ -1004,12 +1065,11 @@ class EverOS(MemoryProvider):
             {
                 "source_rows": source_rows,
                 "synthetic_owner_anchor_count": synthetic_anchor_count,
-                "operational_timestamp_count": sum(
+                "derived_timestamp_count": sum(
                     row["timestamp_kind"] != "source-exact" for row in source_rows
                 ),
             },
         )
-
     def end_session(self, ref: SessionRef) -> SessionMemoryReport | None:
         """HaluMem 只返回当前 session 经 public get 可见的 Episode。"""
 
@@ -1252,6 +1312,18 @@ class EverOS(MemoryProvider):
         _atomic_write_json(self._sidecar_path(isolation_key), normalized)
 
 
+def validate_everos_variant(benchmark_name: str, variant: str) -> None:
+    """在 output/runtime/API 前拒绝无法诚实表达的 MemBench 100K。"""
+
+    if benchmark_name == "membench" and variant == "100k":
+        raise ConfigurationError(
+            "EverOS does not support MemBench variant '100k': official noise "
+            "turns may lack source timestamps, while the typed product API "
+            "requires milliseconds and its Episode prompt renders them into "
+            "answer-visible memory; timestamp fabrication is forbidden"
+        )
+
+
 def clean_everos_conversation_state(
     *,
     provider: EverOS,
@@ -1393,17 +1465,19 @@ def _images_from_event(event: Any) -> list[ImageRef]:
     ]
 
 
-def _operational_timestamps(
+def _product_timestamps(
     events: tuple[Any, ...],
     *,
     session_time: str | None,
     locomo_official_sequence: bool,
 ) -> list[dict[str, Any]]:
-    """把 source time 转为 Unix ms；缺失时只制造可审计的排序时间。
+    """把 source time 转为 Unix ms；缺失 source time 时拒绝产品调用。
 
     LoCoMo current official harness 在 session source time 上按 utterance 加 30 秒；
     主轨沿用这个产品输入姿势，但 sidecar 仍把每条 source time 记为原 session time，
-    不把派生秒数宣称成数据集事实。
+    不把派生秒数宣称成数据集事实。除此之外不制造时间：EverOS v1.2.3 的 typed
+    API 虽然只要求正毫秒值，但 bundled Episode prompt 会把每条消息时间强制写入
+    生成记忆；transport sentinel 因此会变成 answer-visible 的伪事实。
     """
 
     source_values: list[str | None] = []
@@ -1417,7 +1491,11 @@ def _operational_timestamps(
             else (
                 raw_session.strip()
                 if isinstance(raw_session, str) and raw_session.strip()
-                else (session_time.strip() if isinstance(session_time, str) and session_time.strip() else None)
+                else (
+                    session_time.strip()
+                    if isinstance(session_time, str) and session_time.strip()
+                    else None
+                )
             )
         )
         source_values.append(source)
@@ -1434,43 +1512,27 @@ def _operational_timestamps(
             }
             for index in range(len(events))
         ]
-    resolved: list[int] = []
-    for index, current in enumerate(parsed):
-        if current is not None:
-            resolved.append(current)
-            continue
-        previous = next(
-            (parsed[position] for position in range(index - 1, -1, -1) if parsed[position] is not None),
-            None,
+    missing_turn_ids = [
+        str(event.turn_id)
+        for event, current in zip(events, parsed, strict=True)
+        if current is None
+    ]
+    if missing_turn_ids:
+        preview = ", ".join(missing_turn_ids[:3])
+        suffix = "" if len(missing_turn_ids) <= 3 else ", ..."
+        raise ConfigurationError(
+            "EverOS requires source time for every non-LoCoMo turn because its "
+            "Episode prompt renders message timestamps into memory; refusing to "
+            f"fabricate time for turn(s): {preview}{suffix}"
         )
-        following_position = next(
-            (position for position in range(index + 1, len(parsed)) if parsed[position] is not None),
-            None,
-        )
-        following = parsed[following_position] if following_position is not None else None
-        if previous is not None:
-            same_gap_rank = 1
-            for position in range(index - 1, -1, -1):
-                if parsed[position] is not None:
-                    break
-                same_gap_rank += 1
-            candidate = previous + same_gap_rank
-            if following is not None and candidate >= following:
-                candidate = max(1, following - (following_position - index))
-        elif following is not None and following_position is not None:
-            candidate = max(1, following - (following_position - index))
-        else:
-            candidate = _OPERATIONAL_EPOCH_MS + index
-        resolved.append(candidate)
     return [
         {
             "source_timestamp": source_values[index],
-            "product_timestamp_ms": resolved[index],
-            "timestamp_kind": (
-                "source-exact" if parsed[index] is not None else "missing-source-operational"
-            ),
+            "product_timestamp_ms": current,
+            "timestamp_kind": "source-exact",
         }
-        for index in range(len(events))
+        for index, current in enumerate(parsed)
+        if current is not None
     ]
 
 
@@ -1548,7 +1610,7 @@ def _retrieved_item(
     session_record = session_semantics.get(product_session_id)
     source_time_exact = bool(
         isinstance(session_record, dict)
-        and session_record.get("operational_timestamp_count") == 0
+        and session_record.get("derived_timestamp_count") == 0
     )
     sender_ids = raw.get("sender_ids", [])
     if not isinstance(sender_ids, list) or not all(
@@ -1685,7 +1747,7 @@ def _validate_sidecar(value: Any, *, isolation_key: str) -> dict[str, Any]:
     for key, session in sessions.items():
         session_key = _required_text(key, "session key")
         if not isinstance(session, dict) or set(session) != {
-            "operational_timestamp_count",
+            "derived_timestamp_count",
             "owner_ids",
             "product_session_id",
             "source_rows",
@@ -1712,15 +1774,15 @@ def _validate_sidecar(value: Any, *, isolation_key: str) -> dict[str, Any]:
             raise ConfigurationError(
                 "EverOS sidecar session.owner_ids contain duplicates"
             )
-        operational_timestamp_count = _required_non_negative_int(
-            session.get("operational_timestamp_count"),
-            "session.operational_timestamp_count",
+        derived_timestamp_count = _required_non_negative_int(
+            session.get("derived_timestamp_count"),
+            "session.derived_timestamp_count",
         )
-        if operational_timestamp_count != sum(
+        if derived_timestamp_count != sum(
             row["timestamp_kind"] != "source-exact" for row in source_rows
         ):
             raise ConfigurationError(
-                "EverOS sidecar operational timestamp count is inconsistent"
+                "EverOS sidecar derived timestamp count is inconsistent"
             )
         synthetic_owner_anchor_count = _required_non_negative_int(
             session.get("synthetic_owner_anchor_count"),
@@ -1733,7 +1795,7 @@ def _validate_sidecar(value: Any, *, isolation_key: str) -> dict[str, Any]:
                 "EverOS sidecar synthetic owner anchor count is inconsistent"
             )
         normalized_sessions[session_key] = {
-            "operational_timestamp_count": operational_timestamp_count,
+            "derived_timestamp_count": derived_timestamp_count,
             "owner_ids": session_owners,
             "product_session_id": _required_text(
                 session.get("product_session_id"),
@@ -1790,7 +1852,6 @@ def _validate_source_row(value: Any, *, index: int) -> dict[str, Any]:
     allowed_kinds = {
         "source-exact",
         "locomo-official-30s-order",
-        "missing-source-operational",
         "structural-owner-anchor",
     }
     if timestamp_kind not in allowed_kinds:
@@ -1809,12 +1870,7 @@ def _validate_source_row(value: Any, *, index: int) -> dict[str, Any]:
     else:
         if turn_id is None or timestamp_kind == "structural-owner-anchor":
             raise ConfigurationError("EverOS source row lost its public turn identity")
-        if timestamp_kind == "missing-source-operational":
-            if source_timestamp is not None:
-                raise ConfigurationError(
-                    "EverOS missing-source row unexpectedly carries source time"
-                )
-        elif source_timestamp is None:
+        if source_timestamp is None:
             raise ConfigurationError(
                 "EverOS source-derived row is missing its source timestamp"
             )
@@ -1863,9 +1919,9 @@ def _sidecar_after_operation(
         "sessions": {
             **normalized["sessions"],
             _sidecar_session_key(source_session_id): {
-                "operational_timestamp_count": _required_non_negative_int(
-                    source_audit.get("operational_timestamp_count"),
-                    "operational_timestamp_count",
+                "derived_timestamp_count": _required_non_negative_int(
+                    source_audit.get("derived_timestamp_count"),
+                    "derived_timestamp_count",
                 ),
                 "owner_ids": list(owner_ids),
                 "product_session_id": product_session_id,
@@ -2092,4 +2148,5 @@ __all__ = [
     "EverOSRuntime",
     "build_everos_source_identity",
     "clean_everos_conversation_state",
+    "validate_everos_variant",
 ]

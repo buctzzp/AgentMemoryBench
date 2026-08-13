@@ -422,11 +422,29 @@ def test_everos_registration_declares_typed_product_session_contract() -> None:
     ]
     declaration = registration.build_identity_resolver(config.to_manifest())
     assert declaration.implementation_variant == "product"
-    assert declaration.embedding_profile == "product_default_v1"
-    assert declaration.embedding.provider == "deepinfra-openai-compatible"
+    assert declaration.embedding_profile == "product_canonical_required_config_v1"
+    assert declaration.embedding.provider == "openrouter-openai-compatible"
     assert declaration.embedding.model == "Qwen/Qwen3-Embedding-4B"
     assert declaration.embedding.dimension == 1024
     assert declaration.embedding.distance == "lancedb-l2"
+    registration.validate_variant("membench", "0_10k")
+    with pytest.raises(ConfigurationError, match="timestamp fabrication is forbidden"):
+        registration.validate_variant("membench", "100k")
+
+    official = load_method_profile(
+        "everos",
+        "official-full",
+        project_root=load_path_settings().project_root,
+    )
+    official_declaration = registration.build_identity_resolver(
+        official.to_manifest()
+    )
+    assert official_declaration.embedding_profile == "product_default_v1"
+    assert official_declaration.embedding.provider == (
+        "deepinfra-openai-compatible"
+    )
+    assert config.rerank_capability_mode == "disabled-zero-call"
+    assert official.rerank_capability_mode == "configured"
 
 
 def test_clean_retry_hook_uses_failed_worker_state_for_isolated_runs(

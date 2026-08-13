@@ -169,6 +169,36 @@ def test_graphiti_variant_gate_rejects_membench_100k_but_plans_0_10k(
     assert plan.method == "graphiti"
 
 
+def test_everos_variant_gate_rejects_membench_100k_but_plans_0_10k(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """EverOS 不得用 answer-visible 伪时间填补 100K noise turns。"""
+
+    monkeypatch.delenv("OPENCODEGO_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(
+        ConfigurationError,
+        match="timestamp fabrication is forbidden",
+    ):
+        build_smoke_execution_plan(
+            project_root=PROJECT_ROOT,
+            method_name="everos",
+            benchmark_name="membench",
+            variant="100k",
+            run_id="everos-membench-100k-rejected",
+        )
+
+    plan = build_smoke_execution_plan(
+        project_root=PROJECT_ROOT,
+        method_name="everos",
+        benchmark_name="membench",
+        variant="0_10k",
+        run_id="everos-membench-0-10k-ready",
+    )
+    assert plan.prediction_run_id == "everos-membench-0-10k-ready-0-10k"
+    assert plan.method == "everos"
+
+
 def test_operation_level_plan_rejects_parallel_request() -> None:
     """HaluMem operation-level runner 的 W1 门也应在 planner 前置。"""
 

@@ -47,6 +47,7 @@ from .everos_adapter import (
     EverOSConfig,
     build_everos_source_identity,
     clean_everos_conversation_state,
+    validate_everos_variant,
 )
 from .graphiti_adapter import (
     GRAPHITI_BUILD_LLM_RESPONSE_CONTRACT,
@@ -494,19 +495,22 @@ def _clean_everos_failed_ingest_state(
 def _everos_build_identity(
     config_manifest: dict[str, Any],
 ) -> BuildIdentityDeclaration:
-    """解析 EverOS product-default Qwen embedding + LanceDB build。"""
+    """解析 EverOS Qwen embedding、OpenAI-compatible transport 与 LanceDB build。"""
 
     provider = _manifest_text(config_manifest, "embedding_provider")
     model = _manifest_text(config_manifest, "embedding_model")
     dimension = _manifest_dimension(config_manifest, "embedding_dimension")
-    if (
-        provider == "deepinfra-openai-compatible"
-        and model == "Qwen/Qwen3-Embedding-4B"
-        and dimension == 1024
-    ):
+    if provider in {
+        "deepinfra-openai-compatible",
+        "openrouter-openai-compatible",
+    } and model == "Qwen/Qwen3-Embedding-4B" and dimension == 1024:
         return BuildIdentityDeclaration(
             implementation_variant="product",
-            embedding_profile="product_default_v1",
+            embedding_profile=(
+                "product_default_v1"
+                if provider == "deepinfra-openai-compatible"
+                else "product_canonical_required_config_v1"
+            ),
             historical_controlled_build_equivalent_to_current_main=False,
             embedding=EmbeddingIdentity(
                 provider=provider,
@@ -1906,6 +1910,7 @@ _REGISTRATIONS = {
         supports_shared_instance_parallelism=False,
         clean_failed_ingest_state=_clean_everos_failed_ingest_state,
         build_identity_resolver=_everos_build_identity,
+        variant_validator=validate_everos_variant,
     ),
     "graphiti": MethodRegistration(
         name="graphiti",

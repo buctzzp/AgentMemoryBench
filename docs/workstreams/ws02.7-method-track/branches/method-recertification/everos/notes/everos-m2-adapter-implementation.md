@@ -1,8 +1,8 @@
 # EverOS v1.2.3 product-chat adapter M2 实现记录
 
 日期：2026-08-09
-状态：`READY_FOR_B11_REAL_SMOKE_APPROVAL`
-adapter：`everos-product-chat-v1`
+状态：`SUPERSEDED_BY_METHOD_FROZEN_V1`
+adapter：首轮 `everos-product-chat-v1`；冻结实现 `everos-product-chat-v6`
 
 ## 1. 结论
 
@@ -11,8 +11,8 @@ worker；worker 进入官方 `create_app()` lifespan 后，直接调用和 HTTP 
 `memorize/search/get` service。框架没有启动 HTTP host，也没有绕过 boundary、Episode、OME、
 Cascade、SQLite 或 LanceDB。
 
-当前只完成离线 adapter 门，不能标 frozen。真实 build/embedding/rerank/answer/judge、artifact 开箱和
-最终 B11 仍需用户重新批准预算后执行。
+本 note 保留 M2 施工时点事实；真实 B11、v2-v6 勘误与最终边界见
+[frozen-v1](everos-frozen-v1.md)，不得用下文“待运行”历史句覆盖冻结状态。
 
 ## 2. 产品调用图
 
@@ -21,7 +21,8 @@ generic / operation-level runner
   └─ EverOS.prepare()                         只核 source 与独立 runtime
       └─ 首个 conversation 懒启动 EverOSRuntime
           ├─ 每 conversation 一个物理 product root
-          ├─ official everos.toml + ome.toml 模板
+          ├─ vendored shipped default.toml + 环境覆盖（不复制进 output）
+          ├─ root-local official ome.toml 模板
           └─ Python 3.12 JSON-lines worker
               └─ create_app() official lifespan
 
@@ -86,7 +87,7 @@ artifact。embedding/rerank key 使用环境变量名 `EVEROS_DEEPINFRA_API_KEY`
 | --- | --- | --- |
 | LoCoMo | 与 current official harness 一致：两位真实 speaker 都是 `role=user`，各自 sender/owner；主轨检索所有 owner 后稳定合并 | session source time 起点，按 utterance `+30s`；shared caption helper 保留 image，不沿用官方 image-only 丢失 |
 | LongMemEval | canonical user/assistant 原序、完整 session | assistant-first、same-role、singleton/odd tail 原样；纯 assistant session 只加一个空、无 source id 的结构 user owner anchor |
-| MemBench | FirstAgent 拆分后的 child role 与 ThirdAgent user-only 原序 | 原 content 尾部 place/time 不删不重拼；100k noise 缺时只获 operational order time |
+| MemBench | FirstAgent 拆分后的 child role 与 ThirdAgent user-only 原序 | 原 content 尾部 place/time 不删不重拼；100k noise 缺 source time，因产品会把时间写进 Episode 而明确 unsupported |
 | BEAM | 四 variant canonical role/order 原样 | 10M orphan/mismatch 不修 raw、不位置重配；session 边界内使用 source time |
 | HaluMem | 每 session 完整 role/content 一次 flush | public get 只读取该 product session 的 Episode，供 session report |
 
@@ -96,15 +97,14 @@ worker request。
 
 ## 6. 时间语义
 
-产品 DTO 强制正整数 Unix ms，而部分 benchmark 的 source time 合法为 `None`。adapter 将两层
-语义分开：
+产品 DTO 强制正整数 Unix ms，且 bundled Episode prompt 会把时间写进生成记忆。冻结实现因此
+只接受 source-derived time：
 
 1. source time 只按 `turn → 当前 session → None` 读取；不借 question time、兄弟 turn 或墙钟；
-2. 缺失 source time 使用稳定 operational epoch+序号，只为满足产品排序/存储契约；
-3. sidecar 逐 message 保存 source time、product ms 与 `timestamp_kind`；
-4. 只要 Episode 所属 session 含 operational/derived time，或 Episode 已合并到无法回指的
-   `session_id=None`，`RetrievedItem.timestamp=None` 且 `formatted_memory` 不渲染
-   `product_time`；产品原时间只留在审计 metadata。
+2. LoCoMo 按 official harness 从 session source time 为 utterance 派生 `+30s` 顺序；
+3. 其他缺失 source time 在 runtime/API/output 前 fail-fast，不制造 sentinel；
+4. sidecar 逐 message 保存 source time、product ms 与 `timestamp_kind`；LoCoMo 派生时间不在
+   public `timestamp` 中冒充 source fact。
 
 这关闭了一个审读时发现的双通道漏洞：旧实现虽然把公开 `timestamp` 置空，却又从 metadata
 把派生时间写回 answer context；强反例现已锁死。
@@ -116,7 +116,8 @@ worker request。
 1. `OME.wait_idle(timeout)`；
 2. 按 event 聚合所有 run：running、dead-letter、crashed、未恢复 failed 均失败；同 event 的
    failed→success retry 链合法；
-3. `Cascade.sync_once()`，检查 operational health、pending、retryable/permanent failure；
+3. 在同一 wall-clock deadline 内循环 `Cascade.sync_once()`，每轮检查 health、pending、
+   retryable/permanent failure，并显式 yield event loop 让已 claim 的后台 task 获得执行机会；
 4. 连续两次 `processed=0 && pending=0`；
 5. 再次 OME idle/terminal，覆盖 Cascade 产生的传递任务。
 
@@ -141,9 +142,10 @@ source-derived time；zero hit 是 `items=()` + 明确 sentinel，backend/protoc
 | HaluMem extraction | valid candidate：每次 flush 后 public get 只读当前 session Episode |
 | HaluMem update | valid candidate：probe query 读取累计 current product state |
 | HaluMem QA | valid candidate：framework builder 消费同一 public HYBRID readout |
-| HaluMem memory type | N/A：产品 `Conversation` 类型不等于 Event/Persona/Relationship gold taxonomy |
+| HaluMem memory type | **superseded by 2026-08-13 B11**：可从合法 extraction/update scores 按 evaluator-private gold `memory_type` 汇总；产品 `Conversation` kind 不参与分类 |
 
-“candidate”表示离线产品链与 runner 接线已闭合；最终有效性仍由真实 B11 artifact gate确认。
+“candidate”是本 M2 时点的离线判词。2026-08-13 B11 已推翻上表 memory-type N/A：该指标是
+gold-side 分组聚合而非 method 输出 taxonomy；稳定现行口径见 integration 与 dossier。
 
 ## 9. Observability 与并行 ownership
 
@@ -175,16 +177,16 @@ override。HaluMem operation runner 按固定协议保持 W1。
 - source identity：`48fc9084888bc17100053227284f939a5aca5e91`，14 个输入文件，digest
   `c921a23f1d339ef11b43d4dcd5241826967d2b918956c0565c2bef4b2bd5cea9`；
 - 真实 official lifespan 零 API 探针通过，shutdown 多 failure 会 settle 后聚合上抛；
-- 机器计划由 `plan-smoke` 生成并保存在
-  [everos-smoke-plans-v1.json](everos-smoke-plans-v1.json)：9 个 croppable concrete variant
-  各 W1/W2，2 个 HaluMem fixed variant 各 W1，共 20 份。
+- 机器计划最终由 `plan-smoke` 生成并保存在
+  [everos-smoke-plans-v1.json](everos-smoke-plans-v1.json)：8 个 croppable concrete variant
+  各 W1/W2，2 个 HaluMem fixed variant 各 W1，共 18 份；MemBench 100k 不伪造时间。
 
-当前未关闭：
+M2 时点未关闭（均已由 frozen-v1 后续关闭或列为声明缺口）：
 
-1. 真实 build/embedding/rerank/answer/judge API 与 20 份 artifact 尚未运行；
+1. 真实 build/embedding/rerank/answer/judge API 与 current artifact；
 2. 真实 W2 资源峰值、usage 完整性与 multi-owner search 需开箱；
 3. official full、作者 LoCoMo calibration 与效果实验不在本次批准门；
-4. B11 通过前不得写 frozen note。
+4. B11 通过前不得写 frozen note（该门后来已关闭，见冻结证书）。
 
 判词：
 

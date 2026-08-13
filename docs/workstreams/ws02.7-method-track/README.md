@@ -1,7 +1,7 @@
 ---
 id: ws02.7
 parent: ws02
-status: in-progress（9 method frozen；EverOS 进入真实 B11）
+status: done（10 method frozen；5×10 smoke 矩阵闭合）
 created: 2026-07-12
 ---
 # ws02.7 Method Track M0
@@ -27,23 +27,19 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 禁止为恢复全局而全文读取历史账、全部 workstream 或两本经验手册。若本节与 Git
 冲突，以 Git 和最新 ruling 为准。
 
-- **稳定基线（2026-08-12）**：5 benchmark × 9 method 的真实 smoke 与
+- **稳定基线（2026-08-14）**：Phase 1 的 5 benchmark × 10 method 真实 smoke 矩阵与
   B1-B11 已关闭；ws03
   [结构归一 M0](../ws03-architecture-slimming/notes/2026-07-23-structural-normalization-m0-ruling.md)
--  已通过守恒门；Graphiti OSS v0.29.3 与 legacy Letta 0.16.8 产品轨均已完成真实 smoke 和
-  冻结验收；EverOS M2 adapter 为 `ready_for_smoke`。最新无 API 全量为
-  `2145 passed, 3 deselected, 13 warnings, 29 subtests passed in 157.91s`；compileall exit 0。
-- **当前动作**：**LangMem 已冻结为 `method-frozen-v1`；下一家转 EverOS 真实 B11**。
-  压缩恢复只读一份
-  [EverOS M2 adapter checkpoint](branches/method-recertification/everos/notes/everos-m2-adapter-checkpoint.md)；
-  其内再按需要链接 adapter/dossier/ledger，不在恢复时并读。恢复执行必须重新从 current
-  `plan-smoke`/CLI 资格出发；失败 smoke 不允许 resume。LangMem 的 20 run、47 question、47 个
-  namespace 与声明缺口见其
-  [frozen-v1](branches/method-recertification/langmem/notes/langmem-frozen-v1.md)。
-- **其他未冻结状态**：EverOS 的 adapter/plan 已离线闭合，用户已批准使用 `.env`
-  OpenCodeGo smoke，区域 opt-in 外部门也已解除。它仍为 `ready_for_smoke / live-queued`，尚未因
-  “门已解除”自动获得任何 B11 PASS。Supermemory 退出
-  第十格，blocked note 只作 source-gate 历史。
+  已通过守恒门；最后关闭的 EverOS v1.2.3 产品轨完成 18 份 fresh v6 run、35 个
+  question/conversation、全部适用 W1/W2 与 artifact/效率/隐私/state 门。最新全量为
+  `2158 passed, 3 deselected, 13 warnings, 29 subtests passed in 147.45s`；compileall exit 0。
+- **当前动作**：**ws02.7 method track 已完成，不再继续接入或重烧 smoke**。压缩恢复只读
+  [EverOS frozen-v1](branches/method-recertification/everos/notes/everos-frozen-v1.md) 核对最后关闭项；
+  下一阶段由 roadmap 新 workstream 承接成本 pilot、指标扩展、作者校准或 official-full，未获
+  用户预算/范围批准不得自动启动。
+- **声明缺口**：EverOS MemBench 100k 因缺 source time 且产品会把 timestamp 写进 Episode，
+  诚实 unsupported；各家 metric N/A/author/full/resume 缺口仍按 frozen note 保留。Supermemory
+  退出第十格，blocked note 只作 source-gate 历史。
 
 ## 历史恢复记录（冷层；压缩恢复默认不读）
 
@@ -125,7 +121,7 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   [M1 裁决](branches/method-recertification/supermemory/notes/supermemory-current-source-product-m1-ruling.md)
   已锁最新稳定 self-host `server-v0.0.6`：公开 MIT tree 没有实际 server/engine source，release
   只提供 checksum-pinned binary，故不满足 Phase 1 `local OSS` 门；ledger 诚实标
-  `blocked`，不偷换 cloud/binary adapter。当前动作是 EverOS 真实 B11。
+  `blocked`，不偷换 cloud/binary adapter。该历史断点已由 Graphiti 替位及 EverOS 冻结关闭。
 - **恢复当前结构任务只读**：上方 M0 ruling；需要追溯某家 method 才读下表对应 frozen note。
 - **派工边界**：actor 卡由架构师写成自包含 prompt，用户选择跨模型 actor；除非用户明确
   要求，不自动启动 Codex subagent。
@@ -142,12 +138,11 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 | MemOS | `method-frozen-v1` | [frozen-v1](branches/method-recertification/memos/notes/memos-frozen-v1.md) | typed product handlers；LoCoMo 双视角；framework W2 N/A |
 | Letta/MemGPT | `method-frozen-v1` | [frozen-v1](branches/method-recertification/letta/notes/letta-frozen-v1.md) | sleeptime core blocks；W1-only；11 run/17 question；retrieval/extraction N/A |
 | LangMem | `method-frozen-v1` | [frozen-v1](branches/method-recertification/langmem/notes/langmem-frozen-v1.md) | async background manager；20 run/47 question；stable rank valid；evolved provenance N/A；croppable W2 |
-| EverOS | `ready_for_smoke / live-queued` | [M2 checkpoint](branches/method-recertification/everos/notes/everos-m2-adapter-checkpoint.md) | typed product lifespan；Episode semantic provenance N/A；croppable W2；HaluMem fixed W1 |
+| EverOS | `method-frozen-v1` | [frozen-v1](branches/method-recertification/everos/notes/everos-frozen-v1.md) | typed product lifespan；18 run/35 question；Episode provenance N/A；MemBench100k unsupported；croppable W2 |
 | Graphiti | `method-frozen-v1` | [frozen-v1](branches/method-recertification/graphiti/notes/graphiti-frozen-v1.md) | Graphiti OSS 非 Zep；18 run/35 question/88 episode；W1/W2；MemBench 100k N/A |
 
-尚未冻结：EverOS 已完成离线 adapter；共用 OpenCodeGo 区域 opt-in
-已解除，但其真实 smoke/artifact/parallel 门尚未关闭。Supermemory 的 source-blocked ledger/note
-保留为历史判例，不再占 Phase 1 格子。
+尚未冻结：**无**。Supermemory 的 source-blocked ledger/note 保留为历史判例，不再占 Phase 1
+格子；Phase 1 第十格由 Graphiti OSS 占据。
 
 ## 现行长期裁决
 
@@ -190,8 +185,7 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 6. [x] 机器化 smoke 规划/预检；
 7. [x] 新 method 强制接入 ledger；
 8. [x] Letta/LangMem/EverOS/Graphiti 离线 product adapter + machine plan；
-9. [ ] OpenCodeGo workspace 区域 opt-in 已解除；Graphiti、Letta、LangMem 已冻结，继续完成
-   EverOS 真实 B11、artifact gate 与冻结同步。
+9. [x] EverOS 18 份 fresh v6 真实 B11、artifact/parallel/state gate 与冻结同步；5×10 matrix closed。
 
 M0 红线：零真实 API、零 third-party 算法改动、零 metric/prompt/artifact 语义变化；
 旧 import path 在迁移期保留薄兼容层。
@@ -214,5 +208,5 @@ M0 红线：零真实 API、零 third-party 算法改动、零 metric/prompt/art
 - [x] MemOS
 - [x] Letta/MemGPT（`method-frozen-v1`）
 - [x] LangMem（`method-frozen-v1`；20 run/47 question/47 namespace）
-- [ ] EverOS（离线门闭合；真实 B11 queued）
+- [x] EverOS（`method-frozen-v1`；18 run/35 question；MemBench100k N/A）
 - [x] Graphiti OSS（`method-frozen-v1`；18 份 v2 live run + artifact/payload machine gates）

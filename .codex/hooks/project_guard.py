@@ -28,7 +28,10 @@ def _active_capsule_target() -> str:
         matches = []
     if len(matches) == 1:
         return f"docs/{matches[0]}"
-    return "活跃 workstream README（先只用 rg 定位 docs/roadmap.md 的 in-progress P0 行）"
+    return (
+        "当前 workstream README（先只用 rg 定位 docs/roadmap.md 的 in-progress P0 行；"
+        "若当前阶段已关闭，则在 docs/workstreams/ 下只选用户本轮明确指向的一份 README）"
+    )
 
 
 def _recovery_context() -> str:
