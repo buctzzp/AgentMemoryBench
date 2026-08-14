@@ -385,7 +385,9 @@ def test_graphiti_runtime_shutdown_failure_is_permanently_fail_closed(
         path_settings=paths,
         storage_root=tmp_path / "method_state",
     )
-    runtime._worker = SimpleNamespace(poll=lambda: None)  # type: ignore[assignment]
+    runtime._transport._process = SimpleNamespace(  # type: ignore[assignment]
+        poll=lambda: None
+    )
     terminate_calls: list[str] = []
 
     def _failed_shutdown(command: str, payload: dict[str, Any]) -> dict[str, Any]:

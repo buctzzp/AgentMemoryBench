@@ -641,8 +641,27 @@ def test_langmem_source_identity_covers_current_source_and_runtime_files() -> No
         "scripts/requirements/langmem-runtime.txt",
         "src/memory_benchmark/methods/langmem_adapter.py",
         "src/memory_benchmark/methods/langmem_worker.py",
+        "src/memory_benchmark/methods/worker_transport.py",
     }
     assert len(identity["source_sha256"]) == 64
+
+
+def test_langmem_runtime_declares_transport_failure_policy(tmp_path: Path) -> None:
+    """LangMem 协议失败应杀 worker，并保留 journal-authority 失败句。"""
+
+    runtime = LangMemRuntime(
+        config=_config(),
+        openai_settings=OpenAISettings(api_key="test", model="model"),
+        path_settings=_paths(tmp_path),
+        storage_root=tmp_path / "outputs/run/method_state",
+    )
+
+    assert runtime._transport.terminate_on_timeout is True
+    assert runtime._transport.terminate_on_protocol_error is True
+    assert runtime._transport.forget_process_on_terminate is False
+    assert runtime._transport.timeout_detail == (
+        "the operation journal remains the only resume authority"
+    )
 
 
 def test_langmem_manifest_contains_no_secret_or_absolute_state_path() -> None:

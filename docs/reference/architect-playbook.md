@@ -81,6 +81,10 @@
     resolver，要求 builder 存在，并把公开 profile、实际 section、builder、build/embedding 与
     解析配置一起写进 resume identity。不能为了新 envelope 放宽任意未知 key，也不能让旧
     `config_track` 继续选择新 run 行为。
+20. **公共代码也是 method 身份的一部分**：抽共享 transport/helper 后，所有消费它的
+    method source identity 都要纳入该文件哈希；只给 adapter/worker 自身盖章会留下 resume
+    漏洞。抽取时把真正相同的机械协议单源，把 timeout、终止、handle retention、Docker/DB
+    cleanup 等差异做成显式窄 policy，并用强反例逐项锁住，不能拿“DRY”当行为改判。
 
 完整 33 条历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

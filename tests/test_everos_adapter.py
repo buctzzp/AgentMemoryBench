@@ -1172,3 +1172,22 @@ def test_everos_source_identity_covers_patch_worker_runtime_lock_and_templates()
     assert "scripts/patches/everos-product-runtime-observability.patch" in (
         identity["wrapper_hashes"]
     )
+    assert "src/memory_benchmark/methods/worker_transport.py" in (
+        identity["wrapper_hashes"]
+    )
+
+
+def test_everos_runtime_declares_transport_failure_policy(tmp_path: Path) -> None:
+    """EverOS 必须保留 sorted request 与 clean-root 后可重启语义。"""
+
+    runtime = EverOSRuntime(
+        config=_config(),
+        openai_settings=OpenAISettings(api_key="test", model="model"),
+        path_settings=_paths(tmp_path),
+        storage_root=tmp_path / "outputs/run/method_state",
+    )
+
+    assert runtime._transport.request_sort_keys is True
+    assert runtime._transport.terminate_on_timeout is True
+    assert runtime._transport.terminate_on_protocol_error is True
+    assert runtime._transport.forget_process_on_terminate is True

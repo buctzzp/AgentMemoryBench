@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from collections import deque
-from io import StringIO
 import json
 from pathlib import Path
 import subprocess
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -400,22 +397,34 @@ def test_letta_parent_stderr_tail_redacts_key_and_endpoint() -> None:
         provider="opencodego",
         judge_transport="chat_completions",
     )
-    runtime._worker = SimpleNamespace(
-        stderr=StringIO(
-            f"request={endpoint}/chat/completions key={api_key}\n"
-            "ordinary failure context\n"
+    redact = runtime._worker_stderr_redactor()
+    rendered = "\n".join(
+        (
+            redact(f"request={endpoint}/chat/completions key={api_key}"),
+            redact("ordinary failure context"),
         )
     )
-    runtime._stderr_tail = deque(maxlen=80)
-
-    runtime._drain_worker_stderr()
-
-    rendered = "\n".join(runtime._stderr_tail)
     assert api_key not in rendered
     assert endpoint not in rendered
     assert "<redacted-api-key>" in rendered
     assert "<redacted-api-base-url>/chat/completions" in rendered
     assert "ordinary failure context" in rendered
+
+
+def test_letta_runtime_declares_transport_failure_policy(tmp_path: Path) -> None:
+    """Letta timeout/协议错误只报错，最终终止继续归 Docker lifecycle。"""
+
+    runtime = LettaRuntime(
+        config=_config(),
+        openai_settings=OpenAISettings(api_key="test", model="model"),
+        path_settings=_paths(tmp_path),
+        storage_root=tmp_path / "outputs/run/method_state",
+    )
+
+    assert runtime._transport.terminate_on_timeout is False
+    assert runtime._transport.terminate_on_protocol_error is False
+    assert runtime._transport.forget_process_on_terminate is False
+    assert runtime._transport.stderr_tail_char_limit == 2000
 
 
 def test_letta_locomo_payload_preserves_speakers_time_caption_and_sdk_wrapper(
@@ -865,4 +874,5 @@ def test_letta_source_identity_is_pinned_and_excludes_untracked_paper() -> None:
         "scripts/bootstrap_letta_runtime.sh",
         "src/memory_benchmark/methods/letta_adapter.py",
         "src/memory_benchmark/methods/letta_worker.py",
+        "src/memory_benchmark/methods/worker_transport.py",
     }

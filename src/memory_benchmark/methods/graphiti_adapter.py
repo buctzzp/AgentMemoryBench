@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -19,9 +18,6 @@ import math
 import os
 from pathlib import Path
 import re
-import selectors
-import subprocess
-import threading
 from time import perf_counter_ns
 from typing import Any, Protocol
 
@@ -41,6 +37,10 @@ from memory_benchmark.core.provider_protocol import (
     TurnEvent,
 )
 from memory_benchmark.methods.image_text import turn_text_with_images
+from memory_benchmark.methods.worker_transport import (
+    JsonLinesWorkerTransport,
+    WORKER_TRANSPORT_LOGICAL_PATH,
+)
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     EfficiencyStage,
@@ -303,11 +303,17 @@ class GraphitiRuntime:
         self.openai_settings = openai_settings
         self.path_settings = path_settings
         self.storage_root = storage_root
-        self._worker: subprocess.Popen[str] | None = None
-        self._stderr_thread: threading.Thread | None = None
-        self._stderr_tail: deque[str] = deque(maxlen=80)
-        self._request_lock = threading.Lock()
-        self._request_sequence = 0
+        self._transport = JsonLinesWorkerTransport(
+            product_label="Graphiti",
+            request_timeout_seconds=config.worker_request_timeout_seconds,
+            timeout_detail=(
+                "failed-conversation physical cleanup is required before retry"
+            ),
+            stderr_tail_char_limit=3000,
+            terminate_on_timeout=True,
+            terminate_on_protocol_error=True,
+            forget_process_on_terminate=False,
+        )
         self._closed = False
         self._close_failed = False
         self._close_error: BaseException | None = None
@@ -371,8 +377,8 @@ class GraphitiRuntime:
 
         if self._closed:
             raise ConfigurationError("Graphiti runtime is already closed")
-        if self._worker is not None:
-            if self._worker.poll() is None:
+        if self._transport.has_process:
+            if self._transport.is_running:
                 return
             raise ConfigurationError(self._worker_failure_text("exited"))
         worker_path = self.path_settings.project_root / GRAPHITI_WORKER_LOGICAL_PATH
@@ -380,22 +386,13 @@ class GraphitiRuntime:
             raise ConfigurationError(f"Graphiti worker file missing: {worker_path}")
         state_root = (self.storage_root / "graphiti_state").resolve()
         state_root.mkdir(parents=True, exist_ok=True)
-        self._worker = subprocess.Popen(
-            [str(self._worker_python()), str(worker_path)],
+        self._transport.start(
+            argv=[str(self._worker_python()), str(worker_path)],
             cwd=self._graphiti_root(),
             env=self._worker_environment(),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
+            stderr_thread_name=f"graphiti-worker-{id(self)}-stderr",
+            stderr_redactor=self._worker_stderr_redactor(),
         )
-        self._stderr_thread = threading.Thread(
-            target=self._drain_worker_stderr,
-            name=f"graphiti-worker-{id(self)}-stderr",
-            daemon=True,
-        )
-        self._stderr_thread.start()
         try:
             result = self._request(
                 "initialize",
@@ -430,82 +427,21 @@ class GraphitiRuntime:
             self._terminate_worker()
             raise ConfigurationError("Graphiti worker initialize identity mismatch")
 
-    def _drain_worker_stderr(self) -> None:
-        """持续排空并脱敏保存 stderr 尾部。"""
+    def _worker_stderr_redactor(self) -> Callable[[str], str]:
+        """冻结 build key 并返回逐行脱敏器。"""
 
-        worker = self._worker
-        if worker is None or worker.stderr is None:
-            return
-        for line in worker.stderr:
-            self._stderr_tail.append(
-                line.rstrip().replace(self.openai_settings.api_key, "<redacted>")
-            )
+        build_key = self.openai_settings.api_key
+        return lambda line: line.replace(build_key, "<redacted>")
 
     def _request(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """发送串行 JSON-lines 请求并强校验响应身份。"""
+        """经共享 transport 发送请求；Graphiti payload 保持本地显式。"""
 
-        worker = self._worker
-        if worker is None or worker.stdin is None or worker.stdout is None:
-            raise ConfigurationError("Graphiti worker is not running")
-        with self._request_lock:
-            if worker.poll() is not None:
-                raise ConfigurationError(self._worker_failure_text("exited"))
-            self._request_sequence += 1
-            request_id = self._request_sequence
-            worker.stdin.write(
-                json.dumps(
-                    {
-                        "request_id": request_id,
-                        "command": command,
-                        "payload": payload,
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-            worker.stdin.flush()
-            selector = selectors.DefaultSelector()
-            selector.register(worker.stdout, selectors.EVENT_READ)
-            try:
-                ready = selector.select(self.config.worker_request_timeout_seconds)
-            finally:
-                selector.close()
-            if not ready:
-                self._terminate_worker()
-                raise ConfigurationError(
-                    f"Graphiti worker command timed out: {command}; "
-                    "failed-conversation physical cleanup is required before retry"
-                )
-            raw = worker.stdout.readline()
-            if not raw:
-                raise ConfigurationError(self._worker_failure_text("closed stdout"))
-            try:
-                response = json.loads(raw)
-            except json.JSONDecodeError as exc:
-                self._terminate_worker()
-                raise ConfigurationError(
-                    f"Graphiti worker protocol was polluted: {raw[:200]!r}"
-                ) from exc
-            if not isinstance(response, dict) or response.get("request_id") != request_id:
-                self._terminate_worker()
-                raise ConfigurationError("Graphiti worker response identity mismatch")
-            if response.get("ok") is not True:
-                raise ConfigurationError(
-                    "Graphiti worker "
-                    f"{command} failed [{response.get('error_type')}]: "
-                    f"{response.get('error')}"
-                )
-            result = response.get("result")
-            if not isinstance(result, dict):
-                raise ConfigurationError("Graphiti worker result must be an object")
-            return result
+        return self._transport.request(command, payload)
 
     def _worker_failure_text(self, state: str) -> str:
         """构造不含 secret 的 worker 失败摘要。"""
 
-        return f"Graphiti worker {state}; stderr tail: " + "\n".join(
-            self._stderr_tail
-        )[-3000:]
+        return self._transport.failure_text(state)
 
     def ingest(
         self,
@@ -582,7 +518,7 @@ class GraphitiRuntime:
                 "Graphiti runtime is permanently unusable after a prior "
                 "shutdown failure"
             ) from self._close_error
-        worker = self._worker
+        worker = self._transport.process
         if worker is not None:
             try:
                 if worker.poll() is not None:
@@ -594,7 +530,7 @@ class GraphitiRuntime:
                     raise ConfigurationError(
                         "Graphiti worker did not confirm shutdown"
                     )
-                worker.wait(timeout=10)
+                self._transport.wait(timeout=10)
             except BaseException as exc:
                 self._close_failed = True
                 self._close_error = exc
@@ -611,19 +547,7 @@ class GraphitiRuntime:
     def _terminate_worker(self) -> None:
         """尽力终止 worker，不冒充 Graphiti lifecycle 成功。"""
 
-        worker = self._worker
-        if worker is None:
-            return
-        if worker.poll() is None:
-            worker.terminate()
-            try:
-                worker.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                worker.kill()
-                worker.wait(timeout=5)
-        for stream in (worker.stdin, worker.stdout, worker.stderr):
-            if stream is not None and not stream.closed:
-                stream.close()
+        self._transport.terminate()
 
 
 class GraphitiOSS(MemoryProvider):
@@ -1251,6 +1175,7 @@ def build_graphiti_source_identity(
     wrapper_paths = [
         settings.project_root / GRAPHITI_WRAPPER_LOGICAL_PATH,
         settings.project_root / GRAPHITI_WORKER_LOGICAL_PATH,
+        settings.project_root / WORKER_TRANSPORT_LOGICAL_PATH,
         settings.project_root / GRAPHITI_BOOTSTRAP_LOGICAL_PATH,
     ]
     missing_wrappers = [path for path in wrapper_paths if not path.is_file()]

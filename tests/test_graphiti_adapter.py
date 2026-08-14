@@ -15,7 +15,9 @@ from memory_benchmark.methods.graphiti_adapter import (
     GRAPHITI_EMPTY_MEMORY_SENTINEL,
     GraphitiConfig,
     GraphitiOSS,
+    GraphitiRuntime,
     _reference_time,
+    build_graphiti_source_identity,
     clean_graphiti_conversation_state,
     validate_graphiti_variant,
 )
@@ -508,3 +510,28 @@ def test_graphiti_variant_gate_rejects_only_membench_100k() -> None:
         ("halumem", "medium"),
     ):
         validate_graphiti_variant(benchmark, variant)
+
+
+def test_graphiti_source_identity_covers_shared_worker_transport() -> None:
+    """共享 transport 变化必须进入 Graphiti source/resume 身份。"""
+
+    identity = build_graphiti_source_identity()
+
+    assert "src/memory_benchmark/methods/worker_transport.py" in (
+        identity["wrapper_hashes"]
+    )
+
+
+def test_graphiti_runtime_declares_transport_failure_policy(tmp_path: Path) -> None:
+    """Graphiti 协议失败应杀 worker，并保留退出对象阻止隐式重启。"""
+
+    runtime = GraphitiRuntime(
+        config=_config(),
+        openai_settings=OpenAISettings(api_key="test", model="model"),
+        path_settings=_paths(tmp_path),
+        storage_root=tmp_path / "outputs/run/method_state",
+    )
+
+    assert runtime._transport.terminate_on_timeout is True
+    assert runtime._transport.terminate_on_protocol_error is True
+    assert runtime._transport.forget_process_on_terminate is False

@@ -94,3 +94,22 @@ def test_legacy_cli_prediction_module_is_canonical_module_alias() -> None:
         legacy.run_registered_conversation_qa_prediction
         is canonical.run_registered_conversation_qa_prediction
     )
+
+
+def test_isolated_adapters_delegate_main_process_transport() -> None:
+    """四家 adapter 不得重新复制 Popen/selector/stderr-thread transport。"""
+
+    for stem in (
+        "everos_adapter",
+        "graphiti_adapter",
+        "langmem_adapter",
+        "letta_adapter",
+    ):
+        path = PACKAGE / "methods" / f"{stem}.py"
+        source = path.read_text(encoding="utf-8")
+        imports = {module for _, module in _resolved_imports(path)}
+        assert "memory_benchmark.methods.worker_transport" in imports
+        assert "selectors" not in imports
+        assert "threading" not in imports
+        assert "subprocess.Popen" not in source
+        assert "threading.Thread" not in source

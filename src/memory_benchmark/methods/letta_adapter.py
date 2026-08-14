@@ -8,7 +8,6 @@ message wrapper、逐 subject sleeptime agent、terminal wait 与 core-block rea
 
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 import hashlib
@@ -16,10 +15,8 @@ import html
 import json
 import os
 from pathlib import Path
-import selectors
 import shutil
 import subprocess
-import threading
 from time import monotonic, perf_counter_ns, sleep
 from typing import Any, Protocol
 import uuid
@@ -38,6 +35,10 @@ from memory_benchmark.core.provider_protocol import (
     SessionRef,
 )
 from memory_benchmark.methods.image_text import turn_text_with_images
+from memory_benchmark.methods.worker_transport import (
+    JsonLinesWorkerTransport,
+    WORKER_TRANSPORT_LOGICAL_PATH,
+)
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     MeasurementSource,
@@ -261,11 +262,15 @@ class LettaRuntime:
         self._container_name = f"mb-letta-{short}-pg"
         self._volume_name = f"mb-letta-{short}-pgdata"
         self._label_value = self._identity
-        self._worker: subprocess.Popen[str] | None = None
-        self._request_sequence = 0
-        self._request_lock = threading.Lock()
-        self._stderr_tail: deque[str] = deque(maxlen=80)
-        self._stderr_thread: threading.Thread | None = None
+        self._transport = JsonLinesWorkerTransport(
+            product_label="Letta",
+            request_timeout_seconds=config.worker_request_timeout_seconds,
+            timeout_detail=None,
+            stderr_tail_char_limit=2000,
+            terminate_on_timeout=False,
+            terminate_on_protocol_error=False,
+            forget_process_on_terminate=False,
+        )
         self._started = False
         self._closed = False
         self._close_error: BaseException | None = None
@@ -581,96 +586,45 @@ class LettaRuntime:
         """启动 stdio worker 并持续排空 stderr，防止第三方日志堵塞 pipe。"""
 
         worker_path = self.path_settings.project_root / LETTA_WORKER_LOGICAL_PATH
-        self._worker = subprocess.Popen(
-            [str(self._worker_python()), str(worker_path)],
+        self._transport.start(
+            argv=[str(self._worker_python()), str(worker_path)],
             cwd=self._letta_root(),
             env=self._worker_environment(port, include_build_key=True),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
+            stderr_thread_name=f"{self._container_name}-stderr",
+            stderr_redactor=self._worker_stderr_redactor(),
         )
-        self._stderr_thread = threading.Thread(
-            target=self._drain_worker_stderr,
-            name=f"{self._container_name}-stderr",
-            daemon=True,
-        )
-        self._stderr_thread.start()
 
-    def _drain_worker_stderr(self) -> None:
-        """脱敏保存 worker stderr 尾部，仅供错误诊断。"""
+    def _worker_stderr_redactor(self) -> Callable[[str], str]:
+        """冻结 build endpoint/secret 并返回逐行脱敏器。"""
 
-        worker = self._worker
-        if worker is None or worker.stderr is None:
-            return
-        for line in worker.stderr:
-            redacted = line.rstrip().replace(
-                self.openai_settings.api_key,
+        api_key = self.openai_settings.api_key
+        base_url = self.openai_settings.base_url
+
+        def redact(line: str) -> str:
+            """脱敏 Letta worker 可见的 endpoint 与 credential。"""
+
+            redacted = line.replace(
+                api_key,
                 "<redacted-api-key>",
             )
-            if self.openai_settings.base_url:
+            if base_url:
                 redacted = redacted.replace(
-                    self.openai_settings.base_url,
+                    base_url,
                     "<redacted-api-base-url>",
                 )
-            self._stderr_tail.append(redacted)
+            return redacted
+
+        return redact
 
     def _request(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """发送一条串行 JSON-lines 请求，并对超时/协议污染 fail-fast。"""
+        """经共享 transport 发送请求；Letta payload 保持本地显式。"""
 
-        worker = self._worker
-        if worker is None or worker.stdin is None or worker.stdout is None:
-            raise ConfigurationError("Letta worker is not running")
-        with self._request_lock:
-            if worker.poll() is not None:
-                raise ConfigurationError(self._worker_failure_text("exited"))
-            self._request_sequence += 1
-            request_id = self._request_sequence
-            request = {
-                "request_id": request_id,
-                "command": command,
-                "payload": payload,
-            }
-            worker.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
-            worker.stdin.flush()
-            selector = selectors.DefaultSelector()
-            selector.register(worker.stdout, selectors.EVENT_READ)
-            try:
-                ready = selector.select(self.config.worker_request_timeout_seconds)
-            finally:
-                selector.close()
-            if not ready:
-                raise ConfigurationError(
-                    f"Letta worker command timed out: {command}"
-                )
-            raw = worker.stdout.readline()
-            if not raw:
-                raise ConfigurationError(self._worker_failure_text("closed stdout"))
-            try:
-                response = json.loads(raw)
-            except json.JSONDecodeError as exc:
-                raise ConfigurationError(
-                    f"Letta worker protocol was polluted: {raw[:200]!r}"
-                ) from exc
-            if not isinstance(response, dict) or response.get("request_id") != request_id:
-                raise ConfigurationError("Letta worker response identity mismatch")
-            if response.get("ok") is not True:
-                error_type = response.get("error_type")
-                error = response.get("error")
-                raise ConfigurationError(
-                    f"Letta worker {command} failed [{error_type}]: {error}"
-                )
-            result = response.get("result")
-            if not isinstance(result, dict):
-                raise ConfigurationError("Letta worker result must be an object")
-            return result
+        return self._transport.request(command, payload)
 
     def _worker_failure_text(self, state: str) -> str:
         """构造不含 secret 的 worker 失败摘要。"""
 
-        tail = "\n".join(self._stderr_tail)[-2000:]
-        return f"Letta worker {state}; stderr tail: {tail}"
+        return self._transport.failure_text(state)
 
     def ensure_subject(self, subject_id: str) -> dict[str, Any]:
         """经 worker 创建或验证 subject。"""
@@ -724,9 +678,9 @@ class LettaRuntime:
                 "Letta runtime cleanup previously failed and is permanently fail-closed"
             ) from self._close_error
         try:
-            if self._worker is not None and self._worker.poll() is None:
+            if self._transport.is_running:
                 self._request("shutdown", {})
-                self._worker.wait(timeout=10)
+                self._transport.wait(timeout=10)
             self._terminate_worker()
         except BaseException as exc:
             self._close_error = exc
@@ -739,19 +693,7 @@ class LettaRuntime:
     def _terminate_worker(self) -> None:
         """尽力终止 worker，不把该 helper 当作业务成功证明。"""
 
-        worker = self._worker
-        if worker is None:
-            return
-        if worker.poll() is None:
-            worker.terminate()
-            try:
-                worker.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                worker.kill()
-                worker.wait(timeout=5)
-        for stream in (worker.stdin, worker.stdout, worker.stderr):
-            if stream is not None:
-                stream.close()
+        self._transport.terminate()
 
     def _remove_owned_container(self) -> None:
         """只删除带当前 identity label 的容器，绝不触碰 volume。"""
@@ -1547,6 +1489,7 @@ def build_letta_source_identity(
     wrapper_files = [
         settings.project_root / LETTA_WRAPPER_LOGICAL_PATH,
         settings.project_root / LETTA_WORKER_LOGICAL_PATH,
+        settings.project_root / WORKER_TRANSPORT_LOGICAL_PATH,
         settings.project_root / LETTA_BOOTSTRAP_LOGICAL_PATH,
     ]
     missing_wrappers = [path for path in wrapper_files if not path.is_file()]

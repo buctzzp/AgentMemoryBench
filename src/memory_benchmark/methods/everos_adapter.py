@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -19,11 +18,8 @@ import math
 import os
 from pathlib import Path
 import re
-import selectors
 import shutil
-import subprocess
 import tempfile
-import threading
 from time import perf_counter_ns
 from typing import Any, Protocol
 
@@ -43,6 +39,10 @@ from memory_benchmark.core.provider_protocol import (
     SessionRef,
 )
 from memory_benchmark.methods.image_text import turn_text_with_images
+from memory_benchmark.methods.worker_transport import (
+    JsonLinesWorkerTransport,
+    WORKER_TRANSPORT_LOGICAL_PATH,
+)
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     EfficiencyStage,
@@ -319,11 +319,16 @@ class EverOSRuntime:
         self.openai_settings = openai_settings
         self.path_settings = path_settings
         self.storage_root = storage_root
-        self._worker: subprocess.Popen[str] | None = None
-        self._stderr_thread: threading.Thread | None = None
-        self._stderr_tail: deque[str] = deque(maxlen=80)
-        self._request_lock = threading.Lock()
-        self._request_sequence = 0
+        self._transport = JsonLinesWorkerTransport(
+            product_label="EverOS",
+            request_timeout_seconds=config.worker_request_timeout_seconds,
+            timeout_detail="the conversation root must be cleaned before retry",
+            request_sort_keys=True,
+            stderr_tail_char_limit=3000,
+            terminate_on_timeout=True,
+            terminate_on_protocol_error=True,
+            forget_process_on_terminate=True,
+        )
         self._active_isolation_key: str | None = None
         self._active_root: Path | None = None
         self._closed = False
@@ -424,34 +429,25 @@ class EverOSRuntime:
             raise ConfigurationError(
                 "EverOS runtime is permanently unusable after a cleanup failure"
             ) from self._close_error
-        if self._active_isolation_key == isolation_key and self._worker is not None:
-            if self._worker.poll() is None:
+        if self._active_isolation_key == isolation_key and self._transport.has_process:
+            if self._transport.is_running:
                 return
             raise ConfigurationError(self._worker_failure_text("exited"))
-        if self._worker is not None:
+        if self._transport.has_process:
             self._shutdown_active()
         product_root, root_marker = self._prepare_product_root(isolation_key)
         worker_path = self.path_settings.project_root / EVEROS_WORKER_LOGICAL_PATH
         if not worker_path.is_file():
             raise ConfigurationError(f"EverOS worker file missing: {worker_path}")
-        self._worker = subprocess.Popen(
-            [str(self._worker_python()), str(worker_path)],
+        self._transport.start(
+            argv=[str(self._worker_python()), str(worker_path)],
             cwd=self._everos_root(),
             env=self._worker_environment(product_root),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
+            stderr_thread_name=f"everos-worker-{id(self)}-stderr",
+            stderr_redactor=self._worker_stderr_redactor(),
         )
         self._active_isolation_key = isolation_key
         self._active_root = product_root
-        self._stderr_thread = threading.Thread(
-            target=self._drain_worker_stderr,
-            name=f"everos-worker-{id(self)}-stderr",
-            daemon=True,
-        )
-        self._stderr_thread.start()
         try:
             result = self._request(
                 "initialize",
@@ -525,12 +521,9 @@ class EverOSRuntime:
                 )
         return product_root, root_marker
 
-    def _drain_worker_stderr(self) -> None:
-        """持续排空并脱敏保存 worker stderr 尾部。"""
+    def _worker_stderr_redactor(self) -> Callable[[str], str]:
+        """冻结本次 worker 的 secret 集并返回逐行脱敏器。"""
 
-        worker = self._worker
-        if worker is None or worker.stderr is None:
-            return
         secrets = [self.openai_settings.api_key]
         for env_name in (
             self.config.embedding_credential_env,
@@ -539,76 +532,26 @@ class EverOSRuntime:
             value = os.environ.get(env_name)
             if value:
                 secrets.append(value)
-        for line in worker.stderr:
-            redacted = line.rstrip()
+
+        def redact(line: str) -> str:
+            """替换本次 worker 可见的全部 credential。"""
+
+            redacted = line
             for secret in secrets:
                 redacted = redacted.replace(secret, "<redacted>")
-            self._stderr_tail.append(redacted)
+            return redacted
+
+        return redact
 
     def _request(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """发送一条串行 JSON-lines 请求并严格核对响应身份。"""
+        """经共享 transport 发送请求；产品 payload 仍由本 runtime 决定。"""
 
-        worker = self._worker
-        if worker is None or worker.stdin is None or worker.stdout is None:
-            raise ConfigurationError("EverOS worker is not running")
-        with self._request_lock:
-            if worker.poll() is not None:
-                raise ConfigurationError(self._worker_failure_text("exited"))
-            self._request_sequence += 1
-            request_id = self._request_sequence
-            worker.stdin.write(
-                json.dumps(
-                    {
-                        "request_id": request_id,
-                        "command": command,
-                        "payload": payload,
-                    },
-                    ensure_ascii=False,
-                    sort_keys=True,
-                )
-                + "\n"
-            )
-            worker.stdin.flush()
-            selector = selectors.DefaultSelector()
-            selector.register(worker.stdout, selectors.EVENT_READ)
-            try:
-                ready = selector.select(self.config.worker_request_timeout_seconds)
-            finally:
-                selector.close()
-            if not ready:
-                self._terminate_worker()
-                raise ConfigurationError(
-                    f"EverOS worker command timed out: {command}; "
-                    "the conversation root must be cleaned before retry"
-                )
-            raw = worker.stdout.readline()
-            if not raw:
-                raise ConfigurationError(self._worker_failure_text("closed stdout"))
-            try:
-                response = json.loads(raw)
-            except json.JSONDecodeError as exc:
-                self._terminate_worker()
-                raise ConfigurationError(
-                    f"EverOS worker protocol was polluted: {raw[:200]!r}"
-                ) from exc
-            if not isinstance(response, dict) or response.get("request_id") != request_id:
-                self._terminate_worker()
-                raise ConfigurationError("EverOS worker response identity mismatch")
-            if response.get("ok") is not True:
-                raise ConfigurationError(
-                    f"EverOS worker {command} failed "
-                    f"[{response.get('error_type')}]: {response.get('error')}"
-                )
-            result = response.get("result")
-            if not isinstance(result, dict):
-                raise ConfigurationError("EverOS worker result must be an object")
-            return result
+        return self._transport.request(command, payload)
 
     def _worker_failure_text(self, state: str) -> str:
         """构造不含 secret 的 worker 失败摘要。"""
 
-        tail = "\n".join(self._stderr_tail)[-3000:]
-        return f"EverOS worker {state}; stderr tail: {tail}"
+        return self._transport.failure_text(state)
 
     def ingest_session(
         self,
@@ -666,7 +609,7 @@ class EverOSRuntime:
     def delete_conversation(self, *, isolation_key: str) -> dict[str, Any]:
         """先关闭同 root worker，再以 marker+containment 删除唯一物理目录。"""
 
-        if self._active_isolation_key == isolation_key and self._worker is not None:
+        if self._active_isolation_key == isolation_key and self._transport.has_process:
             self._shutdown_active()
         root = self._conversation_root(isolation_key)
         expected = {
@@ -753,7 +696,7 @@ class EverOSRuntime:
                 "EverOS runtime cleanup previously failed and cannot be retried safely"
             ) from self._close_error
         try:
-            if self._worker is not None:
+            if self._transport.has_process:
                 self._shutdown_active()
         except BaseException as exc:
             self._close_error = exc
@@ -763,7 +706,7 @@ class EverOSRuntime:
     def _shutdown_active(self) -> None:
         """要求 worker 经 patched lifespan 完整退出，不把 terminate 冒充成功。"""
 
-        worker = self._worker
+        worker = self._transport.process
         if worker is None:
             return
         if worker.poll() is None:
@@ -773,7 +716,7 @@ class EverOSRuntime:
                     raise ConfigurationError(
                         "EverOS worker did not confirm patched lifespan shutdown"
                     )
-                worker.wait(timeout=15)
+                self._transport.wait(timeout=15)
             except BaseException:
                 self._terminate_worker()
                 raise
@@ -784,20 +727,7 @@ class EverOSRuntime:
     def _terminate_worker(self) -> None:
         """尽力终止子进程并关闭 pipe；只用于资源回收，不提交业务成功。"""
 
-        worker = self._worker
-        if worker is None:
-            return
-        if worker.poll() is None:
-            worker.terminate()
-            try:
-                worker.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                worker.kill()
-                worker.wait(timeout=5)
-        for stream in (worker.stdin, worker.stdout, worker.stderr):
-            if stream is not None and not stream.closed:
-                stream.close()
-        self._worker = None
+        self._transport.terminate()
 
 
 class EverOS(MemoryProvider):
@@ -2079,6 +2009,7 @@ def build_everos_source_identity(
     wrapper_paths = [
         settings.project_root / EVEROS_WRAPPER_LOGICAL_PATH,
         settings.project_root / EVEROS_WORKER_LOGICAL_PATH,
+        settings.project_root / WORKER_TRANSPORT_LOGICAL_PATH,
         settings.project_root / EVEROS_BOOTSTRAP_LOGICAL_PATH,
         settings.project_root / EVEROS_PATCH_LOGICAL_PATH,
     ]

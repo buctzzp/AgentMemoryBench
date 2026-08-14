@@ -70,6 +70,10 @@ method adapter → product runtime boundary
 - 隐私与 namespace 边界。
 
 小型字段校验即使重复，也可能承载不同产品的失败语义；不要为了 DRY 制造一只万能工具箱。
+抽出的公共执行文件必须进入每个消费者的 source/resume identity；否则公共代码已经改变，
+旧 manifest 却仍可能声称同一 method build。共用 transport 只统一 request/response/pipe
+机械层，timeout 后是否终止、是否忘记进程对象、错误提示和最终 cleanup 归属继续用窄 policy
+显式声明，不能用一套默认值吞掉产品状态机。
 
 ### 2.6 生命周期与所有权必须显式
 
@@ -125,7 +129,7 @@ Codex 会话另有一条外层恢复链：active context 是易失 working set�
 | MemOS 有 `memos_lifecycle.py` | 保留；它承载 async task 的精确完成与失败传播，不是普通 helper |
 | `methods/*_native_prompts.py` 很薄 | 它们是旧 import shim；canonical owner 已在 `prompts/author/`，按兼容预算退出 |
 | `prediction.py`、`registry.py` 很大 | 行数只是信号；按 planning/preflight/ingest/answer/parallel 与 registration 变化原因拆 |
-| 多个 adapter 都有 `_request/_terminate_worker` | 先证明协议和失败语义等价，再抽主进程 JSON-lines transport |
+| 多个 adapter 都有 `_request/_terminate_worker` | 共用 `methods/worker_transport.py`；产品 timeout/terminate policy 与 lifecycle 留在 adapter |
 | benchmark 各有 recall evaluator | 纯 Recall 单源；gold view、排除政策与诊断保持薄 policy，不追求零 benchmark 文件 |
 | 旧 `unified/native` 仍在代码里 | 分离“新 run 配置选择”与“旧 artifact 身份回读”；前者迁 TOML profile，后者保留兼容 |
 
