@@ -113,3 +113,80 @@ def test_isolated_adapters_delegate_main_process_transport() -> None:
         assert "threading" not in imports
         assert "subprocess.Popen" not in source
         assert "threading.Thread" not in source
+
+
+def test_prediction_leaf_modules_follow_one_way_dependency_order() -> None:
+    """Prediction 叶模块只能依赖同层以下责任，不得反向引用 façade 或上层。"""
+
+    module_prefix = "memory_benchmark.runners."
+    allowed: dict[str, frozenset[str]] = {
+        "prediction_planning": frozenset(),
+        "prediction_observability": frozenset(),
+        "prediction_preflight": frozenset({"prediction_planning"}),
+        "prediction_ingest": frozenset(
+            {"prediction_planning", "prediction_observability"}
+        ),
+        "prediction_answer": frozenset(
+            {
+                "prediction_planning",
+                "prediction_preflight",
+                "prediction_observability",
+            }
+        ),
+        "prediction_parallel": frozenset(
+            {
+                "prediction_planning",
+                "prediction_preflight",
+                "prediction_ingest",
+                "prediction_answer",
+                "prediction_observability",
+            }
+        ),
+    }
+    for stem, expected in allowed.items():
+        path = PACKAGE / "runners" / f"{stem}.py"
+        actual = {
+            module.removeprefix(module_prefix)
+            for _, module in _resolved_imports(path)
+            if module.startswith(f"{module_prefix}prediction")
+        }
+        assert actual == expected, stem
+
+
+def test_prediction_facade_owns_only_summary_and_orchestration() -> None:
+    """兼容 façade 不得重新吸回叶模块的业务实现。"""
+
+    path = PACKAGE / "runners" / "prediction.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    definitions = {
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+    }
+    assert definitions == {"PredictionRunSummary", "run_predictions"}
+
+
+def test_prediction_facade_preserves_representative_import_identities() -> None:
+    """历史 private import 在迁移期仍须指向唯一叶实现，而非复制 wrapper。"""
+
+    from memory_benchmark.runners import prediction as facade
+    from memory_benchmark.runners import prediction_answer
+    from memory_benchmark.runners import prediction_ingest
+    from memory_benchmark.runners import prediction_parallel
+    from memory_benchmark.runners import prediction_planning
+    from memory_benchmark.runners import prediction_preflight
+
+    assert (
+        facade._build_prediction_work_plan
+        is prediction_planning._build_prediction_work_plan
+    )
+    assert (
+        facade._build_prediction_resume_artifacts
+        is prediction_preflight._build_prediction_resume_artifacts
+    )
+    assert facade._ingest_one is prediction_ingest._ingest_one
+    assert (
+        facade._answer_question_retrieve_first
+        is prediction_answer._answer_question_retrieve_first
+    )
+    assert facade._isolated_worker is prediction_parallel._isolated_worker

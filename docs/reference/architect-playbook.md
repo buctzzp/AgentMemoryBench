@@ -85,6 +85,16 @@
     method source identity 都要纳入该文件哈希；只给 adapter/worker 自身盖章会留下 resume
     漏洞。抽取时把真正相同的机械协议单源，把 timeout、终止、handle retention、Docker/DB
     cleanup 等差异做成显式窄 policy，并用强反例逐项锁住，不能拿“DRY”当行为改判。
+21. **拆编排器要保留组合根、切断反向依赖**：按 planning/preflight/ingest/answer/parallel
+    的变化原因 leaf-first 迁移，叶模块不得 import 原 façade；旧 private import 在迁移期由
+    façade 直接 re-export canonical object，不能复制 wrapper 或第二份实现。每迁一层先跑直接
+    守恒门，最后以 AST 依赖允许集、façade 顶层定义集、compileall 与无 API 全量门收口；达到
+    预定停手线后，不因相邻 registry 仍大就顺手开启下一轮重构。
+22. **活跃主线与 compact 胶囊必须原子切换**：项目 hook 只认 roadmap 中唯一的
+    `in-progress/P0`；关闭旧 workstream 时若尚未选定下一条，不能先留下零个或多个活跃入口。
+    决策等待期可把旧线明确降为“只作决策门、无在途施工”，用户选定后在同一批原子切换状态、
+    capsule 与 roadmap，并复跑 hook contract。否则文档状态看似更“干净”，下一次压缩却会退回
+    模糊兜底，破坏长期记忆自举。
 
 完整 33 条历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

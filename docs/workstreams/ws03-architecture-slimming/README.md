@@ -8,19 +8,19 @@ created: 2026-07-05
 
 ## Codex 恢复胶囊（2026-08-14）
 
-- **当前目标**：十家 method/5×10 smoke 已闭合，暂停 ws05 成本 pilot；执行有停手线的
-  maintainability M1，不调用真实 API。
-- **当前批次**：M1-D prediction decomposition——按 leaf-first 拆 planning/preflight → ingest →
-  answer → parallel；原 `runners.prediction` 保留 façade，不同批修改 registry/metric/prompt/resume。
+- **当前目标**：十家 method/5×10 smoke 已闭合；maintainability M1-A→D 已完成并达到停手线。
+  ws03 仅作为下一主线的决策门保持活跃，不继续自动施工。
+- **当前批次**：等待用户选择下一条研究/工程主线。M1-D 已把
+  planning/preflight/ingest/answer/parallel 抽成单向 leaf，原 `runners.prediction` 只保留
+  兼容 façade 与顶层 orchestration。
 - **当前判据**：只读
-  [十家 method 后的可维护性审计与 M1 裁决](notes/2026-08-14-maintainability-audit-and-m1-ruling.md)
-  §5 M1-D；M1-C 关闭边界见
-  [四家 isolated worker transport 单源化](notes/2026-08-14-isolated-worker-transport-m1c.md)；
+  [M1-D prediction 拆责记录](notes/2026-08-14-prediction-decomposition-m1d.md)；M1 原始停手线见
+  [十家 method 后的可维护性审计与 M1 裁决](notes/2026-08-14-maintainability-audit-and-m1-ruling.md) §7；
   结构灰区查 [`code-structure-principles.md`](../../reference/code-structure-principles.md)。
 - **禁止事项**：不跑成本/official-full/API，不改 metric/prompt/method 算法，不按文件行数
   大搬家，不碰 data/models/outputs/third-party 或用户未跟踪资产。
-- **完成门**：每批定向守恒 + compileall + 无 API 全量回归；M1-A→B→C→D 顺序推进，
-  达到 note §7 后停止 ws03，不无限重构。
+- **完成门**：已满足。最终无 API 全量门 `2228 passed, 3 deselected, 25 warnings,
+  29 subtests passed in 154.30s`；未经用户重新立项，不从长期 backlog 自动开工。
 
 ## 目标
 
@@ -31,6 +31,15 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
 
 ## 当前断点
 
+- 2026-08-14：**M1-D 已关闭，ws03 达到施工停手线**。`prediction.py` 的 planning、
+  preflight、ingest、answer、parallel 与 observability 已按单向依赖抽成六个叶模块；原入口只
+  定义 `PredictionRunSummary` 与 `run_predictions`，历史 private import 同 identity re-export。
+  AST 门锁定叶依赖允许集、façade 所有权和代表性 import identity。施工记录见
+  [M1-D note](notes/2026-08-14-prediction-decomposition-m1d.md)。承重定向集
+  `441 passed, 12 warnings in 9.50s`；compileall exit 0；无 API 全量门
+  `2228 passed, 3 deselected, 25 warnings, 29 subtests passed in 154.30s`。按原裁决不自动扩
+  M1-E/registry 重构；ws03 只作为 compact hook 可定位的唯一 P0 决策门保留，下一动作等待用户
+  选择后再原子切换 workstream。
 - 2026-08-14：**M1-C 已关闭**。EverOS/Graphiti/LangMem/Letta 的 Popen pipe、请求锁/id、
   JSON-lines response、stderr 尾部、selector timeout 与 terminate/kill fallback 已收敛到
   `methods/worker_transport.py`；四家的 worker schema、env、namespace、DB/Docker 与 cleanup
@@ -93,6 +102,7 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
 - [M1-A 依赖方向、freshness 与恢复自举施工记录](notes/2026-08-14-maintainability-m1a-implementation.md)
 - [M1-B TOML profile 与新运行身份迁移记录](notes/2026-08-14-toml-profile-migration-m1b.md)
 - [M1-C 四家 isolated worker transport 单源化记录](notes/2026-08-14-isolated-worker-transport-m1c.md)
+- [M1-D prediction 编排按责任拆分记录](notes/2026-08-14-prediction-decomposition-m1d.md)
 - [稳定代码结构判据](../../reference/code-structure-principles.md)
 - [2026-06-21-registry-capability-simplification-design.md](2026-06-21-registry-capability-simplification-design.md)
 - [2026-06-21-llm-provider-config-design.md](2026-06-21-llm-provider-config-design.md)
@@ -108,7 +118,7 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
   选择；active identity 与 legacy `TrackIdentity v1` readback 分离；旧 artifact 不改写。
 - [x] **M1-C isolated worker transport**：抽四家 adapter 主进程侧 JSON-lines transport；
   产品 worker、环境、Docker/DB 与 cleanup 差异继续显式。
-- [ ] **M1-D prediction decomposition**：leaf-first 拆 planning/preflight、ingest、answer、
+- [x] **M1-D prediction decomposition**：leaf-first 拆 planning/preflight、ingest、answer、
   parallel；原 import 保留 façade，每批行为守恒。达到停手线后返回用户选择，不自动扩 M1-E。
 
 - [ ] 弱化 `MethodCapability` 推理，conversation-QA 兼容性收敛到
