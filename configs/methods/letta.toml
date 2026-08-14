@@ -5,6 +5,7 @@
 # readout 始终为 query-independent attached core blocks。
 
 [smoke]
+answer_builder = "benchmark"
 llm_model = "deepseek-v4-flash"
 context_window = 128000
 max_tokens = 4096
@@ -19,6 +20,7 @@ worker_request_timeout_seconds = 600.0
 max_workers = 1
 
 [official_full]
+answer_builder = "benchmark"
 llm_model = "gpt-4o-mini"
 context_window = 128000
 max_tokens = 4096

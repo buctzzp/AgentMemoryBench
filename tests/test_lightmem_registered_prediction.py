@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from memory_benchmark.benchmark_adapters import (
     BenchmarkLoadRequest,
     BenchmarkRegistration,
@@ -34,13 +36,13 @@ from memory_benchmark.core import (
     TaskFamily,
     Turn,
 )
-from memory_benchmark.evaluators.locomo_judge import LoCoMoJudgeEvaluator
-from memory_benchmark.evaluators.longmemeval_judge import LongMemEvalJudgeEvaluator
+from memory_benchmark.core.exceptions import ConfigurationError
 from memory_benchmark.core.interfaces import BaseMemoryProvider
 from memory_benchmark.methods import registry as method_registry_module
-from memory_benchmark.methods.config_track import resolve_config_track
+from memory_benchmark.prompts.benchmarks.locomo import (
+    build_locomo_unified_answer_prompt,
+)
 from memory_benchmark.readers.answer import AnswerLLMResponse
-from memory_benchmark.runners.evaluation import run_artifact_evaluation
 from memory_benchmark.storage import read_jsonl
 
 
@@ -215,6 +217,8 @@ def _build_fake_benchmark_registration() -> BenchmarkRegistration:
         default_variant="locomo10",
         prepare_run=prepare_run,
         prediction_enabled=True,
+        prompt_track="unified",
+        unified_prompt_builder=build_locomo_unified_answer_prompt,
     )
 
 
@@ -334,66 +338,13 @@ def test_lightmem_registered_prediction_runs_generic_runner_offline(
     assert "gold_answers" not in public_questions[0]
 
 
-class NativeTrackFakeAnswerClient:
-    """记录 native reader 的 settings/messages，零网络返回固定答案。"""
 
-    instances: list["NativeTrackFakeAnswerClient"] = []
-    model_name = "gpt-4o-mini"
-
-    def __init__(
-        self,
-        *,
-        settings: OpenAISettings,
-        answer_settings: AnswerLLMSettings,
-    ) -> None:
-        """保存本次 native sampling 配置。"""
-
-        self.settings = settings
-        self.answer_settings = answer_settings
-        self.messages: list[list[PromptMessage]] = []
-        self.instances.append(self)
-
-    def complete_messages_with_metadata(
-        self,
-        *,
-        messages: list[PromptMessage],
-    ) -> AnswerLLMResponse:
-        """记录 method-owned messages 并返回离线答案。"""
-
-        self.messages.append(list(messages))
-        return AnswerLLMResponse(text="native fake answer")
-
-
-class NativeTrackFakeJudgeClient:
-    """记录 native judge prompt 的 OpenAI-compatible fake client。"""
-
-    def __init__(self, response_text: str) -> None:
-        """初始化固定回复和调用记录。"""
-
-        self.response_text = response_text
-        self.calls: list[dict[str, object]] = []
-        self.chat = SimpleNamespace(
-            completions=SimpleNamespace(create=self._create),
-        )
-
-    def _create(self, **kwargs):
-        """记录 judge 参数并返回最小 chat completion。"""
-
-        self.calls.append(kwargs)
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=self.response_text))],
-            usage=SimpleNamespace(prompt_tokens=5, completion_tokens=1),
-        )
-
-
-def test_lightmem_native_config_track_flows_through_both_official_grids(
+def test_lightmem_native_config_track_is_rejected_for_new_runs(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """LightMem 两个 native 格应贯通 prompt、sampling、judge 和 manifest。"""
+    """旧 native 资产可读，但不能再从 prediction 入口创建新 run。"""
 
-    NativeTrackFakeAnswerClient.instances.clear()
-    FakeLightMemForRegisteredPrediction.instances.clear()
     real_paths = load_path_settings(PROJECT_ROOT)
     test_paths = replace(real_paths, outputs_root=tmp_path / "outputs")
     monkeypatch.setattr(
@@ -404,155 +355,19 @@ def test_lightmem_native_config_track_flows_through_both_official_grids(
     monkeypatch.setattr(
         run_prediction_module,
         "get_benchmark_registration",
-        lambda benchmark_name: _build_fake_benchmark_registration_for(benchmark_name),
-    )
-    monkeypatch.setattr(
-        run_prediction_module,
-        "load_openai_settings",
-        lambda project_root, api_provider=None: OpenAISettings(
-            api_key="sk-test",
-            base_url="https://example.invalid/v1",
-            model="deepseek-v4-flash",
-            provider="opencodego",
-            judge_transport="chat_completions",
-        ),
-    )
-    monkeypatch.setattr(
-        run_prediction_module,
-        "OpenAICompatibleAnswerLLMClient",
-        NativeTrackFakeAnswerClient,
-    )
-    monkeypatch.setattr(
-        method_registry_module,
-        "LightMem",
-        FakeLightMemForRegisteredPrediction,
-    )
-    legacy_registration = replace(
-        method_registry_module.get_method_registration("lightmem"),
-        protocol_version="v2-bridged",
-    )
-    monkeypatch.setattr(
-        run_prediction_module,
-        "get_method_registration",
-        lambda method_name: legacy_registration,
+        lambda benchmark_name: _build_fake_benchmark_registration(),
     )
 
-    for benchmark in ("locomo", "longmemeval"):
-        run_id = f"lightmem-{benchmark}-native"
+    with pytest.raises(ConfigurationError, match="native config-track"):
         run_prediction_module.run_registered_conversation_qa_prediction(
             project_root=PROJECT_ROOT,
             method_name="lightmem",
-            benchmark_name=benchmark,
+            benchmark_name="locomo",
             profile_name="smoke",
             config_track="native",
-            run_id=run_id,
+            run_id="must-not-exist",
             confirm_api=True,
-            smoke_turn_limit=2,
-            smoke_conversation_limit=1,
             enable_efficiency_observability=False,
         )
-        run_dir = tmp_path / "outputs" / run_id
-        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
-        prompts = read_jsonl(
-            run_dir / "artifacts" / "answer_prompts.prediction.jsonl"
-        )
-        reader = next(
-            instance
-            for instance in reversed(NativeTrackFakeAnswerClient.instances)
-            if instance.messages
-        )
 
-        assert manifest["method"]["config_track"] == "native"
-        assert manifest["method"]["prompt_track"] == "native"
-        assert manifest["method"]["consume_granularity"] == (
-            "pair" if benchmark == "longmemeval" else "turn"
-        )
-        expected_max_tokens = 4096 if benchmark == "locomo" else 2000
-        assert (
-            reader.answer_settings.temperature,
-            reader.answer_settings.max_tokens,
-            reader.answer_settings.top_p,
-        ) == (0.0, expected_max_tokens, 0.8)
-        assert manifest["method"]["answer_reader"].get(
-            "provider_compatibility"
-        ) == (
-            "opencodego_locomo_explicit_completion_cap_4096_v3"
-            if benchmark == "locomo"
-            else None
-        )
-        assert prompts[0]["prompt_messages"] == [
-            message.to_dict() for message in reader.messages[0]
-        ]
-
-        bundle = resolve_config_track("lightmem", benchmark, "native")
-        assert bundle is not None
-        judge_client = NativeTrackFakeJudgeClient(
-            '{"label": "CORRECT"}' if benchmark == "locomo" else "yes"
-        )
-        if benchmark == "locomo":
-            judge = LoCoMoJudgeEvaluator(
-                mode="compact",
-                model="gpt-4o-mini",
-                client=judge_client,
-                prompt_template_override=bundle.judge_profile.prompt_template,
-                skipped_categories=bundle.judge_profile.skipped_categories,
-                prompt_profile_override=bundle.judge_profile.profile_name,
-            )
-            assert "LIGHTMEM-LOCOMO-NATIVE-PROMPT" in reader.messages[0][0].content
-        else:
-            judge = LongMemEvalJudgeEvaluator(
-                mode="compact",
-                model="gpt-4o-mini",
-                client=judge_client,
-            )
-            assert "LIGHTMEM-LONGMEMEVAL-NATIVE-MEMORY" in reader.messages[0][1].content
-        summary = run_artifact_evaluation(run_dir, judge, benchmark)
-
-        assert summary.total_questions == 1
-        assert judge_client.calls
-
-
-def _build_fake_benchmark_registration_for(
-    benchmark_name: str,
-) -> BenchmarkRegistration:
-    """构造 LoCoMo/LongMemEval native flow-through 共用的最小注册。"""
-
-    variant = "locomo10" if benchmark_name == "locomo" else "s"
-    dataset = _build_registered_smoke_dataset()
-    dataset.dataset_name = benchmark_name
-    dataset.metadata["variant"] = variant
-    question = dataset.conversations[0].questions[0]
-    if benchmark_name == "longmemeval":
-        question.category = "single-session-user"
-        question.question_time = "2026-01-02"
-
-    def prepare_run(
-        project_root: Path,
-        request: BenchmarkLoadRequest,
-    ) -> PreparedBenchmarkRun:
-        """返回当前 benchmark 的固定离线切片。"""
-
-        return PreparedBenchmarkRun(
-            variant=variant,
-            run_scope=RunScope.SMOKE,
-            dataset=dataset,
-            source_relative_paths=(Path("pyproject.toml"),),
-        )
-
-    return BenchmarkRegistration(
-        name=benchmark_name,
-        adapter_cls=FakeBenchmarkAdapter,
-        task_family=TaskFamily.CONVERSATION_QA,
-        required_capabilities=frozenset(
-            {MethodCapability.CONVERSATION_ADD, MethodCapability.MEMORY_RETRIEVAL}
-        ),
-        variants=(
-            BenchmarkVariantSpec(
-                name=variant,
-                source_relative_paths=(Path("pyproject.toml"),),
-            ),
-        ),
-        default_variant=variant,
-        prepare_run=prepare_run,
-        prediction_enabled=True,
-    )
+    assert not (tmp_path / "outputs").exists()

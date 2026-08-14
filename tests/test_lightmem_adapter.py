@@ -57,7 +57,7 @@ from memory_benchmark.methods.lightmem_adapter import (
     clean_lightmem_conversation_state,
     import_lightmem_classes,
 )
-from memory_benchmark.methods.lightmem_native_prompts import (
+from memory_benchmark.prompts.author.lightmem import (
     build_lightmem_locomo_native_answer_prompt,
     build_lightmem_longmemeval_native_answer_prompt,
 )

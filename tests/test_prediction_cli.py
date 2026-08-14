@@ -43,6 +43,7 @@ from memory_benchmark.methods.config_track import (
     EmbeddingIdentity,
 )
 from memory_benchmark.methods.mem0_adapter import Mem0Config
+from memory_benchmark.methods.registry import ResolvedMethodProfile
 from memory_benchmark.observability.efficiency import (
     ModelDescriptor,
     RetrievalObservationContract,
@@ -97,6 +98,40 @@ def _pending_fake_build_identity(
     )
 
 
+def _resolved_profile(
+    config: Mem0Config,
+    *,
+    profile_name: str,
+) -> ResolvedMethodProfile:
+    """把强类型测试配置包装为新运行所需的 TOML profile envelope。"""
+
+    return ResolvedMethodProfile(
+        public_name=profile_name,
+        section_name=config.profile_name,
+        answer_builder="benchmark",
+        config=config,
+    )
+
+
+def _fake_registered_answer_builder(
+    question: Question,
+    retrieval_result: object,
+) -> AnswerPromptResult:
+    """为 registered service 测试提供最小、可执行的 benchmark builder。"""
+
+    memory = getattr(retrieval_result, "formatted_memory", "")
+    return AnswerPromptResult(
+        question_id=question.question_id,
+        conversation_id=question.conversation_id,
+        prompt_messages=[
+            PromptMessage(
+                role="user",
+                content=f"Question: {question.text}\nMemory: {memory}",
+            )
+        ],
+    )
+
+
 def test_beam_registered_policy_serializes_into_manifest_top_level() -> None:
     """BEAM 声明式 policy 应走通用 manifest 链路，不混入 method identity。"""
 
@@ -107,6 +142,21 @@ def test_beam_registered_policy_serializes_into_manifest_top_level() -> None:
         "resume": registration.resume_policy.to_dict(),
         "gold_evidence_contract_version": "v1",
     }
+
+
+def test_new_run_answer_builder_resolver_rejects_unregistered_or_missing_builder() -> None:
+    """TOML builder identity 不得靠名称猜测，也不能降级成 method-owned prompt。"""
+
+    with pytest.raises(ConfigurationError, match="not registered"):
+        prediction_cli._resolve_registered_answer_builder(
+            answer_builder="mem0_locomo_official",
+            benchmark_registration=SimpleNamespace(name="locomo"),
+        )
+    with pytest.raises(ConfigurationError, match="does not expose"):
+        prediction_cli._resolve_registered_answer_builder(
+            answer_builder="benchmark",
+            benchmark_registration=SimpleNamespace(name="locomo"),
+        )
 
 
 def test_benchmark_policy_manifest_rejects_bogus_gold_evidence_version() -> None:
@@ -591,6 +641,7 @@ def test_registered_prediction_builds_system_from_registry_context(
         return prepared_run
 
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="locomo",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -656,8 +707,11 @@ def test_registered_prediction_builds_system_from_registry_context(
     )
     monkeypatch.setattr(
         prediction_cli,
-        "load_method_profile",
-        lambda **kwargs: config,
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            config,
+            profile_name=kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         prediction_cli,
@@ -780,6 +834,7 @@ def test_registered_operation_level_prediction_passes_clean_failed_ingest_hook(
         run_scope=RunScope.SMOKE,
     )
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_unused_operation_level_prompt_builder,
         name="halumem",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -793,7 +848,6 @@ def test_registered_operation_level_prediction_passes_clean_failed_ingest_hook(
         prepare=lambda project_root, request: prepared_run,
         prediction_enabled=True,
         operation_level=True,
-        unified_prompt_builder=_unused_operation_level_prompt_builder,
     )
     method_registration = SimpleNamespace(
         build_identity_resolver=_pending_fake_build_identity,
@@ -856,8 +910,11 @@ def test_registered_operation_level_prediction_passes_clean_failed_ingest_hook(
     )
     monkeypatch.setattr(
         prediction_cli,
-        "load_method_profile",
-        lambda **kwargs: config,
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            config,
+            profile_name=kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         prediction_cli,
@@ -1011,6 +1068,7 @@ def test_registered_prediction_passes_benchmark_policy_separately_from_method_ma
         evaluation_artifact_only=True,
     )
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="locomo",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -1068,8 +1126,11 @@ def test_registered_prediction_passes_benchmark_policy_separately_from_method_ma
     )
     monkeypatch.setattr(
         prediction_cli,
-        "load_method_profile",
-        lambda **kwargs: config,
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            config,
+            profile_name=kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         prediction_cli,
@@ -1146,6 +1207,7 @@ def test_registered_prediction_omits_benchmark_policy_when_unregistered(
         run_scope=RunScope.SMOKE,
     )
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="locomo",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -1201,8 +1263,11 @@ def test_registered_prediction_omits_benchmark_policy_when_unregistered(
     )
     monkeypatch.setattr(
         prediction_cli,
-        "load_method_profile",
-        lambda **kwargs: config,
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            config,
+            profile_name=kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         prediction_cli,
@@ -1270,6 +1335,7 @@ def test_registered_prediction_rejects_v1_registration_with_unversioned_labels(
         run_scope=RunScope.SMOKE,
     )
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="locomo",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -1326,8 +1392,11 @@ def test_registered_prediction_rejects_v1_registration_with_unversioned_labels(
     )
     monkeypatch.setattr(
         prediction_cli,
-        "load_method_profile",
-        lambda **kwargs: config,
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            config,
+            profile_name=kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         prediction_cli,
@@ -1459,7 +1528,7 @@ def test_custom_method_class_runs_without_builtin_registry(
     )
     monkeypatch.setattr(
         prediction_cli,
-        "load_method_profile",
+        "resolve_method_profile",
         lambda **kwargs: (_ for _ in ()).throw(
             AssertionError("custom method must not load built-in TOML")
         ),
@@ -1657,6 +1726,7 @@ def test_registered_prediction_builds_framework_answer_reader(
         return prepared_run
 
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="locomo",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -1743,8 +1813,11 @@ def test_registered_prediction_builds_framework_answer_reader(
     )
     monkeypatch.setattr(
         prediction_cli,
-        "load_method_profile",
-        lambda **kwargs: config,
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            config,
+            profile_name=kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         prediction_cli,
@@ -1888,6 +1961,7 @@ def test_registered_prediction_rejects_cost_before_loading_settings(
     """未确认 API 成本时不得读取 `.env`、dataset 或构造 method。"""
 
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
             {
@@ -1979,6 +2053,7 @@ def test_registered_prediction_allows_mem0_smoke_worker_override(
         return prepared_run
 
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="locomo",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -2027,8 +2102,11 @@ def test_registered_prediction_allows_mem0_smoke_worker_override(
     )
     monkeypatch.setattr(
         prediction_cli,
-        "load_method_profile",
-        lambda **kwargs: config,
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            config,
+            profile_name=kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         prediction_cli,
@@ -2090,6 +2168,7 @@ def test_registered_prediction_wires_efficiency_observability_when_enabled(
         run_scope=RunScope.SMOKE,
     )
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="locomo",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -2160,8 +2239,11 @@ def test_registered_prediction_wires_efficiency_observability_when_enabled(
     )
     monkeypatch.setattr(
         prediction_cli,
-        "load_method_profile",
-        lambda **kwargs: config,
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            config,
+            profile_name=kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         prediction_cli,
@@ -2258,6 +2340,7 @@ def test_all_expands_in_registration_order_and_uses_explicit_variant_suffixes(
         return prepared_runs[request.variant]
 
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="longmemeval",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -2305,8 +2388,11 @@ def test_all_expands_in_registration_order_and_uses_explicit_variant_suffixes(
     )
     monkeypatch.setattr(
         prediction_cli,
-        "load_method_profile",
-        lambda **kwargs: config,
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            config,
+            profile_name=kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         prediction_cli,
@@ -2377,6 +2463,7 @@ def test_longmemeval_single_variant_run_id_uses_explicit_suffix(
         run_scope=RunScope.SMOKE,
     )
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="longmemeval",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -2412,7 +2499,14 @@ def test_longmemeval_single_variant_run_id_uses_explicit_suffix(
     )
     monkeypatch.setattr(prediction_cli, "get_benchmark_registration", lambda name: benchmark_registration)
     monkeypatch.setattr(prediction_cli, "get_method_registration", lambda name: method_registration)
-    monkeypatch.setattr(prediction_cli, "load_method_profile", lambda **kwargs: config)
+    monkeypatch.setattr(
+        prediction_cli,
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            config,
+            profile_name=kwargs["profile_name"],
+        ),
+    )
     monkeypatch.setattr(
         prediction_cli,
         "load_path_settings",
@@ -2463,6 +2557,7 @@ def test_locomo_run_id_does_not_add_single_variant_suffix(
         run_scope=RunScope.SMOKE,
     )
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="locomo",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -2498,7 +2593,14 @@ def test_locomo_run_id_does_not_add_single_variant_suffix(
     )
     monkeypatch.setattr(prediction_cli, "get_benchmark_registration", lambda name: benchmark_registration)
     monkeypatch.setattr(prediction_cli, "get_method_registration", lambda name: method_registration)
-    monkeypatch.setattr(prediction_cli, "load_method_profile", lambda **kwargs: config)
+    monkeypatch.setattr(
+        prediction_cli,
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            config,
+            profile_name=kwargs["profile_name"],
+        ),
+    )
     monkeypatch.setattr(
         prediction_cli,
         "load_path_settings",
@@ -2536,37 +2638,46 @@ def test_locomo_run_id_does_not_add_single_variant_suffix(
 
 
 @pytest.mark.parametrize(
-    ("config_track", "multi_variant", "expected_parts"),
+    ("profile_name", "multi_variant", "expected_parts"),
     (
-        ("unified", False, ("mem0", "locomo", "smoke", "unified")),
-        ("native", False, ("mem0", "locomo", "smoke", "native")),
+        ("smoke", False, ("mem0", "locomo", "smoke", "smoke")),
         (
-            "unified",
-            True,
-            ("mem0", "longmemeval", "s-cleaned", "smoke", "unified"),
+            "official-full",
+            False,
+            ("mem0", "locomo", "formal", "official-full"),
         ),
         (
-            "native",
+            "smoke",
             True,
-            ("mem0", "longmemeval", "s-cleaned", "smoke", "native"),
+            ("mem0", "longmemeval", "s-cleaned", "smoke", "smoke"),
+        ),
+        (
+            "official-full",
+            True,
+            (
+                "mem0",
+                "longmemeval",
+                "s-cleaned",
+                "formal",
+                "official-full",
+            ),
         ),
     ),
 )
-def test_track_aware_child_output_root_covers_variant_shapes(
+def test_profile_aware_child_output_root_covers_variant_shapes(
     tmp_path: Path,
-    config_track: str,
+    profile_name: str,
     multi_variant: bool,
     expected_parts: tuple[str, ...],
 ) -> None:
-    """新分层布局必须按 track 隔离，且 variant 段保持原有位置。"""
+    """新分层布局必须按公开 TOML profile 隔离并保留 variant 位置。"""
 
     benchmark = "longmemeval" if multi_variant else "locomo"
     output_root = prediction_cli._resolve_child_output_root(
         outputs_root=tmp_path / "outputs",
         method_name="mem0",
         benchmark_name=benchmark,
-        profile_name="smoke",
-        config_track=config_track,
+        profile_name=profile_name,
         variant="s_cleaned" if multi_variant else "locomo10",
         multi_variant_registration=multi_variant,
         output_layout="hierarchical",
@@ -2577,10 +2688,10 @@ def test_track_aware_child_output_root_covers_variant_shapes(
     ).resolve()
 
 
-def test_track_aware_resume_path_does_not_reuse_old_hierarchical_layout(
+def test_profile_aware_resume_path_does_not_reuse_old_hierarchical_layout(
     tmp_path: Path,
 ) -> None:
-    """旧分层 run 存在时，新 prediction 仍只选择带 track 的 resume 路径。"""
+    """旧 track 分层 run 存在时，新 prediction 只选择 profile 路径。"""
 
     old_run_dir = (
         tmp_path / "outputs" / "runs" / "mem0" / "locomo" / "formal" / "run-1"
@@ -2593,13 +2704,12 @@ def test_track_aware_resume_path_does_not_reuse_old_hierarchical_layout(
         method_name="mem0",
         benchmark_name="locomo",
         profile_name="official-full",
-        config_track="unified",
         variant="locomo10",
         multi_variant_registration=False,
         output_layout="hierarchical",
     )
 
-    assert output_root / "run-1" == old_run_dir.parent / "unified" / "run-1"
+    assert output_root / "run-1" == old_run_dir.parent / "official-full" / "run-1"
     assert output_root / "run-1" != old_run_dir
 
 
@@ -2607,7 +2717,7 @@ def test_hierarchical_output_layout_groups_run_by_method_benchmark_and_mode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CLI v2 run 应落到带 config track 的分层目录。"""
+    """新 run 应落到带公开 TOML profile 的分层目录。"""
 
     config = Mem0Config.smoke()
     prepared_run = _build_prepared_run(
@@ -2627,6 +2737,7 @@ def test_hierarchical_output_layout_groups_run_by_method_benchmark_and_mode(
         return prepared_run
 
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="locomo",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -2663,7 +2774,14 @@ def test_hierarchical_output_layout_groups_run_by_method_benchmark_and_mode(
     )
     monkeypatch.setattr(prediction_cli, "get_benchmark_registration", lambda name: benchmark_registration)
     monkeypatch.setattr(prediction_cli, "get_method_registration", lambda name: method_registration)
-    monkeypatch.setattr(prediction_cli, "load_method_profile", lambda **kwargs: config)
+    monkeypatch.setattr(
+        prediction_cli,
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            config,
+            profile_name=kwargs["profile_name"],
+        ),
+    )
     monkeypatch.setattr(
         prediction_cli,
         "load_path_settings",
@@ -2713,7 +2831,7 @@ def test_hierarchical_output_layout_groups_run_by_method_benchmark_and_mode(
             / "mem0"
             / "locomo"
             / "smoke"
-            / "unified"
+            / "smoke"
             / "exp1"
         ).resolve()
     ]
@@ -2726,6 +2844,7 @@ def test_duplicate_variant_suffix_is_rejected(
     """显式 base run_id 已含同 variant 后缀时必须拒绝，避免双重拼接。"""
 
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="longmemeval",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -2759,8 +2878,11 @@ def test_duplicate_variant_suffix_is_rejected(
     monkeypatch.setattr(prediction_cli, "get_method_registration", lambda name: method_registration)
     monkeypatch.setattr(
         prediction_cli,
-        "load_method_profile",
-        lambda **kwargs: Mem0Config.smoke(),
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            Mem0Config.smoke(),
+            profile_name=kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         prediction_cli,
@@ -2799,6 +2921,7 @@ def test_other_registered_variant_suffix_is_rejected(
     """显式 base run_id 含其他已注册 variant 后缀时也必须拒绝。"""
 
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="longmemeval",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -2840,8 +2963,11 @@ def test_other_registered_variant_suffix_is_rejected(
     )
     monkeypatch.setattr(
         prediction_cli,
-        "load_method_profile",
-        lambda **kwargs: Mem0Config.smoke(),
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            Mem0Config.smoke(),
+            profile_name=kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         prediction_cli,
@@ -2872,6 +2998,7 @@ def test_resume_requires_explicit_base_run_id(
     """resume 模式必须由用户显式提供 base run_id。"""
 
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="locomo",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -2943,6 +3070,7 @@ def test_second_child_preflight_failure_creates_no_output_or_method(
         ),
     }
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="longmemeval",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -2982,7 +3110,14 @@ def test_second_child_preflight_failure_creates_no_output_or_method(
     openai_loaded: list[str] = []
     monkeypatch.setattr(prediction_cli, "get_benchmark_registration", lambda name: benchmark_registration)
     monkeypatch.setattr(prediction_cli, "get_method_registration", lambda name: method_registration)
-    monkeypatch.setattr(prediction_cli, "load_method_profile", lambda **kwargs: config)
+    monkeypatch.setattr(
+        prediction_cli,
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            config,
+            profile_name=kwargs["profile_name"],
+        ),
+    )
     monkeypatch.setattr(
         prediction_cli,
         "load_path_settings",
@@ -3055,6 +3190,7 @@ def test_openai_settings_load_only_after_all_preflights(
     }
     events: list[str] = []
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="longmemeval",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -3093,7 +3229,14 @@ def test_openai_settings_load_only_after_all_preflights(
     )
     monkeypatch.setattr(prediction_cli, "get_benchmark_registration", lambda name: benchmark_registration)
     monkeypatch.setattr(prediction_cli, "get_method_registration", lambda name: method_registration)
-    monkeypatch.setattr(prediction_cli, "load_method_profile", lambda **kwargs: config)
+    monkeypatch.setattr(
+        prediction_cli,
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            config,
+            profile_name=kwargs["profile_name"],
+        ),
+    )
     monkeypatch.setattr(
         prediction_cli,
         "load_path_settings",
@@ -3161,6 +3304,7 @@ def test_symlink_child_run_path_outside_outputs_fails_before_prepare(
     (outputs_root / "exp1").symlink_to(outside_root, target_is_directory=True)
 
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="locomo",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -3211,8 +3355,11 @@ def test_symlink_child_run_path_outside_outputs_fails_before_prepare(
     )
     monkeypatch.setattr(
         prediction_cli,
-        "load_method_profile",
-        lambda **kwargs: Mem0Config.smoke(),
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            Mem0Config.smoke(),
+            profile_name=kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         prediction_cli,
@@ -3241,6 +3388,7 @@ def test_case_insensitive_child_run_destination_collision_fails_before_prepare(
     """仅大小写不同的 child destination 必须跨平台保守拒绝。"""
 
     benchmark_registration = SimpleNamespace(
+        unified_prompt_builder=_fake_registered_answer_builder,
         name="demo",
         task_family=TaskFamily.CONVERSATION_QA,
         required_capabilities=frozenset(
@@ -3291,8 +3439,11 @@ def test_case_insensitive_child_run_destination_collision_fails_before_prepare(
     )
     monkeypatch.setattr(
         prediction_cli,
-        "load_method_profile",
-        lambda **kwargs: Mem0Config.smoke(),
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_profile(
+            Mem0Config.smoke(),
+            profile_name=kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         prediction_cli,

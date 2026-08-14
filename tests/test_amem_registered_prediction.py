@@ -37,6 +37,9 @@ from memory_benchmark.core import (
 from memory_benchmark.methods import registry as method_registry_module
 from memory_benchmark.methods.amem_adapter import AMemConfig
 from memory_benchmark.methods.registry import MethodBuildContext
+from memory_benchmark.prompts.benchmarks.locomo import (
+    build_locomo_unified_answer_prompt,
+)
 from memory_benchmark.core.provider_protocol import (
     EvidenceAssertion,
     IngestResult,
@@ -218,6 +221,8 @@ def _build_fake_benchmark_registration() -> BenchmarkRegistration:
         default_variant="locomo10",
         prepare_run=prepare_run,
         prediction_enabled=True,
+        prompt_track="unified",
+        unified_prompt_builder=build_locomo_unified_answer_prompt,
     )
 
 

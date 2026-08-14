@@ -5,6 +5,7 @@
 # 迁移背景见 docs/workstreams/ws02.5-method-interface-audit/plan-memoryos-migration.md。
 
 [smoke]
+answer_builder = "benchmark"
 llm_model = "deepseek-v4-flash"
 embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
 short_term_capacity = 10
@@ -28,6 +29,7 @@ max_workers = 1
 longmemeval_prompt_profile = "memoryos-pypi-retrieve-v1"
 
 [official_full]
+answer_builder = "benchmark"
 llm_model = "gpt-4o-mini"
 embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
 short_term_capacity = 10

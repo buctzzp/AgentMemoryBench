@@ -36,7 +36,7 @@ from memory_benchmark.methods.config_track import (
     BuildIdentityDeclaration,
     EmbeddingIdentity,
 )
-from memory_benchmark.methods.registry import MethodBuildContext
+from memory_benchmark.methods.registry import MethodBuildContext, ResolvedMethodProfile
 from memory_benchmark.benchmark_adapters import (
     BenchmarkLoadRequest,
     PreparedBenchmarkRun,
@@ -61,6 +61,17 @@ from memory_benchmark.storage import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _resolved_fake_profile(config: object, profile_name: str) -> ResolvedMethodProfile:
+    """把局部 fake config 包装成新 run 的 profile envelope。"""
+
+    return ResolvedMethodProfile(
+        public_name=profile_name,
+        section_name=getattr(config, "profile_name"),
+        answer_builder="benchmark",
+        config=config,
+    )
 
 
 def _smoke_openai_settings() -> OpenAISettings:
@@ -537,6 +548,7 @@ def test_registered_mock_v3_prediction_can_be_evaluated_offline(
             assert "mock tea memory" in prompt
             return "tea"
 
+    real_locomo_registration = get_benchmark_registration("locomo")
     fake_benchmark_registration = SimpleNamespace(
         name="locomo",
         task_family=TaskFamily.CONVERSATION_QA,
@@ -550,6 +562,8 @@ def test_registered_mock_v3_prediction_can_be_evaluated_offline(
         variant_names=lambda: ("tiny",),
         prepare=lambda project_root, request: prepared,
         prediction_enabled=True,
+        prompt_track=real_locomo_registration.prompt_track,
+        unified_prompt_builder=real_locomo_registration.unified_prompt_builder,
     )
     fake_method_registration = SimpleNamespace(
         name="mock-v3",
@@ -588,8 +602,11 @@ def test_registered_mock_v3_prediction_can_be_evaluated_offline(
     )
     monkeypatch.setattr(
         run_prediction_module,
-        "load_method_profile",
-        lambda **kwargs: _FakeProfile(),
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_fake_profile(
+            _FakeProfile(),
+            kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         run_prediction_module,
@@ -1022,8 +1039,11 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
     )
     monkeypatch.setattr(
         run_prediction_module,
-        "load_method_profile",
-        lambda **kwargs: _FakeProfile(),
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_fake_profile(
+            _FakeProfile(),
+            kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         run_prediction_module,
@@ -1794,8 +1814,11 @@ def _patch_membench_mock_prediction(
     )
     monkeypatch.setattr(
         run_prediction_module,
-        "load_method_profile",
-        lambda **kwargs: _FakeProfile(),
+        "resolve_method_profile",
+        lambda **kwargs: _resolved_fake_profile(
+            _FakeProfile(),
+            kwargs["profile_name"],
+        ),
     )
     monkeypatch.setattr(
         run_prediction_module,

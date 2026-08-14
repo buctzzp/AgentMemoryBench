@@ -235,7 +235,6 @@ class GraphitiConfig:
             "embedding_provider": "sentence-transformers-local",
             "embedding_distance": "falkordb-cosine",
             "cross_encoder": None,
-            "answer_builder": "framework_benchmark_unified",
             "build_llm_response_contract": GRAPHITI_BUILD_LLM_RESPONSE_CONTRACT,
             "telemetry": "disabled",
         }

@@ -30,9 +30,11 @@ from .simplemem_adapter import (
 from .registry import (
     MethodBuildContext,
     MethodRegistration,
+    ResolvedMethodProfile,
     get_method_registration,
     list_methods,
     load_method_profile,
+    resolve_method_profile,
 )
 
 __all__ = [
@@ -67,7 +69,9 @@ __all__ = [
     "build_simplemem_source_identity",
     "MethodBuildContext",
     "MethodRegistration",
+    "ResolvedMethodProfile",
     "get_method_registration",
     "list_methods",
     "load_method_profile",
+    "resolve_method_profile",
 ]

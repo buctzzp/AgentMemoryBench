@@ -10,10 +10,12 @@ created: 2026-07-05
 
 - **当前目标**：十家 method/5×10 smoke 已闭合，暂停 ws05 成本 pilot；执行有停手线的
   maintainability M1，不调用真实 API。
-- **当前批次**：M1-B TOML profile migration——新 run 由 method TOML section + 完整 answer
-  builder 选择；active identity 与旧 `TrackIdentity v1` artifact readback 分离。
+- **当前批次**：M1-C isolated worker transport——只抽 EverOS/Graphiti/LangMem/Letta
+  主进程侧重复且等价的 JSON-lines transport；各产品 worker/runtime/DB/cleanup 继续显式。
 - **当前判据**：只读
-  [十家 method 后的可维护性审计与 M1 裁决](notes/2026-08-14-maintainability-audit-and-m1-ruling.md)；
+  [十家 method 后的可维护性审计与 M1 裁决](notes/2026-08-14-maintainability-audit-and-m1-ruling.md)
+  §5 M1-C；M1-B 关闭边界见
+  [TOML profile 与新运行身份迁移](notes/2026-08-14-toml-profile-migration-m1b.md)；
   结构灰区查 [`code-structure-principles.md`](../../reference/code-structure-principles.md)。
 - **禁止事项**：不跑成本/official-full/API，不改 metric/prompt/method 算法，不按文件行数
   大搬家，不碰 data/models/outputs/third-party 或用户未跟踪资产。
@@ -29,6 +31,18 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
 
 ## 当前断点
 
+- 2026-08-14：**M1-B 已关闭**。十家 `smoke/official_full` TOML section 均显式声明
+  `answer_builder="benchmark"`；新 prediction 通过严格 profile envelope 生成
+  `MethodRunIdentity v1`，resume 锁 profile/section/builder/build/embedding，新分层路径以
+  profile 取代 track。`--config-track native` 不再创建新 run，显式 unified 只作 deprecated
+  no-op；旧 `TrackIdentity v1` evaluate/cost 回读原样保留。三份内部
+  `methods/*_native_prompts.py` shim 在 canonical import 清零和架构门后删除。施工/兼容矩阵见
+  [M1-B 记录](notes/2026-08-14-toml-profile-migration-m1b.md)。定向门
+  `569 passed, 12 warnings in 10.47s`；compileall exit 0；文档门包含于定向集（单跑
+  `6 passed in 1.17s`）；无 API 全量门
+  `2204 passed, 3 deselected, 25 warnings, 29 subtests passed in 150.99s`。新增 12 条 warning
+  是 legacy CLI 测试触发的预期 `FutureWarning`，其余为既有第三方 warning。下一动作严格为
+  M1-C，不提前拆 prediction/registry。
 - 2026-08-14：**M1-A 已关闭**。registered prediction application service 下沉到
   `runners/registered_prediction.py`，旧 CLI import 保留同 module object 的薄 shim；
   `prompts/author` 改存 evaluator key，`runners → cli` 与 `prompts → evaluators` 均由 AST
@@ -36,8 +50,8 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
   快照、唯一热胶囊与会话定位器。兼容消费者/退出门见
   [M1-A 施工与验收记录](notes/2026-08-14-maintainability-m1a-implementation.md)。定向门
   `234 passed`，compileall exit 0；无 API 全量门
-  `2164 passed, 3 deselected, 13 warnings, 29 subtests passed in 173.27s`。下一动作严格为 M1-B，
-  不提前拆 worker/prediction。
+  `2164 passed, 3 deselected, 13 warnings, 29 subtests passed in 173.27s`。该时点的下一动作
+  M1-B 已由上条关闭；历史证据保留，不再作为当前恢复动作。
 - 2026-08-14：用户裁定成本估算实验暂缓，先做项目“瘦身/规范化”。架构师完成 current-main
   只读审计并发布
   [M1 裁决](notes/2026-08-14-maintainability-audit-and-m1-ruling.md)：
@@ -67,6 +81,7 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
 
 - [十家 method 后的可维护性审计与 M1 裁决](notes/2026-08-14-maintainability-audit-and-m1-ruling.md)
 - [M1-A 依赖方向、freshness 与恢复自举施工记录](notes/2026-08-14-maintainability-m1a-implementation.md)
+- [M1-B TOML profile 与新运行身份迁移记录](notes/2026-08-14-toml-profile-migration-m1b.md)
 - [稳定代码结构判据](../../reference/code-structure-principles.md)
 - [2026-06-21-registry-capability-simplification-design.md](2026-06-21-registry-capability-simplification-design.md)
 - [2026-06-21-llm-provider-config-design.md](2026-06-21-llm-provider-config-design.md)
@@ -78,7 +93,7 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
 - [x] **M1-A freshness / dependency direction**：修 live 状态与链接；切断
   `runners → cli`、`prompts → evaluators`；补最小 AST/import gate；完成 shim/legacy
   消费者和退出门清单。
-- [ ] **M1-B TOML profile migration**：新 run 由 TOML section + 完整 answer builder
+- [x] **M1-B TOML profile migration**：新 run 由 TOML section + 完整 answer builder
   选择；active identity 与 legacy `TrackIdentity v1` readback 分离；旧 artifact 不改写。
 - [ ] **M1-C isolated worker transport**：抽四家 adapter 主进程侧 JSON-lines transport；
   产品 worker、环境、Docker/DB 与 cleanup 差异继续显式。
@@ -92,8 +107,8 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
   `add_from_turn()` 与历史 turn-level resume 文档/测试；`BaseMemorySystem`
   暂保留为后备兼容接口。删除前必须证明四个内置 method、fake/offline 测试和
   artifact-only evaluation 不依赖旧主路径。
-- [ ] Legacy CLI 分阶段清理（节奏已定）：四 method 的 LoCoMo/LongMemEval v2
-  smoke 稳定后加 deprecated warning → 至少一次 v2 formal 小规模 run 后从 README
+- [ ] Legacy CLI 分阶段清理（节奏已定）：M1-B 已为旧 `predict --profile ...` 与显式
+  `--config-track unified` 加 deprecated warning、关闭 native 新 run；至少一次 v2 formal 小规模 run 后从 README
   示例移除旧写法 → 对外发布前决定是否彻底删除旧参数。
 - [ ] `OpenAISettings` 迁移到统一 `LLMRuntimeConfig` / `LLMResponse`；
   第一版仍只实现 OpenAI-compatible provider。

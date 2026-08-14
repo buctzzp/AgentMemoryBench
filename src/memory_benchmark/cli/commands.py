@@ -30,6 +30,7 @@ from memory_benchmark.methods.config_track import (
     TrackIdentity,
     resolve_config_track,
 )
+from memory_benchmark.methods.run_identity import MethodRunIdentity
 from memory_benchmark.runners.registered_prediction import (
     PredictionBatchResult,
     run_registered_conversation_qa_prediction,
@@ -53,7 +54,7 @@ class PredictCommand:
     project_root: str | Path
     benchmark: str
     profile: str
-    config_track: str = "unified"
+    config_track: str | None = None
     method: str | None = None
     method_class: str | None = None
     allow_unsafe_custom_parallel: bool = False
@@ -331,6 +332,23 @@ def _resolve_evaluation_track_identity(
     config_track = method_manifest.get("config_track")
     contract_version = method_manifest.get("contract_version")
     raw_identity = method_manifest.get("track_identity")
+    raw_run_identity = method_manifest.get("run_identity")
+
+    if raw_run_identity is not None:
+        if any(
+            value is not None
+            for value in (config_track, contract_version, raw_identity)
+        ):
+            raise ConfigurationError(
+                "method.run_identity cannot be mixed with legacy config_track/"
+                "track_identity fields"
+            )
+        if not isinstance(raw_run_identity, dict):
+            raise ConfigurationError("method.run_identity must be an object")
+        MethodRunIdentity.from_manifest_dict(raw_run_identity)
+        # 新 profile run 的 judge 始终由 benchmark 统一 evaluator 选择；run identity
+        # 只在此做完整性校验，不再解析旧 native judge bundle。
+        return None, None
 
     if contract_version is None:
         if raw_identity is not None:

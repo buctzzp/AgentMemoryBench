@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from dataclasses import MISSING, fields, is_dataclass
+from dataclasses import MISSING, dataclass, fields, is_dataclass
 from pathlib import Path
 from typing import Any, TypeVar, get_args, get_origin, get_type_hints
 
@@ -17,6 +17,22 @@ from memory_benchmark.core import ConfigurationError
 
 
 ConfigT = TypeVar("ConfigT")
+FRAMEWORK_PROFILE_KEYS = frozenset({"answer_builder"})
+
+
+@dataclass(frozen=True)
+class ProfileSection:
+    """一个已经定位并完成 TOML 结构校验的原始 profile section。
+
+    字段:
+        source_path: profile TOML 的规范绝对路径。
+        name: TOML section 原名。
+        values: section 内的原始公开配置；调用方不得就地修改。
+    """
+
+    source_path: Path
+    name: str
+    values: dict[str, Any]
 
 
 def load_typed_profile(
@@ -39,6 +55,23 @@ def load_typed_profile(
             字段类型不匹配或 dataclass 初始化失败。
     """
 
+    section = load_profile_section(path, profile_name)
+    # 兼容直接加载 method config 的旧调用者；framework 字段不会进入 dataclass，
+    # 但由注册组合根另行要求并校验。
+    return build_typed_profile(
+        section,
+        config_type,
+        reserved_keys=FRAMEWORK_PROFILE_KEYS,
+    )
+
+
+def load_profile_section(path: str | Path, profile_name: str) -> ProfileSection:
+    """读取一个 TOML section，但不把 framework 字段误交给 method dataclass。
+
+    该入口供组合根同时解析 ``answer_builder`` 等运行级字段和 method 自身参数。
+    它只读取公开 TOML，不读取 secret，也不做 section 继承或隐藏 merge。
+    """
+
     resolved_path = Path(path).expanduser().resolve()
     if not resolved_path.is_file():
         raise ConfigurationError(f"Profile TOML file missing: {resolved_path}")
@@ -49,51 +82,83 @@ def load_typed_profile(
         raise ConfigurationError("Profile name is required")
 
     _ensure_top_level_sections(payload, resolved_path)
-
-    section = payload.get(normalized_profile_name)
-    if section is None:
+    raw_section = payload.get(normalized_profile_name)
+    if raw_section is None:
         raise ConfigurationError(
             f"Missing profile section '{normalized_profile_name}' in {resolved_path}"
         )
-    if not isinstance(section, dict):
+    if not isinstance(raw_section, dict):
         raise ConfigurationError(
             f"Profile section '{normalized_profile_name}' must be a TOML table: {resolved_path}"
         )
+    return ProfileSection(
+        source_path=resolved_path,
+        name=normalized_profile_name,
+        values=dict(raw_section),
+    )
+
+
+def build_typed_profile(
+    section: ProfileSection,
+    config_type: type[ConfigT],
+    *,
+    reserved_keys: frozenset[str] = frozenset(),
+) -> ConfigT:
+    """从已读取 section 构造 method 强类型配置。
+
+    ``reserved_keys`` 只能由组合根显式传入，用于把 framework 运行字段与 method
+    参数分离；未知的非保留字段仍然 fail-fast，不能借此放宽 TOML schema。
+    """
+
+    if not isinstance(section, ProfileSection):
+        raise ConfigurationError("section must be a ProfileSection")
+    if any(type(key) is not str or not key.strip() for key in reserved_keys):
+        raise ConfigurationError("reserved profile keys must be non-blank strings")
     if not is_dataclass(config_type):
         raise ConfigurationError(f"Profile target must be a dataclass: {config_type!r}")
 
     config_fields = {field.name: field for field in fields(config_type) if field.init}
     type_hints = get_type_hints(config_type)
+    values = section.values
 
-    if "profile_name" in section and "profile_name" in config_fields:
+    ownership_overlap = sorted(reserved_keys.intersection(config_fields))
+    if ownership_overlap:
         raise ConfigurationError(
-            f"Profile '{normalized_profile_name}' in {resolved_path} must not declare profile_name"
+            "Framework profile key(s) must not also be method config fields: "
+            + ", ".join(ownership_overlap)
         )
 
-    unknown_keys = sorted(key for key in section if key not in config_fields)
+    if "profile_name" in values and "profile_name" in config_fields:
+        raise ConfigurationError(
+            f"Profile '{section.name}' in {section.source_path} must not declare profile_name"
+        )
+
+    unknown_keys = sorted(
+        key for key in values if key not in config_fields and key not in reserved_keys
+    )
     if unknown_keys:
         raise ConfigurationError(
-            f"Unknown key(s) in profile '{normalized_profile_name}' at {resolved_path}: "
+            f"Unknown key(s) in profile '{section.name}' at {section.source_path}: "
             f"{', '.join(unknown_keys)}"
         )
 
     kwargs: dict[str, Any] = {}
     for field_name, field in config_fields.items():
         if field_name == "profile_name":
-            kwargs[field_name] = normalized_profile_name
+            kwargs[field_name] = section.name
             continue
 
-        if field_name not in section:
+        if field_name not in values:
             continue
 
-        raw_value = section[field_name]
+        raw_value = values[field_name]
         expected_type = type_hints.get(field_name, field.type)
         kwargs[field_name] = _normalize_profile_value(
             raw_value=raw_value,
             expected_type=expected_type,
             field_name=field_name,
-            profile_name=normalized_profile_name,
-            source_path=resolved_path,
+            profile_name=section.name,
+            source_path=section.source_path,
         )
 
     missing_fields = [
@@ -105,7 +170,7 @@ def load_typed_profile(
     ]
     if missing_fields:
         raise ConfigurationError(
-            f"Missing required key(s) in profile '{normalized_profile_name}' at {resolved_path}: "
+            f"Missing required key(s) in profile '{section.name}' at {section.source_path}: "
             f"{', '.join(sorted(missing_fields))}"
         )
 
@@ -115,7 +180,7 @@ def load_typed_profile(
         raise
     except TypeError as exc:
         raise ConfigurationError(
-            f"Invalid profile '{normalized_profile_name}' in {resolved_path}: {exc}"
+            f"Invalid profile '{section.name}' in {section.source_path}: {exc}"
         ) from None
 
 

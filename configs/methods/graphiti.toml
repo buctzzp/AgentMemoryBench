@@ -6,6 +6,7 @@
 # 没有可复现的完整 QA author profile，故不虚构 author_* section。
 
 [smoke]
+answer_builder = "benchmark"
 llm_model = "deepseek-v4-flash"
 structured_output_mode = "json_object"
 llm_temperature = 1.0
@@ -20,6 +21,7 @@ worker_request_timeout_seconds = 900.0
 max_workers = 1
 
 [official_full]
+answer_builder = "benchmark"
 llm_model = "gpt-4o-mini"
 structured_output_mode = "json_schema"
 llm_temperature = 1.0

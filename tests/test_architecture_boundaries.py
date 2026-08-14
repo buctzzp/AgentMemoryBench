@@ -60,6 +60,29 @@ def test_prompt_assets_do_not_depend_on_evaluators() -> None:
     ) == []
 
 
+def test_new_run_composition_root_does_not_depend_on_legacy_config_track() -> None:
+    """新 prediction 组合根不得重新引入 unified/native 双轨 resolver。"""
+
+    path = PACKAGE / "runners" / "registered_prediction.py"
+    imported = {module for _, module in _resolved_imports(path)}
+    assert "memory_benchmark.methods.config_track" not in imported
+
+
+def test_author_prompt_assets_have_no_internal_method_shims() -> None:
+    """作者 prompt 资产的旧 methods re-export 已退出且不得复活。"""
+
+    for stem in (
+        "lightmem_native_prompts",
+        "mem0_native_prompts",
+        "memoryos_native_prompts",
+    ):
+        assert not (PACKAGE / "methods" / f"{stem}.py").exists()
+        assert _forbidden_imports(
+            PACKAGE,
+            f"memory_benchmark.methods.{stem}",
+        ) == []
+
+
 def test_legacy_cli_prediction_module_is_canonical_module_alias() -> None:
     """旧 import 在兼容期必须返回 canonical module 本身，避免双份状态。"""
 

@@ -263,6 +263,9 @@ type 字段就判 N/A；Graphiti M2 初稿误判、M3 更正是判例。
 - 每个 method 一个 TOML。`smoke` 与 `official_full` 是主 section，同一 method 跨五个
   benchmark 使用同一套算法参数；smoke 只缩运行规模。作者确实跑过且参数有一手证据时，
   才增加稀疏 `author_<benchmark>` section。
+- 每个可创建新 run 的 section 都必须显式声明非空 `answer_builder`。framework envelope 与
+  method dataclass 分开校验：只有 `answer_builder` 等已登记 framework key 会被保留字段消费，
+  其余未知 TOML key 仍 fail-fast，不能用迁移放宽 schema。
 - CLI 只用 `--profile` 选择 section，禁止逐项传超参数、运行前手改同一 section，或根据
   benchmark 名暗中自动切到作者配置。manifest/resume 必须锁 section 与解析后的完整配置。
 - embedding、chunk、top-k、update、summary 等都由 TOML 控制；第三方库里写死但确属配置的
@@ -277,10 +280,15 @@ type 字段就判 N/A；Graphiti M2 初稿误判、M3 更正是判例。
 - answer/judge 主表仍由 benchmark 统一；作者 answer 配置是可选校准，不强铺 5×10。当前真实
   LLM 被项目硬锁 `gpt-4o-mini`，作者若使用别的 model 必须标 framework override，不得宣称
   paper-model parity。
+- **M1-B 现行运行门（2026-08-14）**：新 run 使用 `MethodRunIdentity v1` 锁公开 profile、
+  TOML section、完整 builder 与 build/embedding；不能与旧 `TrackIdentity v1` 字段混写。
+  新 `native` config-track run 已关闭，显式 `unified` 只是 deprecated no-op；旧 artifact 的
+  evaluation/cost 回读继续严格兼容。分层输出目录以 profile 而非 track 分段。
 
 ### B11. 主配置 smoke + 冻结
-- 5×10 主 smoke 只要求 `smoke` section；作者配置不属于冻结必填矩阵。首个作者校准 run 或
-  真实效果 full run 前，再完成 author section、完整 builder 与旧 `config_track` 迁移。
+- 5×10 主 smoke 只要求 `smoke` section；作者配置不属于冻结必填矩阵。旧 `config_track`
+  的新-run 迁移已由 ws03 M1-B 完成；首个作者校准 run 前只补**有一手证据**的 author section、
+  完整 builder 注册与最终 messages parity，不得重新启用 native 轨或用已有 prompt 文件猜配置。
 - **机器计划门（2026-07-29）**：禁止架构师/actor 凭记忆手写 B11 smoke 命令。
   每个 concrete variant 必须先运行
   `uv run memory-benchmark plan-smoke --root . --method <m> --benchmark <b>

@@ -25,10 +25,11 @@ from memory_benchmark.methods.config_track import (
     build_unified_track_identity,
     resolve_config_track,
 )
-from memory_benchmark.methods.lightmem_native_prompts import (
+from memory_benchmark.prompts.author.lightmem import (
     LIGHTMEM_LOCOMO_NATIVE_JUDGE_PROMPT,
 )
 from memory_benchmark.methods.registry import resolve_registered_build_identity
+from memory_benchmark.methods.run_identity import build_method_run_identity
 
 
 def _mem0_manifest() -> dict[str, Any]:
@@ -472,26 +473,36 @@ def test_unified_identity_rejects_native_sources_and_native_none_scope() -> None
         replace(native, native_scope="none")
 
 
-def test_method_manifest_uses_inner_version_and_rejects_duck_typed_identity() -> None:
-    """顶层版本取自已校验对象，不能出现 top=v1/inner=bogus。"""
+def test_method_manifest_stamps_new_run_identity_and_rejects_duck_type() -> None:
+    """新 manifest 只写 profile run identity，且拒绝字典冒充强类型对象。"""
 
-    identity = _unified_identity("mem0", _mem0_manifest())
+    identity = build_method_run_identity(
+        profile_name="smoke",
+        profile_section="smoke",
+        answer_builder="benchmark",
+        build_identity=resolve_registered_build_identity("mem0", _mem0_manifest()),
+    )
     manifest = _build_method_manifest(
         config_manifest={"profile_name": "smoke"},
         source_identity={"source_sha256": "abc"},
         workload_estimate=None,
-        track_identity=identity,
+        run_identity=identity,
     )
-    assert manifest["contract_version"] == identity.contract_version
-    assert manifest["track_identity"]["contract_version"] == identity.contract_version
-    assert manifest["track_identity"]["judge_model_source"] == "framework_default"
+    assert "contract_version" not in manifest
+    assert "track_identity" not in manifest
+    assert manifest["run_identity"]["contract_version"] == identity.contract_version
+    assert manifest["run_identity"]["answer_builder"] == "benchmark"
+    assert manifest["run_identity"]["profile"] == {
+        "name": "smoke",
+        "section": "smoke",
+    }
 
-    with pytest.raises(ConfigurationError, match="must be TrackIdentity"):
+    with pytest.raises(ConfigurationError, match="must be MethodRunIdentity"):
         _build_method_manifest(
             config_manifest={},
             source_identity={},
             workload_estimate=None,
-            track_identity=cast(Any, identity.to_manifest_dict()),
+            run_identity=cast(Any, identity.to_manifest_dict()),
         )
 
 

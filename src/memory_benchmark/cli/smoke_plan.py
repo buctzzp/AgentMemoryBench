@@ -389,8 +389,6 @@ def _build_predict_argv(
         benchmark_name,
         "--variant",
         variant,
-        "--config-track",
-        "unified",
         "--run-id",
         base_run_id,
         "--allow-api",

@@ -1410,7 +1410,8 @@ def _method_manifest_with_protocol(
     normalized = dict(method_manifest)
     normalized.setdefault("protocol_version", protocol_version)
     normalized.setdefault("prompt_track", prompt_track)
-    normalized.setdefault("profile", {})
+    if "run_identity" not in normalized:
+        normalized.setdefault("profile", {})
     if provenance_granularity is None and isinstance(system, MemoryProvider):
         provenance_granularity = system.provenance_granularity
     if provenance_granularity is not None:

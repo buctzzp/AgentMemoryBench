@@ -11,6 +11,11 @@ import pytest
 from memory_benchmark.analysis.cost import APILLMPrice, load_pricing
 from memory_benchmark.analysis.run_cost_report import build_run_cost_report
 from memory_benchmark.core import ConfigurationError
+from memory_benchmark.methods.run_identity import (
+    BuildIdentityDeclaration,
+    EmbeddingIdentity,
+    build_method_run_identity,
+)
 from memory_benchmark.observability.efficiency import (
     EfficiencyArtifactStore,
     EfficiencyStage,
@@ -238,6 +243,45 @@ def test_run_cost_report_config_track_graceful_fallbacks(tmp_path: Path) -> None
     assert missing_report.config_track == "unknown"
     assert legacy_report.complete is False
     assert legacy_report.missing_stores == ("prediction", "evaluator")
+
+
+def test_run_cost_report_reads_new_profile_identity_without_legacy_track(
+    tmp_path: Path,
+) -> None:
+    """新 artifact 应公开 profile/builder，同时不伪装成 unified/native。"""
+
+    paths = ExperimentPaths.create(tmp_path / "profile-run")
+    identity = build_method_run_identity(
+        profile_name="official-full",
+        profile_section="official_full",
+        answer_builder="benchmark",
+        build_identity=BuildIdentityDeclaration(
+            implementation_variant="product",
+            embedding_profile="unclassified_pending",
+            historical_controlled_build_equivalent_to_current_main=False,
+            embedding=EmbeddingIdentity(
+                provider=None,
+                model=None,
+                dimension=None,
+                revision=None,
+                revision_status="pending",
+                normalization=None,
+                instruction=None,
+                distance=None,
+                identity_status="pending",
+            ),
+        ),
+    )
+    paths.manifest_path.write_text(
+        json.dumps({"method": {"run_identity": identity.to_manifest_dict()}}),
+        encoding="utf-8",
+    )
+
+    report = build_run_cost_report(paths.run_dir, {}, [])
+
+    assert report.config_track == "profile"
+    assert report.profile_name == "official-full"
+    assert report.answer_builder == "benchmark"
 
 
 def test_evaluator_store_is_required_to_include_judge_cost(tmp_path: Path) -> None:

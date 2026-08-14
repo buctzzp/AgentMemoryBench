@@ -9,6 +9,7 @@
 # 差异留档 method-interface-inventory.md hyperparameters 字段。
 
 [smoke]
+answer_builder = "benchmark"
 # budget-only connectivity profile；不与 official_full 结果比较。
 llm_model = "deepseek-v4-flash"
 embedding_model_path = "models/all-MiniLM-L6-v2"
@@ -28,6 +29,7 @@ enable_parallel_processing = false
 enable_parallel_retrieval = true
 
 [official_full]
+answer_builder = "benchmark"
 llm_model = "gpt-4o-mini"
 embedding_model_path = "models/all-MiniLM-L6-v2"
 embedding_dimension = 384

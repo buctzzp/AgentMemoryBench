@@ -40,6 +40,12 @@ from memory_benchmark.core.provider_protocol import (
     UnitRef,
 )
 from memory_benchmark.methods import registry as method_registry_module
+from memory_benchmark.prompts.benchmarks.locomo import (
+    build_locomo_unified_answer_prompt,
+)
+from memory_benchmark.prompts.benchmarks.longmemeval import (
+    build_longmemeval_unified_answer_prompt,
+)
 from memory_benchmark.storage import read_jsonl
 
 
@@ -205,10 +211,10 @@ def test_simplemem_registered_prediction_runs_locomo_and_longmemeval_fake_smoke(
         assert manifest["method"]["protocol_version"] == "v3"
         assert manifest["method"]["provenance_granularity"] == "none"
         assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"
-        assert manifest["method"]["prompt_track"] == "native"
+        assert manifest["method"]["prompt_track"] == "unified"
         assert manifest["method"]["config"]["profile_name"] == "smoke"
         assert predictions[0]["answer"] == "framework fake answer"
-        assert prompts[0]["metadata"]["prompt_track"] == "native"
+        assert prompts[0]["metadata"]["prompt_track"] == "unified"
         assert prompts[0]["formatted_memory"] == (
             "[2026-01-01T00:00:00] fake simplemem memory"
         )
@@ -279,8 +285,12 @@ def test_simplemem_registered_prediction_workers_gt_1_manifest_has_protocol_fiel
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["method_name"] == "SimpleMem"
     assert manifest["method"]["protocol_version"] == "v3"
-    assert manifest["method"]["prompt_track"] == "native"
-    assert manifest["method"]["profile"] == {}
+    assert manifest["method"]["prompt_track"] == "unified"
+    assert "profile" not in manifest["method"]
+    assert manifest["method"]["run_identity"]["profile"] == {
+        "name": "smoke",
+        "section": "smoke",
+    }
     # 交叉校验：worker 内实例必须是 MemoryProvider
     assert len(FakeSimpleMemForRegisteredPrediction.instances) >= 1
     for instance in FakeSimpleMemForRegisteredPrediction.instances:
@@ -312,6 +322,10 @@ class FakeAnswerClient:
 def _fake_registration(benchmark_name: str):
     """构造 LoCoMo/LongMemEval 共用的最小 fake benchmark registration。"""
 
+    builders = {
+        "locomo": build_locomo_unified_answer_prompt,
+        "longmemeval": build_longmemeval_unified_answer_prompt,
+    }
     return SimpleNamespace(
         name=benchmark_name,
         task_family=TaskFamily.CONVERSATION_QA,
@@ -329,6 +343,8 @@ def _fake_registration(benchmark_name: str):
             request=request,
         ),
         prediction_enabled=True,
+        prompt_track="unified",
+        unified_prompt_builder=builders[benchmark_name],
     )
 
 

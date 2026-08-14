@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from memory_benchmark.methods.memoryos_native_prompts import (
+from memory_benchmark.prompts.author.memoryos import (
     MEMORYOS_LOCOMO_NATIVE_SYSTEM_PROMPT,
     MEMORYOS_LOCOMO_NATIVE_USER_PROMPT,
     build_memoryos_locomo_native_answer_prompt,

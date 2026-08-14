@@ -1,4 +1,4 @@
-"""Prompt 资产所有权与旧 import 兼容的架构回归门。"""
+"""Prompt 资产所有权与仍在预算内的兼容 import 架构回归门。"""
 
 from __future__ import annotations
 
@@ -12,12 +12,6 @@ from memory_benchmark.evaluators import (
     locomo_judge,
     longmemeval_judge,
 )
-from memory_benchmark.methods import (
-    lightmem_native_prompts,
-    mem0_native_prompts,
-    memoryos_native_prompts,
-)
-from memory_benchmark.prompts.author import lightmem, mem0, memoryos
 from memory_benchmark.prompts.benchmarks import beam, halumem_judge, locomo, longmemeval
 
 
@@ -95,8 +89,8 @@ def test_unified_answer_builders_have_single_canonical_owner() -> None:
     )
 
 
-def test_legacy_prompt_import_paths_reexport_canonical_objects() -> None:
-    """旧路径仍可用，但必须转发同一对象而不是复制第二份 prompt。"""
+def test_budgeted_prompt_import_paths_reexport_canonical_objects() -> None:
+    """仍保留的 benchmark/evaluator 旧路径必须转发同一对象。"""
 
     assert (
         locomo_prompt.build_locomo_unified_answer_prompt
@@ -105,18 +99,6 @@ def test_legacy_prompt_import_paths_reexport_canonical_objects() -> None:
     assert (
         longmemeval_prompt.build_longmemeval_unified_answer_prompt
         is longmemeval.build_longmemeval_unified_answer_prompt
-    )
-    assert (
-        lightmem_native_prompts.LIGHTMEM_NATIVE_ANSWER_PROFILES
-        is lightmem.LIGHTMEM_NATIVE_ANSWER_PROFILES
-    )
-    assert (
-        mem0_native_prompts.MEM0_NATIVE_ANSWER_PROFILES
-        is mem0.MEM0_NATIVE_ANSWER_PROFILES
-    )
-    assert (
-        memoryos_native_prompts.MEMORYOS_NATIVE_ANSWER_PROFILES
-        is memoryos.MEMORYOS_NATIVE_ANSWER_PROFILES
     )
     assert (
         halumem_prompts.EVALUATION_PROMPT_FOR_QUESTION

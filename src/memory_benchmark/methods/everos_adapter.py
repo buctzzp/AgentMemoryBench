@@ -250,7 +250,6 @@ class EverOSConfig:
             "product_surface": EVEROS_PRODUCT_SURFACE,
             "consume_granularity": "session",
             "embedding_distance": "lancedb-l2",
-            "answer_builder": "framework_benchmark_unified",
             "missing_timestamp_policy": "require-source-time-v1",
             "timestamp_derivation_policy": "locomo-official-30s-only-v1",
             "locomo_role_policy": "all-user-real-speaker-owner",

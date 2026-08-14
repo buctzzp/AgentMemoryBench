@@ -36,6 +36,7 @@ from memory_benchmark.config.settings import (
 )
 from memory_benchmark.core import (
     AddResult,
+    AnswerPromptResult,
     AnswerResult,
     Conversation,
     MethodCapability,
@@ -44,20 +45,18 @@ from memory_benchmark.core import (
 )
 from memory_benchmark.core.exceptions import ConfigurationError
 from memory_benchmark.core.interfaces import BaseMemoryProvider, BaseMemorySystem
-from memory_benchmark.core.provider_protocol import MemoryProvider
+from memory_benchmark.core.provider_protocol import MemoryProvider, RetrievalResult
 from memory_benchmark.methods.custom_loader import load_custom_memory_provider
-from memory_benchmark.methods.config_track import (
-    TrackIdentity,
-    build_native_track_identity,
-    build_unified_track_identity,
-    resolve_config_track,
-    validate_track_identity,
-)
 from memory_benchmark.methods.mem0_adapter import Mem0Config
 from memory_benchmark.methods.registry import (
     MethodBuildContext,
     get_method_registration,
     load_method_profile,
+    resolve_method_profile,
+)
+from memory_benchmark.methods.run_identity import (
+    MethodRunIdentity,
+    build_method_run_identity,
 )
 from memory_benchmark.observability import RunContext
 from memory_benchmark.observability.efficiency import (
@@ -263,7 +262,7 @@ def run_registered_conversation_qa_prediction(
     method_name: str | None,
     benchmark_name: str,
     profile_name: str = "smoke",
-    config_track: str = "unified",
+    config_track: str | None = None,
     method_class: str | None = None,
     allow_unsafe_custom_parallel: bool = False,
     variant: str | None = None,
@@ -293,7 +292,8 @@ def run_registered_conversation_qa_prediction(
         method_name: method registry 中的稳定名称。
         benchmark_name: benchmark registry 中的稳定名称。
         profile_name: `smoke` 或 `official-full`。
-        config_track: `unified` 保持框架默认；`native` 使用已注册 method 论文配置。
+        config_track: 旧 CLI 兼容参数；空值或 `unified` 均不改变新 run，`native`
+            已禁用，作者校准必须选择显式 TOML profile。
         variant: 可选 benchmark variant selector；为空时使用 registration 默认值。
         run_id: 可选稳定运行 id；resume 时必须传显式 base run_id。
         resume: 是否复用兼容 manifest/checkpoint 和 Mem0 method state。
@@ -324,13 +324,10 @@ def run_registered_conversation_qa_prediction(
     root = Path(project_root).expanduser().resolve()
     path_settings = load_path_settings(project_root=root)
     benchmark_registration = get_benchmark_registration(benchmark_name)
+    _validate_new_run_config_track(config_track)
     if bool(method_name) == bool(method_class):
         raise ConfigurationError("Pass exactly one of method_name or method_class")
     if method_class is not None:
-        if config_track != "unified":
-            raise ConfigurationError(
-                "Custom methods do not have registered native config-track bundles"
-            )
         return _run_custom_conversation_qa_prediction(
             project_root=root,
             path_settings=path_settings,
@@ -382,7 +379,6 @@ def run_registered_conversation_qa_prediction(
         )
         for concrete_variant in selected_variants:
             variant_validator(benchmark_name, concrete_variant)
-    method_registration.resolve_profile_section(profile_name)
     _confirm_prediction_cost(
         method_display_name=method_registration.display_name,
         profile_name=profile_name,
@@ -394,11 +390,12 @@ def run_registered_conversation_qa_prediction(
         raise ConfigurationError(
             f"{method_name} resume requires an explicit existing run_id"
         )
-    config = load_method_profile(
+    resolved_profile = resolve_method_profile(
         method_name=method_name,
         profile_name=profile_name,
         project_root=path_settings.project_root,
     )
+    config = resolved_profile.config
     use_framework_answer_reader = (
         MethodCapability.MEMORY_RETRIEVAL
         in method_registration.provided_capabilities
@@ -427,25 +424,17 @@ def run_registered_conversation_qa_prediction(
     consume_granularity = method_registration.resolve_consume_granularity(
         benchmark_name
     )
-    config_track_bundle = (
-        None
-        if config_track == "unified"
-        else resolve_config_track(
-            method_name,
-            benchmark_name,
-            config_track,
-        )
+    run_identity = build_method_run_identity(
+        profile_name=resolved_profile.public_name,
+        profile_section=resolved_profile.section_name,
+        answer_builder=resolved_profile.answer_builder,
+        build_identity=build_identity,
     )
-    # bundle 只保存 readout 资产；完整身份在同一处把当前 build 与 readout 组合。
-    track_identity = (
-        build_unified_track_identity(build_identity=build_identity)
-        if config_track_bundle is None
-        else build_native_track_identity(
-            build_identity=build_identity,
-            bundle=config_track_bundle,
-        )
+    answer_prompt_builder = _resolve_registered_answer_builder(
+        answer_builder=resolved_profile.answer_builder,
+        benchmark_registration=benchmark_registration,
     )
-    run_scope = _resolve_profile_run_scope(config.profile_name)
+    run_scope = _resolve_profile_run_scope(resolved_profile.public_name)
     if selected_variants is None:
         selected_variants = resolve_variant_selector(
             benchmark_registration,
@@ -455,7 +444,7 @@ def run_registered_conversation_qa_prediction(
     selected_run_ids = _resolve_batch_run_ids(
         method_name=method_name,
         benchmark_name=benchmark_name,
-        profile_name=config.profile_name,
+        profile_name=resolved_profile.public_name,
         explicit_base_run_id=run_id,
         variants=selected_variants,
         registration=benchmark_registration,
@@ -466,8 +455,7 @@ def run_registered_conversation_qa_prediction(
             outputs_root=path_settings.outputs_root,
             method_name=method_name,
             benchmark_name=benchmark_name,
-            profile_name=config.profile_name,
-            config_track=config_track,
+            profile_name=resolved_profile.public_name,
             variant=concrete_variant,
             multi_variant_registration=multi_variant_registration,
             output_layout=output_layout,
@@ -498,30 +486,19 @@ def run_registered_conversation_qa_prediction(
     max_workers = method_registration.max_workers_getter(config)
     max_workers = _resolve_smoke_max_workers(
         method_display_name=method_registration.display_name,
-        profile_name=config.profile_name,
+        profile_name=resolved_profile.public_name,
         smoke_max_workers=smoke_max_workers,
         configured_max_workers=max_workers,
         allow_override=method_registration.allow_smoke_worker_override,
     )
-    prompt_track = (
-        getattr(benchmark_registration, "prompt_track", "native")
-        if use_framework_answer_reader
-        else "native"
-    )
+    prompt_track = getattr(benchmark_registration, "prompt_track", "native")
     answer_llm_settings: AnswerLLMSettings | None = None
     answer_compatibility_note: str | None = None
     if use_framework_answer_reader:
-        base_answer_settings = (
-            replace(
-                config_track_bundle.answer_llm_settings,
-                model=api_model,
-            )
-            if config_track_bundle is not None
-            else resolve_answer_llm_settings(
-                method_name=method_registration.name,
-                benchmark_name=benchmark_registration.name,
-                model=api_model,
-            )
+        base_answer_settings = resolve_answer_llm_settings(
+            method_name=method_registration.name,
+            benchmark_name=benchmark_registration.name,
+            model=api_model,
         )
         (
             answer_llm_settings,
@@ -581,20 +558,17 @@ def run_registered_conversation_qa_prediction(
             workload_estimate=workload_estimate,
             answer_reader_manifest=answer_reader_manifest,
             prompt_track=(
-                "native"
-                if config_track_bundle is not None
-                else prompt_track
+                prompt_track
                 if use_framework_answer_reader and prompt_track == "unified"
                 else None
             ),
-            config_track=("native" if config_track_bundle is not None else None),
             retrieval_evidence_contract_version=getattr(
                 method_registration,
                 "retrieval_evidence_contract_version",
                 None,
             ),
             consume_granularity=consume_granularity,
-            track_identity=track_identity,
+            run_identity=run_identity,
         )
         policy = PredictionRunPolicy(
             max_workers=max_workers,
@@ -772,15 +746,6 @@ def run_registered_conversation_qa_prediction(
                 raise ConfigurationError(
                     "operation-level prediction requires framework answer reader"
                 )
-            unified_prompt_builder = getattr(
-                benchmark_registration,
-                "unified_prompt_builder",
-                None,
-            )
-            if unified_prompt_builder is None:
-                raise ConfigurationError(
-                    "operation-level prediction requires unified_prompt_builder"
-                )
             summary = run_operation_level_predictions(
                 dataset=child.dataset,
                 provider=system,
@@ -791,7 +756,7 @@ def run_registered_conversation_qa_prediction(
                 run_scope=child.run_scope,
                 source_paths=child.source_paths,
                 answer_reader=answer_reader,
-                unified_prompt_builder=unified_prompt_builder,
+                unified_prompt_builder=answer_prompt_builder,
                 efficiency_collector=child.efficiency_collector,
                 model_inventory=child.model_inventory,
                 instrumentation_identity=child.instrumentation_identity,
@@ -828,11 +793,7 @@ def run_registered_conversation_qa_prediction(
                 build_context_template=build_context,
                 supports_shared_instance_parallelism=supports_shared_instance_parallelism,
                 answer_reader=answer_reader,
-                unified_prompt_builder=getattr(
-                    benchmark_registration, "unified_prompt_builder", None
-                )
-                if config_track_bundle is None
-                else None,
+                unified_prompt_builder=answer_prompt_builder,
                 prediction_transform=getattr(
                     benchmark_registration,
                     "prediction_transform",
@@ -933,7 +894,6 @@ def _run_custom_conversation_qa_prediction(
             method_name="custom",
             benchmark_name=benchmark_name,
             profile_name=profile_name,
-            config_track="unified",
             variant=concrete_variant,
             multi_variant_registration=multi_variant_registration,
             output_layout=output_layout,
@@ -1345,6 +1305,44 @@ def _resolve_profile_run_scope(profile_name: str) -> RunScope:
     return RunScope.FULL
 
 
+def _validate_new_run_config_track(config_track: str | None) -> None:
+    """关闭旧双轨的新运行能力，同时容忍显式 unified 兼容调用。"""
+
+    if config_track in (None, "unified"):
+        return
+    if config_track == "native":
+        raise ConfigurationError(
+            "New native config-track runs are disabled. Select an evidence-backed "
+            "author_<benchmark> TOML profile when the method registers one."
+        )
+    raise ConfigurationError(f"Unknown prediction config_track '{config_track}'")
+
+
+def _resolve_registered_answer_builder(
+    *,
+    answer_builder: str,
+    benchmark_registration,
+) -> Callable[[Question, RetrievalResult], AnswerPromptResult]:
+    """把 TOML builder identity 解析为可调用的完整 answer 构造器。
+
+    M1-B 只开放已经闭合的 ``benchmark`` 主表 builder。作者资产即使已经在
+    ``prompts/author`` 存档，也必须等对应 ``author_<benchmark>`` profile 完成
+    参数与最终消息校准后再在此注册，不能靠名字猜测或自动按 benchmark 切换。
+    """
+
+    if answer_builder != "benchmark":
+        raise ConfigurationError(
+            f"Answer builder '{answer_builder}' is not registered for new runs"
+        )
+    builder = getattr(benchmark_registration, "unified_prompt_builder", None)
+    if not callable(builder):
+        raise ConfigurationError(
+            f"Benchmark '{benchmark_registration.name}' does not expose its "
+            "registered answer builder"
+        )
+    return builder
+
+
 def _resolve_adapter_smoke_history_limit(
     *,
     benchmark_name: str,
@@ -1457,7 +1455,6 @@ def _resolve_child_output_root(
     method_name: str,
     benchmark_name: str,
     profile_name: str,
-    config_track: str,
     variant: str,
     multi_variant_registration: bool,
     output_layout: str,
@@ -1465,8 +1462,8 @@ def _resolve_child_output_root(
     """根据 CLI 布局模式返回单个 child run 的 output_root。
 
     `RunContext.run_dir` 始终是 `output_root / run_id`。因此这里返回的是
-    run_id 上一级目录，而不是最终 run 目录。分层布局始终包含 config track；
-    resume 也只检查该新布局，不会查找或迁移缺少 track 段的旧分层目录。
+    run_id 上一级目录，而不是最终 run 目录。M1-B 分层布局包含公开 TOML profile；
+    resume 只检查该新布局，不会查找或迁移旧 track/pre-track 目录。
     """
 
     canonical_outputs_root = Path(outputs_root).expanduser().resolve()
@@ -1476,11 +1473,8 @@ def _resolve_child_output_root(
         raise ConfigurationError(
             f"Unknown prediction output_layout '{output_layout}'"
         )
-    if config_track not in {"unified", "native"}:
-        raise ConfigurationError(
-            f"Unknown prediction config_track '{config_track}'"
-        )
     mode_directory = "smoke" if profile_name == "smoke" else "formal"
+    profile_token = normalize_variant_run_id_token(profile_name)
     path_parts = [
         canonical_outputs_root,
         Path("runs"),
@@ -1489,7 +1483,7 @@ def _resolve_child_output_root(
     ]
     if multi_variant_registration:
         path_parts.append(Path(normalize_variant_run_id_token(variant)))
-    path_parts.extend((Path(mode_directory), Path(config_track)))
+    path_parts.extend((Path(mode_directory), Path(profile_token)))
     return Path(*path_parts).resolve()
 
 
@@ -1646,9 +1640,9 @@ def _confirm_prediction_cost(
         raise ConfigurationError(
             f"Real {method_display_name} prediction requires --confirm-api"
         )
-    if profile_name == "official-full" and not confirm_full:
+    if profile_name != "smoke" and not confirm_full:
         raise ConfigurationError(
-            f"{method_display_name} official-full requires --confirm-full "
+            f"{method_display_name} profile '{profile_name}' requires --confirm-full "
             "in addition to --confirm-api"
         )
 
@@ -1756,10 +1750,9 @@ def _build_method_manifest(
     workload_estimate: dict[str, object] | None,
     answer_reader_manifest: dict[str, object] | None = None,
     prompt_track: str | None = None,
-    config_track: str | None = None,
     retrieval_evidence_contract_version: str | None = None,
     consume_granularity: str | None = None,
-    track_identity: TrackIdentity | None = None,
+    run_identity: MethodRunIdentity | None = None,
 ) -> dict[str, object]:
     """构造不含 secret、可供 registered preflight 直接比较的 method manifest。"""
 
@@ -1771,8 +1764,6 @@ def _build_method_manifest(
         manifest["answer_reader"] = answer_reader_manifest
     if prompt_track is not None:
         manifest["prompt_track"] = prompt_track
-    if config_track is not None:
-        manifest["config_track"] = config_track
     if retrieval_evidence_contract_version is not None:
         manifest["retrieval_evidence_contract_version"] = (
             retrieval_evidence_contract_version
@@ -1783,12 +1774,10 @@ def _build_method_manifest(
                 "consume_granularity must be turn, pair, session or conversation"
             )
         manifest["consume_granularity"] = consume_granularity
-    if track_identity is not None:
-        if not isinstance(track_identity, TrackIdentity):
-            raise ConfigurationError("track_identity must be TrackIdentity or None")
-        validate_track_identity(track_identity)
-        manifest["track_identity"] = track_identity.to_manifest_dict()
-        manifest["contract_version"] = track_identity.contract_version
+    if run_identity is not None:
+        if not isinstance(run_identity, MethodRunIdentity):
+            raise ConfigurationError("run_identity must be MethodRunIdentity or None")
+        manifest["run_identity"] = run_identity.to_manifest_dict()
     if workload_estimate is not None:
         manifest["workload_estimate"] = workload_estimate
     return manifest

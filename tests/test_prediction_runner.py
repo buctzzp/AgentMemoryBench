@@ -1436,6 +1436,64 @@ def test_resume_manifest_strictly_compares_consume_granularity() -> None:
     assert not _manifests_match_for_resume(pair, turn)
 
 
+def _run_identity_resume_method_manifest() -> dict[str, object]:
+    """返回新 TOML profile run 的最小合法身份。"""
+
+    return {
+        "protocol_version": "v3",
+        "run_identity": {
+            "contract_version": "v1",
+            "profile": {"name": "smoke", "section": "smoke"},
+            "answer_builder": "benchmark",
+            "build": {
+                "implementation_variant": "product",
+                "embedding_profile": "controlled_embedding_v1",
+                "historical_controlled_build_equivalent_to_current_main": False,
+                "embedding": {
+                    "provider": "huggingface",
+                    "model": "sentence-transformers/all-MiniLM-L6-v2",
+                    "dimension": 384,
+                    "revision": None,
+                    "revision_status": "local_unpinned",
+                    "normalization": None,
+                    "instruction": None,
+                    "distance": "qdrant-cosine",
+                    "identity_status": "declared",
+                },
+            },
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("path", "replacement"),
+    (
+        (("profile", "name"), "official-full"),
+        (("profile", "section"), "official_full"),
+        (("answer_builder",), "mem0_locomo_official"),
+        (("build", "embedding", "dimension"), 1536),
+    ),
+)
+def test_resume_manifest_rejects_new_run_identity_change(
+    path: tuple[str, ...],
+    replacement: object,
+) -> None:
+    """profile、builder 或 build 任一变化都必须双向阻断 resume。"""
+
+    original = {"method": _run_identity_resume_method_manifest()}
+    changed = json.loads(json.dumps(original))
+    cursor = changed["method"]["run_identity"]
+    for key in path[:-1]:
+        cursor = cursor[key]
+    cursor[path[-1]] = replacement
+    missing = {"method": {"protocol_version": "v3"}}
+
+    assert not _manifests_match_for_resume(original, changed)
+    assert not _manifests_match_for_resume(changed, original)
+    assert not _manifests_match_for_resume(original, missing)
+    assert not _manifests_match_for_resume(missing, original)
+
+
 def _track_identity_resume_method_manifest() -> dict[str, object]:
     """返回用于 resume 严格比较的最小合法 v1 method manifest。"""
 
@@ -3679,7 +3737,11 @@ def test_registered_prediction_missing_build_identity_fails_before_side_effects(
 
     from memory_benchmark.cli import run_prediction as run_prediction_module
     from memory_benchmark.core import MethodCapability, TaskFamily
-    from memory_benchmark.methods.registry import MethodBuildContext, MethodRegistration
+    from memory_benchmark.methods.registry import (
+        MethodBuildContext,
+        MethodRegistration,
+        ResolvedMethodProfile,
+    )
 
     class _FakeConfig:
         """缺 build declaration 反例使用的最小配置。"""
@@ -3755,8 +3817,13 @@ def test_registered_prediction_missing_build_identity_fails_before_side_effects(
     )
     monkeypatch.setattr(
         run_prediction_module,
-        "load_method_profile",
-        lambda **kwargs: _FakeConfig(),
+        "resolve_method_profile",
+        lambda **kwargs: ResolvedMethodProfile(
+            public_name="smoke",
+            section_name="smoke",
+            answer_builder="benchmark",
+            config=_FakeConfig(),
+        ),
     )
 
     with pytest.raises(
@@ -3791,7 +3858,11 @@ def test_registered_isolated_prediction_does_not_construct_root_system(
         BuildIdentityDeclaration,
         EmbeddingIdentity,
     )
-    from memory_benchmark.methods.registry import MethodBuildContext, MethodRegistration
+    from memory_benchmark.methods.registry import (
+        MethodBuildContext,
+        MethodRegistration,
+        ResolvedMethodProfile,
+    )
 
     class _FakeConfig:
         """registered prediction 测试用最小 method config。"""
@@ -3839,6 +3910,9 @@ def test_registered_isolated_prediction_does_not_construct_root_system(
             run_scope=request.run_scope,
             dataset=dataset,
             source_relative_paths=(),
+        ),
+        unified_prompt_builder=lambda question, retrieval: AnswerPromptResult(
+            messages=({"role": "user", "content": question.text},),
         ),
         prediction_enabled=True,
     )
@@ -3900,8 +3974,13 @@ def test_registered_isolated_prediction_does_not_construct_root_system(
     )
     monkeypatch.setattr(
         run_prediction_module,
-        "load_method_profile",
-        lambda **kwargs: _FakeConfig(),
+        "resolve_method_profile",
+        lambda **kwargs: ResolvedMethodProfile(
+            public_name="smoke",
+            section_name="smoke",
+            answer_builder="benchmark",
+            config=_FakeConfig(),
+        ),
     )
 
     run_prediction_module.run_registered_conversation_qa_prediction(

@@ -4,6 +4,7 @@
 # official_full 仍保持已冻结的 primary/gpt-4o-mini，二者不得混作效果对比。
 
 [smoke]
+answer_builder = "benchmark"
 llm_model = "deepseek-v4-flash"
 embedding_model = "all-MiniLM-L6-v2"
 retrieve_k = 10
@@ -14,6 +15,7 @@ use_product_layer = true
 suppress_official_stdout = true
 
 [official_full]
+answer_builder = "benchmark"
 llm_model = "gpt-4o-mini"
 embedding_model = "all-MiniLM-L6-v2"
 retrieve_k = 10

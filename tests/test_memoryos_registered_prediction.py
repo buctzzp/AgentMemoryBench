@@ -36,10 +36,7 @@ from memory_benchmark.core.interfaces import BaseMemoryProvider
 from memory_benchmark.methods import memoryos_adapter as memoryos_adapter_module
 from memory_benchmark.methods.memoryos_adapter import MemoryOS as RealMemoryOS
 from memory_benchmark.methods import registry as method_registry_module
-from memory_benchmark.methods.config_track import (
-    CONTRACT_VERSION,
-    build_unified_track_identity,
-)
+from memory_benchmark.methods.run_identity import build_method_run_identity
 from memory_benchmark.observability import RunContext
 from memory_benchmark.observability.efficiency.entities import ModelDescriptor
 from memory_benchmark.runners import prediction as prediction_runner_module
@@ -57,6 +54,7 @@ def _write_memoryos_profiles(project_root: Path) -> None:
     profile_path.write_text(
         """
 [smoke]
+answer_builder = "benchmark"
 llm_model = "deepseek-v4-flash"
 embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
 short_term_capacity = 1
@@ -80,6 +78,7 @@ max_workers = 1
 longmemeval_prompt_profile = "memoryos-pypi-retrieve-v1"
 
 [official_full]
+answer_builder = "benchmark"
 llm_model = "gpt-4o-mini"
 embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
 short_term_capacity = 1
@@ -211,16 +210,19 @@ def _patch_locomo_registration(
         assert isinstance(project_root, Path)
         return prepared_run
 
+    canonical_registration = run_prediction_module.get_benchmark_registration(
+        "locomo"
+    )
     registration = SimpleNamespace(
         name="locomo",
-        task_family=run_prediction_module.get_benchmark_registration("locomo").task_family,
-        required_capabilities=run_prediction_module.get_benchmark_registration(
-            "locomo"
-        ).required_capabilities,
+        task_family=canonical_registration.task_family,
+        required_capabilities=canonical_registration.required_capabilities,
         default_variant="locomo10",
         variant_names=lambda: ("locomo10",),
         prepare=_prepare,
         prediction_enabled=True,
+        prompt_track=canonical_registration.prompt_track,
+        unified_prompt_builder=canonical_registration.unified_prompt_builder,
     )
     monkeypatch.setattr(
         run_prediction_module,
@@ -414,7 +416,7 @@ def test_memoryos_requires_confirm_api_before_settings_or_factory(
     monkeypatch.setattr(method_registry_module, "MemoryOS", _FakeMemoryOS)
     monkeypatch.setattr(
         run_prediction_module,
-        "load_method_profile",
+        "resolve_method_profile",
         lambda **kwargs: (_ for _ in ()).throw(
             AssertionError("profile must not load before confirm_api")
         ),
@@ -463,7 +465,7 @@ def test_memoryos_official_full_requires_confirm_full_before_settings_or_factory
     monkeypatch.setattr(method_registry_module, "MemoryOS", _FakeMemoryOS)
     monkeypatch.setattr(
         run_prediction_module,
-        "load_method_profile",
+        "resolve_method_profile",
         lambda **kwargs: (_ for _ in ()).throw(
             AssertionError("profile must not load before confirm_full")
         ),
@@ -623,6 +625,7 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
         },
         "config": _FakeMemoryOS.instances[0].config.to_manifest(),
         "consume_granularity": "session",
+        "prompt_track": "unified",
         "source": {"source": "fake-memoryos"},
         "retrieval_evidence_contract_version": "v1",
         "workload_estimate": {
@@ -630,8 +633,10 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
             "total_update_batches": 1,
             "conversation_count": 1,
         },
-        "contract_version": CONTRACT_VERSION,
-        "track_identity": build_unified_track_identity(
+        "run_identity": build_method_run_identity(
+            profile_name="smoke",
+            profile_section="smoke",
+            answer_builder="benchmark",
             build_identity=method_registry_module.resolve_registered_build_identity(
                 "memoryos",
                 _FakeMemoryOS.instances[0].config.to_manifest(),
@@ -747,7 +752,7 @@ def test_new_memoryos_run_writes_only_canonical_prediction_artifacts(
                 "metadata": {
                     "answer_reader": "framework",
                     "answer_model": "fake-answer-client",
-                    "answer_prompt_profile": "method_owned",
+                    "answer_prompt_profile": "locomo_official_qa_rag_v1",
                 },
             }
         ]
@@ -764,11 +769,14 @@ def test_new_memoryos_run_writes_only_canonical_prediction_artifacts(
     # registered preflight candidate 与 runner 最终 manifest 必须共用同一 v1 identity；
     # 再用同一 run_id 真正走一次 resume，证明首跑/续跑身份对称。
     first_manifest = json.loads(canonical_paths["manifest"].read_text(encoding="utf-8"))
-    first_identity = first_manifest["method"]["track_identity"]
-    assert first_manifest["method"]["contract_version"] == "v1"
+    first_identity = first_manifest["method"]["run_identity"]
+    assert "config_track" not in first_manifest["method"]
+    assert "track_identity" not in first_manifest["method"]
     assert first_identity["contract_version"] == "v1"
-    assert first_identity["implementation_variant"] == "product"
-    assert first_identity["embedding"] == {
+    assert first_identity["profile"] == {"name": "smoke", "section": "smoke"}
+    assert first_identity["answer_builder"] == "benchmark"
+    assert first_identity["build"]["implementation_variant"] == "product"
+    assert first_identity["build"]["embedding"] == {
         "provider": "sentence-transformers",
         "model": "sentence-transformers/all-MiniLM-L6-v2",
         "dimension": 384,
@@ -793,7 +801,7 @@ def test_new_memoryos_run_writes_only_canonical_prediction_artifacts(
     )
     second_manifest = json.loads(canonical_paths["manifest"].read_text(encoding="utf-8"))
     assert resumed.runs[0].summary.completed_conversations == 1
-    assert second_manifest["method"]["track_identity"] == first_identity
+    assert second_manifest["method"]["run_identity"] == first_identity
     assert second_manifest == first_manifest
 
 

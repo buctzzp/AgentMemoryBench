@@ -5,6 +5,7 @@
 # 当前官方 repo 对五个 Phase-1 benchmark 均无 author harness，故不虚构 author section。
 
 [smoke]
+answer_builder = "benchmark"
 llm_model = "deepseek-v4-flash"
 embedding_model_path = "models/all-MiniLM-L6-v2"
 embedding_dimension = 384
@@ -17,6 +18,7 @@ worker_request_timeout_seconds = 600.0
 max_workers = 1
 
 [official_full]
+answer_builder = "benchmark"
 llm_model = "gpt-4o-mini"
 embedding_model_path = "models/all-MiniLM-L6-v2"
 embedding_dimension = 384

@@ -17,7 +17,12 @@ from memory_benchmark.config import (
     PathSettings,
     load_path_settings,
 )
-from memory_benchmark.config.profiles import load_typed_profile
+from memory_benchmark.config.profiles import (
+    FRAMEWORK_PROFILE_KEYS,
+    build_typed_profile,
+    load_profile_section,
+    load_typed_profile,
+)
 from memory_benchmark.core import (
     BaseMemorySystem,
     ConfigurationError,
@@ -38,7 +43,7 @@ from .amem_adapter import (
     build_amem_source_identity,
     clean_amem_conversation_state,
 )
-from .config_track import BuildIdentityDeclaration, EmbeddingIdentity
+from .run_identity import BuildIdentityDeclaration, EmbeddingIdentity
 from .everos_adapter import (
     EVEROS_EMBEDDING_MODEL_ID,
     EVEROS_LLM_MODEL_ID,
@@ -133,6 +138,38 @@ class MethodBuildContext:
 
 
 @dataclass(frozen=True)
+class ResolvedMethodProfile:
+    """一次新 run 已解析的 TOML profile envelope。
+
+    ``config`` 只含 method 算法参数；``answer_builder`` 属于 framework 运行选择，
+    不再由 adapter 的 ``to_manifest()`` 硬编码。公开 profile 名与 TOML section 名
+    分开保存，避免 ``official-full``/``official_full`` 被静默混用。
+    """
+
+    public_name: str
+    section_name: str
+    answer_builder: str
+    config: Any
+
+    def __post_init__(self) -> None:
+        """拒绝空白 builder 和与 section 不一致的强类型配置。"""
+
+        for label, value in (
+            ("public profile name", self.public_name),
+            ("profile section", self.section_name),
+            ("answer_builder", self.answer_builder),
+        ):
+            if type(value) is not str or not value.strip() or value != value.strip():
+                raise ConfigurationError(f"{label} must be a non-blank trimmed string")
+        config_profile_name = getattr(self.config, "profile_name", None)
+        if config_profile_name != self.section_name:
+            raise ConfigurationError(
+                "Resolved method profile config.profile_name must equal its TOML section: "
+                f"{config_profile_name!r} != {self.section_name!r}"
+            )
+
+
+@dataclass(frozen=True)
 class MethodRegistration:
     """一个统一 CLI method 的静态注册信息。
 
@@ -166,7 +203,8 @@ class MethodRegistration:
             conversation 级安全清理半写入状态时才声明。
         build_identity_resolver: 可选回调，从 ``config.to_manifest()`` 解析当前 build
             的完整身份声明。method/profile 分类与 concrete embedding 事实只在注册表
-            维护一次；config_track 只负责把声明与 readout 资产组合。
+            维护一次；新 run 与 TOML profile 选择组合，旧 config-track 仅供历史
+            artifact 回读。
         variant_validator: 可选 method × benchmark × concrete variant 预运行校验；
             必须在 output/runtime/API 构造前调用，用于拒绝无法诚实表达的组合。
     """
@@ -2304,6 +2342,48 @@ def load_method_profile(
     )
 
 
+def resolve_method_profile(
+    method_name: str,
+    profile_name: str,
+    project_root: str | Path | None = None,
+) -> ResolvedMethodProfile:
+    """解析新 run 的 TOML section、完整 answer builder 与 method config。
+
+    ``answer_builder`` 是每个已注册 section 的必填 framework 字段。该函数先把它
+    从原始 section 中分离，再让 method dataclass 对剩余字段保持原有严格校验；因此
+    不会为迁移而放宽任意未知 key。
+    """
+
+    registration = get_method_registration(method_name)
+    root = load_path_settings(project_root).project_root
+    section_name = registration.resolve_profile_section(profile_name)
+    section = load_profile_section(
+        root / registration.profile_relative_path,
+        section_name,
+    )
+    answer_builder = section.values.get("answer_builder")
+    if type(answer_builder) is not str or not answer_builder.strip():
+        raise ConfigurationError(
+            f"Profile '{section_name}' in {section.source_path} must declare a "
+            "non-blank answer_builder"
+        )
+    if answer_builder != answer_builder.strip():
+        raise ConfigurationError(
+            f"Profile '{section_name}' answer_builder must not contain outer whitespace"
+        )
+    config = build_typed_profile(
+        section,
+        registration.config_type,
+        reserved_keys=FRAMEWORK_PROFILE_KEYS,
+    )
+    return ResolvedMethodProfile(
+        public_name=profile_name,
+        section_name=section_name,
+        answer_builder=answer_builder,
+        config=config,
+    )
+
+
 def _sha256_file(path: Path) -> str:
     """计算文件 SHA-256，用于 wrapper 插桩身份。"""
 
@@ -2315,9 +2395,11 @@ def _sha256_file(path: Path) -> str:
 __all__ = [
     "MethodBuildContext",
     "MethodRegistration",
+    "ResolvedMethodProfile",
     "get_method_registration",
     "list_methods",
     "load_method_profile",
+    "resolve_method_profile",
     "resolve_registered_factory_consume_granularity",
     "resolve_registered_factory_provenance_granularity",
     "resolve_registered_factory_retrieval_evidence_contract_version",

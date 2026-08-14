@@ -314,7 +314,6 @@ class MemOSConfig:
                 "product_full_session_preserve_order_no_truncation"
             ),
             "reference_time_effect": MEMOS_REFERENCE_TIME_EFFECT,
-            "answer_builder": "framework_benchmark_unified",
         }
 
 

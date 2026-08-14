@@ -10,6 +10,7 @@ from typing import Mapping, Sequence
 
 from memory_benchmark.analysis.cost import APIPrice, CostReport, calculate_cost
 from memory_benchmark.analysis.efficiency import EfficiencySummary, aggregate_efficiency
+from memory_benchmark.methods.run_identity import MethodRunIdentity
 from memory_benchmark.observability.efficiency import (
     EfficiencyArtifactStore,
     EfficiencyObservation,
@@ -44,6 +45,8 @@ class RunCostReport:
     """
 
     config_track: str
+    profile_name: str | None
+    answer_builder: str | None
     total_cost: Decimal
     currency: str | None
     complete: bool
@@ -89,8 +92,13 @@ def build_run_cost_report(
         != 0
         or any(getattr(item, "stage", None) is stage for item in observations)
     }
+    config_track, profile_name, answer_builder = _read_method_run_selection(
+        paths.manifest_path
+    )
     return RunCostReport(
-        config_track=_read_config_track(paths.manifest_path),
+        config_track=config_track,
+        profile_name=profile_name,
+        answer_builder=answer_builder,
         total_cost=cost_report.total_cost,
         currency=cost_report.currency,
         complete=cost_report.complete and not missing_stores,
@@ -176,22 +184,36 @@ def _read_all_observations(
     return observations, tuple(missing_stores)
 
 
-def _read_config_track(manifest_path: Path) -> str:
-    """从 manifest 读取配置轨；旧 manifest 降级为 unified，缺失或坏文件为 unknown。"""
+def _read_method_run_selection(
+    manifest_path: Path,
+) -> tuple[str, str | None, str | None]:
+    """读取新 profile 身份，并保持旧 config-track artifact 的原样回读。"""
 
     if not manifest_path.is_file():
-        return "unknown"
+        return "unknown", None, None
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-        return "unknown"
+        return "unknown", None, None
     if not isinstance(manifest, dict):
-        return "unknown"
+        return "unknown", None, None
     method = manifest.get("method")
     if not isinstance(method, dict):
-        return "unified"
+        return "unified", None, None
+    raw_run_identity = method.get("run_identity")
+    if raw_run_identity is not None:
+        if not isinstance(raw_run_identity, dict):
+            # 与 evaluation 一致：新身份存在但损坏不能伪装成 legacy unified。
+            MethodRunIdentity.from_manifest_dict(raw_run_identity)
+        identity = MethodRunIdentity.from_manifest_dict(raw_run_identity)
+        return "profile", identity.profile_name, identity.answer_builder
     config_track = method.get("config_track", "unified")
-    return config_track if isinstance(config_track, str) and config_track else "unknown"
+    legacy_track = (
+        config_track
+        if isinstance(config_track, str) and config_track
+        else "unknown"
+    )
+    return legacy_track, None, None
 
 
 __all__ = ["RunCostReport", "TokenSourceMix", "build_run_cost_report"]

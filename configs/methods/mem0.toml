@@ -10,6 +10,7 @@
 # method-interface-inventory.md hyperparameters 字段）。
 
 ["smoke"]
+answer_builder = "benchmark"
 extraction_model = "deepseek-v4-flash"
 embedding_provider = "huggingface"
 embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
@@ -23,6 +24,7 @@ api_timeout_seconds = 60.0
 api_max_retries = 8
 
 ["official_full"]
+answer_builder = "benchmark"
 extraction_model = "gpt-4o-mini"
 embedding_provider = "huggingface"
 embedding_model = "sentence-transformers/all-MiniLM-L6-v2"

@@ -20,6 +20,7 @@ benchmark 可以增加少量 `author_<benchmark>` section。CLI 只选择 sectio
 [smoke]
 # 5×10 极小流通验证。method 算法参数原则上与 official_full 相同；只允许缩小
 # 数据范围、问题数、并发或其他不改变 method 行为的运行规模。
+answer_builder = "benchmark"
 
 [official_full]
 # Phase 1 主配置：同一个 method 跨 LoCoMo、LongMemEval、HaluMem、BEAM、MemBench
@@ -121,10 +122,11 @@ prompt 目录按“谁定义实验口径”分层，而不是按“当前由哪�
 - method 产品内部的 extraction/update/build prompt 仍归 method/vendored 实现，
   不复制进 framework prompt 包。
 
-旧 `benchmark_adapters/*_prompt.py`、`evaluators/halumem_prompts.py` 与
-`methods/*_native_prompts.py` 在迁移期仅保留薄 re-export shim，保证旧扩展和历史测试
-可导入；新代码必须引用 canonical prompt package。是否删除 shim 与旧 `config_track`
-退出一并裁定，不能让兼容层继续承载新内容。
+旧 `benchmark_adapters/*_prompt.py` 与 `evaluators/halumem_prompts.py` 仍是薄 re-export
+shim，保证现有扩展可导入；新代码必须引用 canonical prompt package。三份仅供仓库内部
+使用的 `methods/{lightmem,mem0,memoryos}_native_prompts.py` 已在 2026-08-14 M1-B 完成
+内部 import 清零和 parity 门后删除。兼容层逐项按消费者与退出门处置，不能因为同属 shim
+就成批删除，也不能继续承载新内容。
 
 ## 4. TOML 的边界
 
@@ -138,24 +140,30 @@ TOML 负责**保存数值与选择实现**；代码只负责两类不可避免�
 
 ## 5. 与旧 `config_track` 的关系
 
-- 当前 `config_track=unified/native`、track-aware 输出目录和 `TrackIdentity v1` 已存在，旧产物
-  不改写、不假装来自新政策。
-- `TrackIdentity v1` 中已经落盘的 implementation/build/readout 事实仍有审计价值；目标是让
-  manifest 如实记录最终 TOML 与 builder，而不是删除身份校验。
-- 新运行模型不再强铺两条流水线：5×10 主 smoke 只要求 `smoke` 主配置；作者配置仅在确有
-  复现价值、预算和一手参数时另跑。
-- 迁移完成前，旧 `config_track` 是兼容实现，不是新增 method 应继续复制的架构模板。
+- **2026-08-14 起的新 run 已完成迁移**：由公开 TOML profile 名、实际 section、
+  `answer_builder` 和当前 build/embedding 组成 `MethodRunIdentity v1`；这些字段与解析后的
+  method config、API runtime 一同严格参与 resume。
+- 分层输出路径现在是 `.../{smoke|formal}/{profile}/{run_id}`。旧目录中的
+  `unified/native` segment 不移动、不重命名，新 run 也不会探测或复用旧路径。
+- CLI `--config-track native` 不再能创建新 run；显式 `--config-track unified` 只发弃用警告且
+  不改变行为。旧 `predict --profile ...` 写法仍分阶段弃用，正式入口为
+  `predict smoke` 或 `predict formal --profile <name>`。
+- `TrackIdentity v1` parser、旧 native bundle 和 evaluate/cost artifact 回读长期保留；旧产物
+  不改写、不假装来自新政策。新 run 不能同时写 `run_identity` 与旧
+  `config_track/track_identity/contract_version` 字段。
+- 新运行模型不再强铺两条流水线：5×10 主 smoke 使用 `smoke`；正式主表默认
+  `official-full`；作者配置只在确有复现价值、预算和一手参数时显式选择。
 
 ## 6. 实施日程
 
 1. **现在已完成**：政策落盘；不改既有实验史，不触发真实 API。
 2. **2026-08-14 状态**：MemBench canonical split、RetrievalEvidence 与 5×10 主 smoke
    均已关闭。旧“当前主线”只属历史，不再作为恢复动作。
-3. **当前 ws03 M1-B（首个作者校准 run 或真实效果 full run 之前）**：
-   - loader/registry 接受有一手证据的 `author_<benchmark>` section；
-   - 把仍写死在 adapter/third_party 接缝、但确属配置的参数暴露进 TOML；
-   - 用 TOML 的 `answer_builder` 选择 benchmark builder 或作者完整 builder；
-   - manifest/resume 锁住 section、解析后配置、builder 与最终 answer 调用参数；
-   - 移除新路径对全局 `config_track=unified/native` 分支的依赖，保留旧产物只读兼容。
+3. **2026-08-14 ws03 M1-B 已完成**：十家 `smoke/official_full` section 均显式声明
+   `answer_builder="benchmark"`；新 loader/registry 把 framework envelope 与 method dataclass
+   严格分离；新 manifest/resume/output identity 已切换至 `MethodRunIdentity v1`；旧 artifact
+   只读回读保持。当前只注册 `benchmark` builder，不凭已有 prompt 文件虚构任何作者 profile。
 4. **逐 method 到性能阶段时**：再裁 `official_full` 的最终参数；作者跑过的 benchmark 才补
    对应 author section。Phase 1 不做五个 benchmark 各自 sweep，也不追求 smoke 分数最优。
+   新 `author_<benchmark>` section 必须同时注册经过最终消息 parity 验收的完整 builder；名字
+   未注册或变量链未闭合时在 API/runtime 前 fail-fast。

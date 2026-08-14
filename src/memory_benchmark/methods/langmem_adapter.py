@@ -198,7 +198,6 @@ class LangMemConfig:
             "embedding_provider": "sentence-transformers-local",
             "embedding_distance": "langgraph-inmemory-cosine",
             "query_model": None,
-            "answer_builder": "framework_benchmark_unified",
             "build_llm_response_contract": LANGMEM_BUILD_LLM_RESPONSE_CONTRACT,
         }
 

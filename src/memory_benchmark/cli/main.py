@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import warnings
 import json
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -190,12 +191,22 @@ def _add_prediction_arguments(parser: argparse.ArgumentParser) -> None:
         required=True,
         choices=list_prediction_benchmarks(),
     )
-    parser.add_argument("--profile", choices=["smoke", "official-full"], default=None)
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help=(
+            "Registered TOML profile name. With 'predict formal' this may be "
+            "official-full or an explicitly registered author profile."
+        ),
+    )
     parser.add_argument(
         "--config-track",
         choices=["unified", "native"],
-        default="unified",
-        help="Run with framework-unified or method paper-native readout configuration.",
+        default=None,
+        help=(
+            "Deprecated compatibility flag. 'unified' is a no-op; new 'native' "
+            "runs are disabled in favor of explicit TOML profiles."
+        ),
     )
     parser.add_argument("--variant", default=None)
     parser.add_argument("--run-id", default=None)
@@ -435,6 +446,7 @@ def _prediction_command_from_args(args: argparse.Namespace) -> PredictCommand:
     """从 predict/run 参数构造统一 prediction command。"""
 
     normalized = _normalize_prediction_args(args)
+    _warn_or_reject_legacy_config_track(args.config_track)
     _validate_method_selector(args, normalized)
     return PredictCommand(
         project_root=Path(args.root),
@@ -494,10 +506,10 @@ def _normalize_prediction_args(args: argparse.Namespace) -> dict[str, Any]:
 
     if args.prediction_mode is None:
         return _normalize_legacy_prediction_args(args)
-    if args.profile is not None:
+    if args.prediction_mode == "smoke" and args.profile is not None:
         raise MemoryBenchmarkError(
-            "Do not pass --profile with 'predict smoke' or 'predict formal'; "
-            "the subcommand already selects the run mode."
+            "Do not pass --profile with 'predict smoke'; smoke always selects "
+            "the registered smoke TOML section."
         )
     if args.prediction_mode == "smoke":
         return _normalize_smoke_prediction_args(args)
@@ -554,6 +566,12 @@ def _default_smoke_history_limit(benchmark_name: str) -> int:
 def _normalize_legacy_prediction_args(args: argparse.Namespace) -> dict[str, Any]:
     """保持旧 `predict --profile ...` 写法可用，并接入新别名。"""
 
+    warnings.warn(
+        "'predict --profile ...' is deprecated; use 'predict smoke' or "
+        "'predict formal --profile ...'.",
+        FutureWarning,
+        stacklevel=3,
+    )
     _validate_smoke_axis_args(args)
     default_history_limit = _default_smoke_history_limit(args.benchmark)
     smoke = (args.profile or "smoke") == "smoke"
@@ -685,8 +703,13 @@ def _normalize_formal_prediction_args(args: argparse.Namespace) -> dict[str, Any
         raise MemoryBenchmarkError(
             "predict formal does not support --questions-per-conversation"
         )
+    selected_profile = args.profile or "official-full"
+    if selected_profile == "smoke":
+        raise MemoryBenchmarkError(
+            "predict formal cannot select the smoke profile"
+        )
     return {
-        "profile": "official-full",
+        "profile": selected_profile,
         "confirm_full": True,
         "smoke_turn_limit": 20,
         "smoke_round_limit": None,
@@ -701,6 +724,24 @@ def _normalize_formal_prediction_args(args: argparse.Namespace) -> dict[str, Any
         "output_layout": "hierarchical",
         "membench_sources": (),
     }
+
+
+def _warn_or_reject_legacy_config_track(config_track: str | None) -> None:
+    """在命令层关闭 native 新 run，并标明 unified 只剩兼容 no-op。"""
+
+    if config_track is None:
+        return
+    if config_track == "native":
+        raise MemoryBenchmarkError(
+            "--config-track native no longer creates new runs; select an explicitly "
+            "registered --profile author-<benchmark> instead"
+        )
+    warnings.warn(
+        "--config-track unified is deprecated and has no effect; the selected TOML "
+        "profile now owns answer_builder identity.",
+        FutureWarning,
+        stacklevel=3,
+    )
 
 
 def _validate_smoke_axis_args(args: argparse.Namespace) -> None:

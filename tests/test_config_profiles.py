@@ -7,6 +7,7 @@ OpenAI 配置的延迟加载行为。测试不会暴露任何密钥信息。
 from __future__ import annotations
 
 import textwrap
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -106,6 +107,31 @@ def test_load_typed_profile_rejects_unknown_key(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="unexpected"):
         load_typed_profile(toml_path, "smoke", Mem0Config)
+
+
+def test_load_typed_profile_rejects_framework_method_field_ownership_overlap(
+    tmp_path: Path,
+) -> None:
+    """method dataclass 不得重新声明 framework-owned answer_builder。"""
+
+    @dataclass(frozen=True)
+    class _InvalidMethodConfig:
+        """故意抢占 framework 字段的反例 config。"""
+
+        profile_name: str
+        answer_builder: str
+
+    toml_path = tmp_path / "invalid.toml"
+    _write_toml(
+        toml_path,
+        """
+        [smoke]
+        answer_builder = "benchmark"
+        """,
+    )
+
+    with pytest.raises(ConfigurationError, match="must not also be method config"):
+        load_typed_profile(toml_path, "smoke", _InvalidMethodConfig)
 
 
 def test_load_typed_profile_rejects_wrong_field_type(tmp_path: Path) -> None:

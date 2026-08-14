@@ -6,6 +6,9 @@
 > 2026-07-27 后的新 smoke 改用 `opencodego/deepseek-v4-flash`；本页既有 B11 数字与
 > token 观测仍是当时 `gpt-4o-mini` 历史 run，不改写、不跨模型比较。现行运行身份见
 > [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
+> 2026-08-14 M1-B 后，新 run 由 `lightmem.toml` 的公开 profile + section 内
+> `answer_builder` 选择，并写 `MethodRunIdentity v1`；旧 `config_track/TrackIdentity v1`
+> run 只作历史 artifact 回读，下文 native/unified 证据均按其发生时身份理解。
 > 2026-07-17 的 method-frozen-v2 与 v6 LoCoMo smoke 仍是有效历史证据，但 v7 改变
 > 公共 readout 与 embedding observation 契约，不能沿用 v6 artifact 宣称当前版本已
 > frozen。online-soft lifecycle 主体、MemBench 时间语义 Phase A 与 LightMem
@@ -578,7 +581,9 @@ distinct raw timestamps 仍保持，repeated raw timestamps 才形成 method-der
   `text_embedder=None` 且 compressor/topic 默认 OFF 的事实继续保留，不能把不可运行默认当权威。
 - **B10 ✅（当前主 TOML truthful；author builder 按政策延后）**：历史 M0 R1/R2 已让
   manifest 显式写 `native_scope=readout_only`、实际 embedding、answer/judge model source，
-  严格参与 evaluate/resume，旧产物身份可信。现行政策不再新增双轨：首个作者校准 run 前，
+  严格参与 evaluate/resume，旧产物身份可信。M1-B 已让 `smoke/official_full` 显式声明
+  `answer_builder="benchmark"`，新 manifest/resume/output path 使用 profile 身份且不再生成
+  native run。首个作者校准 run 前，
   LoCoMo/LME 改由 `author_locomo`/`author_longmemeval` section 选择各自完整 answer builder，
   并验收从 speaker/time/retrieved memories 到最终 messages 的变量构造；不能只复用旧
   `ANSWER_PROMPT` 模板或 readout bundle 宣称 parity。
@@ -681,11 +686,10 @@ distinct raw timestamps 仍保持，repeated raw timestamps 才形成 method-der
    `author_locomo` TOML 参数；旧判例保留在 `dual-track-config-policy.md` §10。
 2. 现行配置政策是 `method-toml-and-answer-builder-policy.md`；既有作者 prompt 资产
    已归位到 `prompts/author/lightmem.py`，仍解释历史 readout（longmemeval builder
-   透传 prompt_messages，2-message 守卫）；旧
-   `methods/lightmem_native_prompts.py` 仅作 re-export 兼容。track-aware 路径层已生效
-   （M0-1c，2026-07-13）：
-   旧 run 落 `…/{mode}/{track}/{run_id}`，旧布局仅可 evaluate 不可 resume；新配置迁移前
-   不改写这些历史身份。
+   透传 prompt_messages，2-message 守卫）。内部 consumer 已迁 canonical import，旧
+   `methods/lightmem_native_prompts.py` 于 M1-B 删除。M0-1c 的 track-aware 路径只解释历史：
+   旧 run 落 `…/{mode}/{track}/{run_id}`，仍可 evaluate 但不可被新 run resume；新 run 落
+   `…/{mode}/{profile}/{run_id}`，不移动或改写旧身份。
 3. **日志已知限制**：LightMem 内部诊断走 `self.logger`（`Created N`=INFO :372、
    `No entries found`=WARNING :474/:554），INFO 级连它自己的内部日志文件都不落
    （实测 0 字节）；框架 `logs/method.log` 亦未捕获。真需要内部 INFO 时再查其

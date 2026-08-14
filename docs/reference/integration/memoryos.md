@@ -7,6 +7,8 @@
 > 2026-07-27 后的新 smoke 改用 `opencodego/deepseek-v4-flash`；原 B11 run 的
 > `gpt-4o-mini` 身份保持历史真实，不改写、不跨模型比较。现行运行身份见
 > [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
+> 2026-08-14 M1-B 后，新 run 由 `memoryos.toml` profile 与 `answer_builder` 选择，并写
+> `MethodRunIdentity v1`；旧 readout-native/config-track run 保持历史只读身份。
 > 证据底：`ws02.7/notes/m1-memoryos-evidence.md`、
 > `ws02.7/notes/m2-memoryos-adapter.md`。
 
@@ -64,13 +66,14 @@
   SentenceTransformer all-MiniLM-L6-v2/384、外部 L2 normalize + FAISS IP，build 字节不变，
   无需重建；性能主配置仍在真实效果实验前通过 TOML 裁定，裸名/限定名等价须以本地模型
   revision/hash 进 identity。
-- **B10 历史 config-track ✅ truthful v1；新 author builder 迁移待办**：LoCoMo 官方 system/user prompt 由 AST parity 锁逐字
+- **B10 ✅ 历史身份可读且 M1-B 新运行迁移已关闭；author builder 待办**：LoCoMo 官方 system/user prompt 由 AST parity 锁逐字
   核对，answer=`gpt-4o-mini`, temperature=0.7, max_tokens=2000。官方无 LLM judge，
   bundle `judge_profile=None` 时回落框架默认 judge。paper build 超参只登记资产，当前
   config-track 尚不消费 build override，因此真实范围仍只是 readout；M0 R1/R2 已在新 manifest
   显式写 `implementation_variant=product`、PyPI embedding、`native_scope=readout_only`、
   `judge_source=framework_fallback` 与 answer/judge model source，并由 evaluate/resume 严格消费，
-  旧产物身份不改写；首个作者 LoCoMo 校准 run 前改由 `author_locomo` section 选择完整 builder，
+  旧产物身份不改写。M1-B 已使主 `smoke/official_full` 选择 benchmark builder、写 profile
+  identity 并拒绝新 native run；首个作者 LoCoMo 校准 run 前改由 `author_locomo` section 选择完整 builder，
   不再只靠 `judge_profile=None` 推断。
 - **B11 smoke+冻结 ✅**：五 benchmark 共 8 个真实 run 已完成 predict、全部适用 evaluator、
   付费 judge、效率落盘、formatted-memory/state 抽查、四格 W2 物理隔离与 HaluMem operation-level

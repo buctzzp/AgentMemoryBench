@@ -6,6 +6,7 @@
 # TOML、manifest、日志或 artifact。主轨没有暗中选择 benchmark 专用参数。
 
 [smoke]
+answer_builder = "benchmark"
 llm_model = "deepseek-v4-flash"
 memory_mode = "chat"
 search_method = "hybrid"
@@ -25,6 +26,7 @@ drain_timeout_seconds = 600.0
 max_workers = 1
 
 [official_full]
+answer_builder = "benchmark"
 llm_model = "gpt-4o-mini"
 memory_mode = "chat"
 search_method = "hybrid"

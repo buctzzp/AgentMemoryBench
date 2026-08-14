@@ -11,7 +11,7 @@ from memory_benchmark.benchmark_adapters.locomo_prompt import (
 from memory_benchmark.core import AnswerResult, GoldAnswerInfo, PromptMessage, Question
 from memory_benchmark.core.provider_protocol import RetrievalResult
 from memory_benchmark.evaluators.locomo_judge import LoCoMoJudgeEvaluator
-from memory_benchmark.methods.lightmem_native_prompts import (
+from memory_benchmark.prompts.author.lightmem import (
     LIGHTMEM_LOCOMO_NATIVE_ANSWER_PROMPT,
     LIGHTMEM_LOCOMO_NATIVE_JUDGE_PROMPT,
     LIGHTMEM_NATIVE_ANSWER_PROFILES,

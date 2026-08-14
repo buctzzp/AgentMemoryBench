@@ -201,7 +201,6 @@ class LettaConfig:
             "embedding_provider": None,
             "readout": "all-attached-core-blocks-query-independent",
             "namespace_algorithm": LETTA_NAMESPACE_ALGORITHM,
-            "answer_builder": "framework_benchmark_unified",
         }
 
 

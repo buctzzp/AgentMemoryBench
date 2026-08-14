@@ -253,7 +253,7 @@ def test_execute_predict_delegates_to_registered_prediction(
             "benchmark_name": "locomo",
             "project_root": tmp_path,
             "profile_name": "smoke",
-            "config_track": "unified",
+            "config_track": None,
             "variant": None,
             "run_id": "run-1",
             "resume": False,
@@ -1884,6 +1884,93 @@ def test_main_maps_predict_formal_v2_arguments_to_command(
             output_layout="hierarchical",
         )
     ]
+
+
+def test_predict_formal_accepts_explicit_registered_profile_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """formal 只转发 profile identity；是否注册由 method 组合根统一裁定。"""
+
+    received: list[PredictCommand] = []
+    monkeypatch.setattr(
+        main_cli,
+        "execute_predict",
+        lambda command: received.append(command)
+        or SimpleNamespace(run_id="author-run"),
+    )
+
+    exit_code = main_cli.main(
+        [
+            "predict",
+            "formal",
+            "--root",
+            str(tmp_path),
+            "--method",
+            "mem0",
+            "--benchmark",
+            "locomo",
+            "--profile",
+            "author-locomo",
+            "--allow-api",
+        ]
+    )
+
+    assert exit_code == 0
+    assert received[0].profile == "author-locomo"
+    assert received[0].confirm_full is True
+
+
+def test_predict_smoke_rejects_explicit_profile(tmp_path: Path) -> None:
+    """smoke profile 固定，不能借同一子命令切入 formal/author section。"""
+
+    assert main_cli.main(
+        [
+            "predict",
+            "smoke",
+            "--root",
+            str(tmp_path),
+            "--method",
+            "mem0",
+            "--benchmark",
+            "locomo",
+            "--profile",
+            "official-full",
+            "--allow-api",
+        ]
+    ) == 2
+
+
+def test_predict_rejects_native_track_and_warns_for_unified_noop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """旧 native 不再创建 run；显式 unified 只在迁移期作为告警 no-op。"""
+
+    received: list[PredictCommand] = []
+    monkeypatch.setattr(
+        main_cli,
+        "execute_predict",
+        lambda command: received.append(command)
+        or SimpleNamespace(run_id="compat-run"),
+    )
+    base = [
+        "predict",
+        "smoke",
+        "--root",
+        str(tmp_path),
+        "--method",
+        "mem0",
+        "--benchmark",
+        "locomo",
+        "--allow-api",
+    ]
+
+    assert main_cli.main([*base, "--config-track", "native"]) == 2
+    assert received == []
+    with pytest.warns(FutureWarning, match="has no effect"):
+        assert main_cli.main([*base, "--config-track", "unified"]) == 0
+    assert received[0].config_track == "unified"
 
 
 def test_predict_smoke_rejects_resume_and_retry_failed(

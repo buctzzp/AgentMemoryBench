@@ -185,7 +185,7 @@ def test_locomo_registered_prediction_offline_probe_workflow(
         / "mem0"
         / "locomo"
         / "smoke"
-        / "unified"
+        / "smoke"
         / "locomo-a6-probe-smoke"
     ).resolve()
     paths = ExperimentPaths.create(run_dir)

@@ -18,6 +18,7 @@
 # secret 只声明**环境变量名**，值不进本文件、不进 manifest、不进日志。
 
 [smoke]
+answer_builder = "benchmark"
 llm_model = "deepseek-v4-flash"
 embedding_backend = "sentence_transformer"
 embedding_model_path = "models/all-MiniLM-L6-v2"
@@ -52,6 +53,7 @@ vector_db_port = 6333
 vector_db_credential_env = "MEMOS_QDRANT_API_KEY"
 
 [official_full]
+answer_builder = "benchmark"
 llm_model = "gpt-4o-mini"
 embedding_backend = "sentence_transformer"
 embedding_model_path = "models/all-MiniLM-L6-v2"

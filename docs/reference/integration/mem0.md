@@ -5,6 +5,8 @@
 > 2026-07-27 后的新 smoke 改用 `opencodego/deepseek-v4-flash`；冻结 B11 仍是当时
 > `gpt-4o-mini` 历史证据，不跨模型比较。现行运行身份见
 > [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
+> 2026-08-14 M1-B 后，新 run 由 `mem0.toml` profile 与 `answer_builder` 选择，并写
+> `MethodRunIdentity v1`；下文 native/unified 只描述旧 artifact 的历史真实身份。
 > 现行冻结证据与声明缺口见
 > `../../workstreams/ws02.7-method-track/branches/method-recertification/mem0/notes/mem0-frozen-v2.md`；
 > `../../workstreams/ws02.7-method-track/notes/mem0-frozen-v1.md` 保留为历史快照。
@@ -111,10 +113,12 @@ message role/content 与检索请求 top-k，不改 Mem0 V3 extraction/update/de
   `official_full` 是否采用 `text-embedding-3-small`/1536/Qdrant cosine。若切换，托管权重
   revision 只能声明 `provider_managed_unpinned`，并须全量重建、重开 B8+/B11、由用户确认
   预算/规模/run_id。官方 0.1 相关性门槛导致空检索仍属于方法语义，不当作框架故障。
-- **B10 ✅ current 主配置 truthful；author TOML/builder 迁移待性能阶段**：旧 native 注册 LoCoMo、LongMemEval、
+- **B10 ✅ current 主配置 truthful；M1-B 新运行迁移已关闭，author 校准待性能阶段**：旧 native 注册 LoCoMo、LongMemEval、
   BEAM；当前真实覆盖仅 readout，embedding/build override 未生效。新 manifest 已声明
   `native_scope=readout_only`、current controlled MiniLM 与 answer/judge
-  `framework_model_override`，不再由裸 `config_track=native` 暗示 full-native。首个作者校准
+  `framework_model_override`，旧身份不再由裸 `config_track=native` 冒充 full-native。
+  M1-B 已使 `smoke/official_full` 显式选择 benchmark builder，新 run 用 profile identity 且拒绝
+  native track。首个作者校准
   run 前须把有证据的 LoCoMo/LongMemEval/BEAM 设置改由 `author_<benchmark>` TOML section
   选择完整 answer builder；旧 judge 路由泛化和论文校准仍属于前置包。
 - **B11 ✅ current-v3 五格真实 smoke + 冻结**：8 个 run 覆盖 LoCoMo/LME W1+W2、MemBench

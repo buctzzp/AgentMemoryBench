@@ -28,6 +28,7 @@ from memory_benchmark.methods.registry import (
     get_method_registration,
     list_methods,
     load_method_profile,
+    resolve_method_profile,
 )
 
 
@@ -631,6 +632,53 @@ max_workers = 1
     assert config.profile_name == "smoke"
     assert config.llm_model == "gpt-4o-mini"
     assert config.embedding_model_path == "models/Qwen3-Embedding-0.6B"
+
+
+@pytest.mark.parametrize("method_name", tuple(list_methods()))
+@pytest.mark.parametrize("profile_name", ("smoke", "official-full"))
+def test_registered_profiles_declare_benchmark_answer_builder(
+    method_name: str,
+    profile_name: str,
+) -> None:
+    """十家主 section 都必须由 TOML 显式选择 benchmark builder。"""
+
+    resolved = resolve_method_profile(
+        method_name=method_name,
+        profile_name=profile_name,
+        project_root=Path(__file__).resolve().parents[1],
+    )
+
+    assert resolved.public_name == profile_name
+    assert resolved.section_name == profile_name.replace("-", "_")
+    assert resolved.answer_builder == "benchmark"
+    assert resolved.config.profile_name == resolved.section_name
+
+
+def test_new_run_profile_requires_answer_builder_without_weakening_config_loader(
+    tmp_path: Path,
+) -> None:
+    """新 run 缺 builder 应失败，旧 config-only loader 仍可读取同一 section。"""
+
+    profile_path = tmp_path / "configs" / "methods" / "mem0.toml"
+    profile_path.parent.mkdir(parents=True)
+    profile_path.write_text(
+        """
+[smoke]
+extraction_model = "gpt-4o-mini"
+embedding_model = "text-embedding-3-small"
+embedding_dimensions = 1536
+reader_model = "gpt-4o-mini"
+top_k = 200
+max_workers = 1
+ingestion_chunk_size = 1
+infer = true
+""",
+        encoding="utf-8",
+    )
+
+    assert load_method_profile("mem0", "smoke", tmp_path).profile_name == "smoke"
+    with pytest.raises(ConfigurationError, match="answer_builder"):
+        resolve_method_profile("mem0", "smoke", tmp_path)
 
 
 def test_unknown_method_is_rejected() -> None:

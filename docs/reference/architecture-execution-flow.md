@@ -155,19 +155,24 @@ validate_compatibility(
 ### 5.2 CLI v2 参数风格
 
 三种调用风格统一归一化为 `PredictCommand`：
-- **Legacy**：`predict --profile smoke --method mem0`
-- **v2 smoke**：`predict smoke --method mem0`（强制 confirm_full=False）
-- **v2 formal**：`predict formal --method mem0`（强制 profile=official-full, confirm_full=True）
+- **Legacy（deprecated）**：`predict --profile smoke --method mem0`
+- **v2 smoke**：`predict smoke --method mem0`（固定选择 `smoke` TOML profile，不能另传
+  `--profile`）
+- **v2 formal**：`predict formal --method mem0` 默认选择 `official-full`；作者校准必须显式
+  `predict formal --profile author-<benchmark>`，且该公开名已在 method registry 注册。
+
+旧 `--config-track unified` 只发弃用警告且不改变新 run；`--config-track native` 已拒绝创建
+新 run。旧参数只为历史调用迁移保留，不再选择 answer/build 行为。
 
 ### 5.3 成本安全门
 
 两层保护，在 method 构建**之前**校验：
 1. `--confirm-api`：method requires_api 时必需
-2. `--confirm-full`：profile 为 official-full 时额外必需
+2. `--confirm-full`：任何非 `smoke` profile 均额外必需
 
 ---
 
-## 6. Prediction 统一装配（13 步，`run_prediction.py`）
+## 6. Prediction 统一装配（13 步，`runners/registered_prediction.py`）
 
 | 步骤 | 操作 | 关键说明 |
 |------|------|---------|
@@ -175,13 +180,13 @@ validate_compatibility(
 | 2 | 查找注册 | get_benchmark_registration() + get_method_registration() |
 | 3 | 校验 prediction_enabled | benchmark 是否允许 prediction |
 | 4 | 校验 task-family 兼容 | validate_compatibility() |
-| 5 | 解析 profile section | 确认 profile 在 method config 中存在 |
+| 5 | 解析 profile envelope | 公开 profile → TOML section；强制读取完整 `answer_builder` |
 | 6 | 成本门确认 | --confirm-api / --confirm-full |
 | 7 | 校验 resume 约束 | resume=True 时 run_id 必须显式提供 |
-| 8 | 加载 method profile config | TOML → 强类型 dataclass（如 Mem0Config） |
-| 9 | 解析 run scope & variants | smoke→SMOKE, official-full→FULL；variant selector → 具体 variant 元组 |
+| 8 | 加载 method profile config | framework 字段与 method 参数分离；其余 TOML → 强类型 dataclass（如 Mem0Config） |
+| 9 | 生成运行身份并解析 scope/variant | `MethodRunIdentity v1` 锁 profile/section/builder/build；smoke→SMOKE，其余→FULL |
 | 10 | 生成 child run ID | 显式或自动 {method}-{benchmark}-{profile}-{uuid8} |
-| 11 | 解析输出目录 | flat（outputs/）或 hierarchical（outputs/runs/{method}/{benchmark}/...） |
+| 11 | 解析输出目录 | flat（outputs/）或 hierarchical（`outputs/runs/{method}/{benchmark}/[variant]/{smoke|formal}/{profile}/...`） |
 | 12 | 装配 per-child 准备 | load dataset → 构建 manifest → 创建 policy → 创建 RunContext |
 | 13 | 预检 + 构建 + 运行 | preflight → 决定 shared/isolated → 创建 method → run_predictions() |
 
@@ -546,16 +551,19 @@ Scope 不可嵌套。Observation ID 通过 SHA-256 生成（确定性去重，�
 
 ### 13.1 Smoke vs Full 差异
 
-**Smoke 和 official-full profile 在所有四个 method 的 TOML 中完全相同**（模型、top-k、阈值等），唯一差异是 `max_workers`（1 vs 10）。数据规模控制由 benchmark adapter 层处理：
+十家 method 都有 `smoke` 与 `official_full` 主 section，并显式声明
+`answer_builder="benchmark"`。两者应保持同一 method 算法口径；允许 API runtime、并发等已由
+政策明确声明的运行差异，不能把“两个 section 字节完全相同”当契约。数据规模仍由 benchmark
+adapter/planner 层控制：
 
 | 维度 | Smoke | Full |
 |------|-------|------|
 | Conversations | smoke_conversation_limit（默认 1） | 全部 |
 | History | benchmark policy 决定；LoCoMo 默认 1 round=2 turns | 完整 |
 | Questions | 1 per conversation | 全部 |
-| Profile params | 与 full 完全相同 | — |
+| Profile params | 主算法口径与 full 对齐；低预算 API runtime 另有身份 | 主表参数由 `official_full` 明示 |
 | confirm_full | 不需要 | 需要 |
-| 输出布局 | hierarchical（smoke/） | hierarchical（formal/） |
+| 输出布局 | hierarchical（`smoke/smoke/`） | hierarchical（`formal/{profile}/`） |
 
 ### 13.2 LoCoMo vs LongMemEval Smoke 截断差异
 

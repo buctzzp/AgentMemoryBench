@@ -8,7 +8,7 @@ from types import ModuleType
 
 import pytest
 
-from memory_benchmark.methods.mem0_native_prompts import (
+from memory_benchmark.prompts.author.mem0 import (
     MEM0_BEAM_NATIVE_ANSWER_PROMPT,
     MEM0_BEAM_NATIVE_JUDGE_PROMPT,
     MEM0_BEAM_NATIVE_JUDGE_SYSTEM_PROMPT,

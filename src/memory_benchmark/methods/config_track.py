@@ -1,7 +1,7 @@
-"""method 双轨 readout 配置与可验证的 run 身份契约。
+"""历史双轨 artifact 的 readout 配置与 TrackIdentity v1 兼容契约。
 
-注册表负责从当前强类型 method config 解析 build 身份；本模块只组合 build 身份与
-unified/native readout 资产，并为 manifest 提供严格的 v1 序列化、解析和校验。
+新 prediction 不再调用本模块；它只为既有 unified/native manifest 的 evaluation、
+成本回读和严格校验保留。新运行身份位于 :mod:`memory_benchmark.methods.run_identity`。
 """
 
 from __future__ import annotations
@@ -25,17 +25,18 @@ from memory_benchmark.prompts.author.memoryos import (
     MEMORYOS_NATIVE_ANSWER_PROFILES,
 )
 
+from .run_identity import (
+    BuildIdentityDeclaration,
+    EmbeddingIdentity,
+    EmbeddingProfile,
+    ImplementationVariant,
+    validate_embedding_identity,
+)
+
 
 TrackContractVersion = Literal["v1"]
-ImplementationVariant = Literal["product", "reproduction:memoryos-chromadb"]
 ReadoutTrack = Literal["unified", "native"]
 NativeScope = Literal["none", "readout_only"]
-EmbeddingProfile = Literal[
-    "controlled_embedding_v1",
-    "product_canonical_required_config_v1",
-    "product_default_v1",
-    "unclassified_pending",
-]
 JudgeSource = Literal["framework_default", "official_parity", "framework_fallback"]
 AnswerModelSource = Literal[
     "framework_default",
@@ -47,13 +48,6 @@ JudgeModelSource = Literal[
     "official_parity",
     "framework_model_override",
 ]
-EmbeddingRevisionStatus = Literal[
-    "local_unpinned",
-    "provider_managed_unpinned",
-    "pending",
-]
-EmbeddingIdentityStatus = Literal["declared", "pending"]
-
 LiteralAlias: TypeAlias = Any
 CONTRACT_VERSION: TrackContractVersion = cast(
     TrackContractVersion, get_args(TrackContractVersion)[0]
@@ -104,135 +98,6 @@ def _optional_manifest_text(value: Any, label: str) -> str | None:
     if type(value) is not str or not value.strip():
         raise ConfigurationError(f"{label} must be null or a non-blank string")
     return value
-
-
-@dataclass(frozen=True)
-class EmbeddingIdentity:
-    """method 当前 build 的 concrete embedding 身份。"""
-
-    provider: str | None
-    model: str | None
-    dimension: int | None
-    revision: str | None
-    revision_status: EmbeddingRevisionStatus
-    normalization: str | None
-    instruction: str | None
-    distance: str | None
-    identity_status: EmbeddingIdentityStatus
-
-    def __post_init__(self) -> None:
-        """构造时立即拒绝非法或自相矛盾的 embedding 身份。"""
-
-        validate_embedding_identity(self)
-
-    def to_manifest_dict(self) -> dict[str, Any]:
-        """返回可公开写入 manifest 的稳定字典。"""
-
-        return {
-            "provider": self.provider,
-            "model": self.model,
-            "dimension": self.dimension,
-            "revision": self.revision,
-            "revision_status": self.revision_status,
-            "normalization": self.normalization,
-            "instruction": self.instruction,
-            "distance": self.distance,
-            "identity_status": self.identity_status,
-        }
-
-    @classmethod
-    def from_manifest_dict(cls, raw: Mapping[str, Any]) -> "EmbeddingIdentity":
-        """严格解析 manifest embedding；拒绝缺键、多余键和宽松类型转换。"""
-
-        if not isinstance(raw, Mapping):
-            raise ConfigurationError("track identity embedding must be an object")
-        _require_exact_keys(
-            raw,
-            frozenset(
-                {
-                    "provider",
-                    "model",
-                    "dimension",
-                    "revision",
-                    "revision_status",
-                    "normalization",
-                    "instruction",
-                    "distance",
-                    "identity_status",
-                }
-            ),
-            "track identity embedding",
-        )
-        dimension = raw["dimension"]
-        if dimension is not None and type(dimension) is not int:
-            raise ConfigurationError("embedding dimension must be null or an integer")
-        return cls(
-            provider=_optional_manifest_text(raw["provider"], "embedding provider"),
-            model=_optional_manifest_text(raw["model"], "embedding model"),
-            dimension=dimension,
-            revision=_optional_manifest_text(raw["revision"], "embedding revision"),
-            revision_status=cast(
-                EmbeddingRevisionStatus,
-                _require_literal(
-                    raw["revision_status"],
-                    EmbeddingRevisionStatus,
-                    "embedding.revision_status",
-                ),
-            ),
-            normalization=_optional_manifest_text(
-                raw["normalization"], "embedding normalization"
-            ),
-            instruction=_optional_manifest_text(
-                raw["instruction"], "embedding instruction"
-            ),
-            distance=_optional_manifest_text(raw["distance"], "embedding distance"),
-            identity_status=cast(
-                EmbeddingIdentityStatus,
-                _require_literal(
-                    raw["identity_status"],
-                    EmbeddingIdentityStatus,
-                    "embedding.identity_status",
-                ),
-            ),
-        )
-
-
-@dataclass(frozen=True)
-class BuildIdentityDeclaration:
-    """注册表从当前 config 解析出的单一 build 身份事实源。"""
-
-    implementation_variant: ImplementationVariant
-    embedding_profile: EmbeddingProfile
-    historical_controlled_build_equivalent_to_current_main: bool
-    embedding: EmbeddingIdentity
-
-    def __post_init__(self) -> None:
-        """校验注册声明的枚举、布尔类型与 pending 对齐关系。"""
-
-        _require_literal(
-            self.implementation_variant,
-            ImplementationVariant,
-            "implementation_variant",
-        )
-        _require_literal(self.embedding_profile, EmbeddingProfile, "embedding_profile")
-        if type(self.historical_controlled_build_equivalent_to_current_main) is not bool:
-            raise ConfigurationError(
-                "historical_controlled_build_equivalent_to_current_main must be bool"
-            )
-        if (
-            self.embedding_profile == "unclassified_pending"
-            and self.embedding.identity_status != "pending"
-        ):
-            raise ConfigurationError(
-                "unclassified_pending profile requires pending embedding identity"
-            )
-        if (
-            self.embedding_profile != "unclassified_pending"
-            and self.embedding.identity_status != "declared"
-        ):
-            raise ConfigurationError(
-                "classified embedding profile requires declared embedding identity"
-            )
 
 
 @dataclass(frozen=True)
@@ -366,66 +231,6 @@ class TrackIdentity:
                 ),
             ),
         )
-
-
-def validate_embedding_identity(embedding: EmbeddingIdentity) -> None:
-    """强校验 embedding 字段及 declared/pending 互斥语义。"""
-
-    _require_literal(
-        embedding.revision_status,
-        EmbeddingRevisionStatus,
-        "embedding.revision_status",
-    )
-    _require_literal(
-        embedding.identity_status,
-        EmbeddingIdentityStatus,
-        "embedding.identity_status",
-    )
-    for label, value in (
-        ("provider", embedding.provider),
-        ("model", embedding.model),
-        ("revision", embedding.revision),
-        ("normalization", embedding.normalization),
-        ("instruction", embedding.instruction),
-        ("distance", embedding.distance),
-    ):
-        _optional_manifest_text(value, f"embedding {label}")
-        if isinstance(value, str) and value.strip().lower() == "unknown":
-            raise ConfigurationError(
-                f"embedding {label} must use null instead of the string 'unknown'"
-            )
-    if embedding.dimension is not None and (
-        type(embedding.dimension) is not int or embedding.dimension <= 0
-    ):
-        raise ConfigurationError(
-            f"embedding dimension must be a positive int or null, got {embedding.dimension!r}"
-        )
-    if embedding.identity_status == "declared":
-        if embedding.provider is None or embedding.model is None:
-            raise ConfigurationError(
-                "declared embedding identity requires non-blank provider and model"
-            )
-        if embedding.dimension is None:
-            raise ConfigurationError(
-                "declared embedding identity requires a positive dimension"
-            )
-        if embedding.revision_status == "pending":
-            raise ConfigurationError(
-                "declared embedding identity cannot use pending revision_status"
-            )
-        if embedding.distance is None:
-            raise ConfigurationError(
-                "declared embedding identity requires a known distance"
-            )
-    else:
-        if embedding.revision_status != "pending":
-            raise ConfigurationError(
-                "pending embedding identity requires revision_status='pending'"
-            )
-        if embedding.revision is not None:
-            raise ConfigurationError(
-                "pending embedding identity cannot claim a concrete revision"
-            )
 
 
 def validate_track_identity(identity: TrackIdentity) -> None:

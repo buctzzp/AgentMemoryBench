@@ -75,6 +75,12 @@
 18. **会话历史是飞行记录器，不是事实源**：compaction 后优先使用 Git + 热胶囊 + 当前
     note；只有逐字旧对话实质影响裁决时，才用 `session_id`/`transcript_path` 定点回查少量
     user/assistant turn。回查能证明当时的主张与授权，不能替代 current code/data/ruling。
+19. **配置 envelope 与产品参数分层**：`answer_builder`、运行 profile 身份等 framework-owned
+    字段属于 TOML section envelope，不应塞进十家 method dataclass 或 adapter manifest。
+    兼容用 config-only loader 可以忽略已登记的保留字段；创建新 run 的组合根必须使用更严格
+    resolver，要求 builder 存在，并把公开 profile、实际 section、builder、build/embedding 与
+    解析配置一起写进 resume identity。不能为了新 envelope 放宽任意未知 key，也不能让旧
+    `config_track` 继续选择新 run 行为。
 
 完整 33 条历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。
