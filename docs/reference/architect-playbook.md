@@ -63,6 +63,12 @@
     prerequisite 写进 evaluator registry；planner 与 direct executor 必须共用同一拓扑排序。
     同理，generic 与 operation runner 的公开 artifact schema 要对表，真实请求字段不能只在一条
     runner 里落盘。否则一份正确 machine plan 仍会被手写 CLI 或另一 runner 绕开。
+15. **不把不对称误判成不规范**：统一的是 provider contract，不是每家文件数量。`_worker`
+    可承载依赖/进程隔离，lifecycle 可承载异步完成状态机；只有变化原因、依赖与失败语义相同的
+    重复才抽公共层，不能为目录对称制造空壳或把边界塞回 adapter。
+16. **重构必须先写停手线**：删除量、文件数和行数都不是 KPI。每批只修一类依赖或职责，
+    以行为/identity/artifact 守恒和自动边界门验收；达到预先声明的终态后回到研究主线，禁止
+    用“长期可维护性”包装无限重写。
 
 完整 33 条历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

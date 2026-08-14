@@ -64,15 +64,17 @@ Letta/Graphiti 403 run 只保留作失败阶段证据，不冒充可 resume smok
 [结构归一 M0](workstreams/ws03-architecture-slimming/notes/2026-07-23-structural-normalization-m0-ruling.md)
 已完成 evaluator/prompt/文档的零语义迁移与全量守恒门；MemOS 随后已冻结，
 registry-backed `plan-smoke` preflight 与新 method ledger v1 强制门也已关闭；Graphiti、Letta 与
-LangMem、EverOS 均已完成真实 B11 与冻结对表。ws02.7 method-track 至此关闭；下一步须由用户
-在成本 pilot、指标扩展、作者校准或 official-full 中选择新 workstream，不沿用本线自动烧 API。
+LangMem、EverOS 均已完成真实 B11 与冻结对表。ws02.7 method-track 至此关闭。2026-08-14 用户
+已选择：**成本 pilot/ws05 暂缓，ws03 maintainability M1 升为当前唯一 P0**；先清 live 文档与
+依赖方向，再迁 TOML profile、共享 worker transport 和 prediction 编排。M1 明确零真实 API，
+达到停手线后再回到成本/指标/作者校准/official-full 选择。
 
 ## Workstream 索引
 
 | ID | 名称 | 状态 | 优先级 | 说明 |
 | --- | --- | --- | --- | --- |
 | [ws01](workstreams/ws01-docs-governance/README.md) | docs-governance | done | P0 | 文档治理与任务树重构（2026-07-05 终验通过） |
-| [ws02](workstreams/ws02-phase1-matrix/README.md) | phase1-matrix | open | P0 | 5×10 smoke 矩阵（里程碑 7.20）：method 审计、新 adapter、极小 smoke（主线） |
+| [ws02](workstreams/ws02-phase1-matrix/README.md) | phase1-matrix | paused | P1 | 5×10 smoke 已关闭；只剩成本估算/申请材料，按用户裁定随 ws05 暂缓 |
 | [ws02.1](workstreams/ws02.1-membench/README.md) | membench-adapter | accepted | P0 | MemBench frozen-v1；method 矩阵的 0-10k/100k smoke 证据统一在 ws02.7 |
 | [ws02.2](workstreams/ws02.2-halumem/README.md) | halumem-adapter | accepted | P0 | HaluMem frozen-v1；method extraction/update/QA/type 真实 smoke 由 ws02.7 逐家验收 |
 | [ws02.3](workstreams/ws02.3-beam/README.md) | beam-adapter | accepted | P0 | BEAM frozen-v1；method variant/rubric 真实 smoke 由 ws02.7 逐家验收 |
@@ -80,9 +82,9 @@ LangMem、EverOS 均已完成真实 B11 与冻结对表。ws02.7 method-track �
 | [ws02.5](workstreams/ws02.5-method-interface-audit/README.md) | method-interface-audit | done | P0 | 2026-07-09 关闭：5 method 接口审计 + MemoryOS 迁移 + 当时配置归一化；shared embedder 资产保留为 controlled，ws02.7 现审计 product-default 精确身份与迁移/复证面 |
 | [ws02.6](workstreams/ws02.6-first-smoke-hardening/README.md) | first-smoke-hardening | done | P0 | 五 benchmark 全部 frozen-v1 + B6 横向总验收完成（2026-07-12）；method 侧已转 ws02.7 |
 | [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | done | P0 | Phase 1 十家 method 均 frozen；5×10 smoke matrix closed |
-| [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | open | P1 | 结构归一 M0 已关闭；legacy/LLM runtime 等 M1 后续有边界推进，不阻塞 MemOS |
+| [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | in-progress | P0 | 当前主线：M1 freshness/依赖方向 → TOML profile → worker transport → prediction 拆责 |
 | [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | open | P2 | isolated 进度心跳、第三方 stdout/tqdm 治理 |
-| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | open | P1 | 全量实验申请材料：成本估算表 + 结果汇总 + 兜底验证清单（依赖 ws02） |
+| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | paused | P1 | 用户 2026-08-14 暂缓成本 pilot；ws03 达停手线后再显式恢复 |
 | [ws06](workstreams/ws06-tests-restructure/README.md) | tests-restructure | open | P2 | tests 分组重组、大文件拆分、过时断言排查 |
 
 新 workstream 的建立与命名规则见 `AGENTS.md` "文档规则"。

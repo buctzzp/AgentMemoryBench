@@ -149,9 +149,9 @@ TOML 负责**保存数值与选择实现**；代码只负责两类不可避免�
 ## 6. 实施日程
 
 1. **现在已完成**：政策落盘；不改既有实验史，不触发真实 API。
-2. **当前主线不变**：先完成 MemBench FirstAgent canonical pair split，再完成
-   RetrievalEvidence M1；5×10 主 smoke 不等待作者参数调优。
-3. **首个作者校准 run 或真实效果 full run 之前**：
+2. **2026-08-14 状态**：MemBench canonical split、RetrievalEvidence 与 5×10 主 smoke
+   均已关闭。旧“当前主线”只属历史，不再作为恢复动作。
+3. **当前 ws03 M1-B（首个作者校准 run 或真实效果 full run 之前）**：
    - loader/registry 接受有一手证据的 `author_<benchmark>` section；
    - 把仍写死在 adapter/third_party 接缝、但确属配置的参数暴露进 TOML；
    - 用 TOML 的 `answer_builder` 选择 benchmark builder 或作者完整 builder；

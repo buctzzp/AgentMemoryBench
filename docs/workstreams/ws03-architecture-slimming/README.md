@@ -1,10 +1,24 @@
 ---
 id: ws03
 parent: null
-status: open
+status: in-progress
 created: 2026-07-05
 ---
 # ws03 架构减重（registry / legacy 接口 / CLI / LLM 配置）
+
+## Codex 恢复胶囊（2026-08-14）
+
+- **当前目标**：十家 method/5×10 smoke 已闭合，暂停 ws05 成本 pilot；执行有停手线的
+  maintainability M1，不调用真实 API。
+- **当前批次**：M1-A freshness 与依赖方向——先切断 `runners → cli`、
+  `prompts → evaluators`，补最小 architecture/live-link gate，再盘点兼容层退出。
+- **当前判据**：只读
+  [十家 method 后的可维护性审计与 M1 裁决](notes/2026-08-14-maintainability-audit-and-m1-ruling.md)；
+  结构灰区查 [`code-structure-principles.md`](../../reference/code-structure-principles.md)。
+- **禁止事项**：不跑成本/official-full/API，不改 metric/prompt/method 算法，不按文件行数
+  大搬家，不碰 data/models/outputs/third-party 或用户未跟踪资产。
+- **完成门**：每批定向守恒 + compileall + 无 API 全量回归；M1-A→B→C→D 顺序推进，
+  达到 note §7 后停止 ws03，不无限重构。
 
 ## 目标
 
@@ -15,6 +29,13 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
 
 ## 当前断点
 
+- 2026-08-14：用户裁定成本估算实验暂缓，先做项目“瘦身/规范化”。架构师完成 current-main
+  只读审计并发布
+  [M1 裁决](notes/2026-08-14-maintainability-audit-and-m1-ruling.md)：
+  `metrics/evaluators` 分层和 method-specific worker/lifecycle 属合理结构；真实优先债是两条
+  反向依赖、活跃 `config_track` 选择器、四份 worker transport 重复及 prediction 巨型编排。
+  docs/roadmap/ws02/ws05 的 live 状态同步修正；文档门 `5 passed in 1.26s`，M1-A 的依赖
+  环修复与自动边界门为下一动作。
 - 2026-07-23：**结构归一 M0 已关闭**。架构师在
   `codex/ws03-structural-normalization-m0` 按 A→B→C 串行完成：
   文档热/冷分层与任务路由经验检索、pure metric + retrieval evaluator 共壳、
@@ -24,8 +45,8 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
   `1685 passed, 3 deselected, 1 warning, 29 subtests passed in 128.11s`。
   详细 commit、边界与行数见
   [结构归一 M0 裁决/施工记录](notes/2026-07-23-structural-normalization-m0-ruling.md)。
-- 下一主线回到 ws02.7 接入 **MemOS**；ws03 保持 open，后续 legacy/LLM runtime/
-  evaluator registry 等 M1 不与新 method 接入无边界混做。
+- “下一主线回 ws02.7 接 MemOS”已于 2026-08-14 被本轮 M1 裁决 supersede；MemOS 与后续
+  十家 method 均已冻结，旧句不得再作为恢复动作。
 - 先前的
   [里程碑收口与架构减重审计](notes/2026-07-23-first-25-cell-consolidation-audit.md)
   中体积盘点、scratch 吸收和 legacy 分类继续有效，只有“立即 MemOS”的顺序被改判。
@@ -35,12 +56,24 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
 
 ## 设计文档
 
+- [十家 method 后的可维护性审计与 M1 裁决](notes/2026-08-14-maintainability-audit-and-m1-ruling.md)
+- [稳定代码结构判据](../../reference/code-structure-principles.md)
 - [2026-06-21-registry-capability-simplification-design.md](2026-06-21-registry-capability-simplification-design.md)
 - [2026-06-21-llm-provider-config-design.md](2026-06-21-llm-provider-config-design.md)
 - [首批 25 格里程碑收口与架构减重审计](notes/2026-07-23-first-25-cell-consolidation-audit.md)
 - [结构归一 M0 裁决：metric / evaluator / prompt / 文档](notes/2026-07-23-structural-normalization-m0-ruling.md)
 
 ## 任务清单
+
+- [ ] **M1-A freshness / dependency direction**：修 live 状态与链接；切断
+  `runners → cli`、`prompts → evaluators`；补最小 AST/import gate；完成 shim/legacy
+  消费者和退出门清单。
+- [ ] **M1-B TOML profile migration**：新 run 由 TOML section + 完整 answer builder
+  选择；active identity 与 legacy `TrackIdentity v1` readback 分离；旧 artifact 不改写。
+- [ ] **M1-C isolated worker transport**：抽四家 adapter 主进程侧 JSON-lines transport；
+  产品 worker、环境、Docker/DB 与 cleanup 差异继续显式。
+- [ ] **M1-D prediction decomposition**：leaf-first 拆 planning/preflight、ingest、answer、
+  parallel；原 import 保留 façade，每批行为守恒。达到停手线后返回用户选择，不自动扩 M1-E。
 
 - [ ] 弱化 `MethodCapability` 推理，conversation-QA 兼容性收敛到
   `BaseMemoryProvider` 继承关系；保留轻量 registry（名称 → factory/config/

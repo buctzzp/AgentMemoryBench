@@ -1,7 +1,7 @@
 ---
 id: ws05
 parent: null
-status: open
+status: paused
 created: 2026-07-05
 ---
 # ws05 全量实验申请材料与前置工程
@@ -14,6 +14,9 @@ created: 2026-07-05
 
 ## 当前断点
 
+- 2026-08-14：用户明确暂缓“每个 benchmark 跑隔离空间再外推”的成本 pilot，先执行
+  ws03 maintainability M1。本页任务未取消；恢复前必须由用户重新确认预算、规模与 run_id，
+  不得从旧 smoke/artifact 或底层 resume 能力自动续跑。
 - 2026-07-05：依赖 ws02 矩阵产出，暂不开工。本 workstream 从旧
   "experiment-reporting" 口径重构而来：成本估算不再是一次性报告任务，而是
   ws02 每个格子的标准产出；本 ws 负责"组装申请材料 + 全量前置工程"。

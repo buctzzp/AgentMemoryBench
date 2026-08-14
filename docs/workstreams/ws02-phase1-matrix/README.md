@@ -1,10 +1,10 @@
 ---
 id: ws02
 parent: null
-status: in-progress
+status: paused
 created: 2026-07-05
 ---
-# ws02 Phase 1：5×10 Smoke 矩阵（主线，里程碑 2026-07-20）
+# ws02 Phase 1：5×10 Smoke 矩阵（smoke 已关闭；成本阶段暂停）
 
 ## 目标
 
@@ -17,8 +17,9 @@ created: 2026-07-05
 
 - adapter 与真实 smoke 覆盖已由 [ws02.7](../ws02.7-method-track/README.md) 关闭：5 个
   benchmark × 10 个 method 均已逐家冻结；不适用组合以 N/A/unsupported 留痕。
-- 本父 workstream 仍保持 `in-progress`，只因为“全矩阵成本估算表 + 导师汇报材料”尚未关闭；
-  它不再表示还有 method adapter 或 B11 smoke 待施工。
+- 本父 workstream 只剩“全矩阵成本估算表 + 导师汇报材料”；用户于 2026-08-14 明确暂缓
+  成本估算、先做 ws03 M1，因此状态为 `paused`。它不再表示还有 method adapter 或 B11
+  smoke 待施工，也不得被 compaction 恢复门当作当前主线。
 - 后续成本 pilot、指标扩展、作者校准或 official-full 必须新立范围并重新获用户预算批准，
   不从本页下方历史断点自动续烧 API。
 
@@ -30,7 +31,7 @@ created: 2026-07-05
 | SimpleMem | 🧩 adapter 就绪待 smoke | 🧩 adapter 就绪待 smoke | 🧩 adapter 就绪待 smoke | ⬜ | ⬜ |
 | MemOS / Letta / Cognee / LangMem / Supermemory | ⬜ | ⬜ | ⬜ | ⬜ | 🧩 adapter 就绪待 smoke |
 
-## 当前断点
+## 历史断点（冷层；禁止按下列旧“下一步”直接续工）
 
 - 2026-07-08（Codex）：ws02.2 HaluMem adapter T3-patch/R2/T4/T5/T6/T7 已完成并
   逐 task commit。operation-level runner、HaluMem 专用 `--sessions` smoke 轴、
