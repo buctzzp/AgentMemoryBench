@@ -30,7 +30,7 @@ from memory_benchmark.methods.config_track import (
     TrackIdentity,
     resolve_config_track,
 )
-from memory_benchmark.cli.run_prediction import (
+from memory_benchmark.runners.registered_prediction import (
     PredictionBatchResult,
     run_registered_conversation_qa_prediction,
 )
@@ -243,6 +243,7 @@ def execute_evaluate(command: EvaluateCommand) -> tuple[Any, ...]:
                     track_identity is None
                     or track_identity.judge_source == "official_parity"
                 )
+                and native_bundle.judge_profile.evaluator_key == metric_name
                 and metric_name == "locomo-judge"
             ):
                 native_judge = native_bundle.judge_profile

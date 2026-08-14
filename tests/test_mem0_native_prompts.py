@@ -92,6 +92,14 @@ def test_mem0_native_profiles_cover_only_three_official_harness_grids() -> None:
 
     assert set(MEM0_NATIVE_ANSWER_PROFILES) == expected
     assert set(MEM0_NATIVE_JUDGE_PROFILES) == expected
+    assert {
+        benchmark: profile.evaluator_key
+        for benchmark, profile in MEM0_NATIVE_JUDGE_PROFILES.items()
+    } == {
+        "locomo": "locomo-judge",
+        "longmemeval": "longmemeval-judge",
+        "beam": "beam-rubric-judge",
+    }
     assert all(
         profile.settings.temperature == 0.0
         and profile.settings.max_tokens == 4096

@@ -142,11 +142,11 @@ LightMem 当前需要本地模型：
 - `models/llmlingua-2-bert-base-multilingual-cased-meetingbank`
 
 method 资源和官方参数核对见
-[docs/method-resource-parameter-audit.md](docs/method-resource-parameter-audit.md)。
+[docs/reference/method-resource-parameter-audit.md](docs/reference/method-resource-parameter-audit.md)。
 当前 public Hugging Face 数据仓库为
 [BuptZZP/agentmemorybench-data](https://huggingface.co/datasets/BuptZZP/agentmemorybench-data)，
 准备和上传流程见
-[docs/huggingface-datasets.md](docs/huggingface-datasets.md)。
+[docs/reference/huggingface-datasets.md](docs/reference/huggingface-datasets.md)。
 
 ## 项目层次
 
@@ -547,7 +547,8 @@ OpenAI-compatible response usage；`tokenizer_estimate` 表示 wrapper 无法拿
 
 - `docs/archive/handoffs/`: 上下文压缩或额度中断前的交接文件。
 - `docs/task-ledger.md`: 当前任务和历史文档 open/closed 状态总账。
-- `docs/logs/`: 开发过程中的主题日志，命名规则见 [docs/logs/README.md](docs/logs/README.md)。
+- 历史主题日志已归档，命名规则见
+  [docs/archive/logs/README.md](docs/archive/logs/README.md)。
 - `outputs/<run_id>/logs/run.log`: 单次运行的人类可读日志。
 - `outputs/<run_id>/logs/events.jsonl`: 单次运行的结构化事件日志。
 

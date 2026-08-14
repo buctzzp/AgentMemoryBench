@@ -14,7 +14,6 @@ from memory_benchmark.core import (
     GoldAnswerInfo,
     Question,
 )
-from memory_benchmark.evaluators.longmemeval_judge import LongMemEvalJudgeEvaluator
 from memory_benchmark.evaluators.locomo_judge import LoCoMoJudgeEvaluator
 from memory_benchmark.methods.config_track import (
     CONTRACT_VERSION,
@@ -118,7 +117,7 @@ def test_lightmem_native_config_track_is_readout_only_asset(
     if benchmark == "locomo":
         assert bundle.judge_profile.prompt_template == LIGHTMEM_LOCOMO_NATIVE_JUDGE_PROMPT
     else:
-        assert bundle.judge_profile.evaluator_type is LongMemEvalJudgeEvaluator
+        assert bundle.judge_profile.evaluator_key == "longmemeval-judge"
 
 
 @pytest.mark.parametrize("benchmark", ("locomo", "longmemeval", "beam"))

@@ -32,23 +32,49 @@ def test_codex_hooks_config_registers_compact_and_commit_events() -> None:
     payload = json.loads(HOOKS_CONFIG.read_text(encoding="utf-8"))
     hooks = payload["hooks"]
     assert hooks["SessionStart"][0]["matcher"] == "^compact$"
+    assert hooks["SessionStart"][0]["hooks"][0]["additionalContextLimit"] == 1800
     assert hooks["PreToolUse"][0]["matcher"] == "^Bash$"
 
 
-def test_compact_session_injects_bounded_recovery_gate() -> None:
-    """压缩重启必须注入静默四步恢复门，并明确禁止全文扫文档。"""
+def test_compact_session_injects_bounded_hot_snapshot() -> None:
+    """压缩重启应直接注入 Git/胶囊/会话定位器，不再要求重复读取热层。"""
 
     payload = _run_hook(
-        {"hook_event_name": "SessionStart", "source": "compact"}
+        {
+            "hook_event_name": "SessionStart",
+            "source": "compact",
+            "session_id": "thread-test-123",
+            "transcript_path": "/tmp/rollout-test.jsonl",
+        }
     )
     context = payload["hookSpecificOutput"]["additionalContext"]
     assert "git status --short" in context
     assert "git log -5 --oneline" in context
-    assert "docs/workstreams/" in context
-    assert "Codex 恢复胶囊" in context
-    assert "禁止为恢复全局而通读全部" in context
-    assert "恢复仅在后台执行" in context
-    assert "不要自动向用户播报 compaction" in context
+    assert "docs/workstreams/ws03-architecture-slimming/README.md" in context
+    assert "## Codex 恢复胶囊" in context
+    assert "当前批次" in context
+    assert "thread-test-123" in context
+    assert "/tmp/rollout-test.jsonl" in context
+    assert "上述快照与胶囊已完成原四步门的 1-3" in context
+    assert "证明“当时说过什么”，不是当前项目真理" in context
+    assert "不自动播报 compaction" in context
+    assert len(context) < 9_000
+
+
+def test_compact_session_sanitizes_untrusted_locator_fields() -> None:
+    """会话定位器必须单行且有界，不能借事件字段扩张恢复 context。"""
+
+    payload = _run_hook(
+        {
+            "hook_event_name": "SessionStart",
+            "source": "compact",
+            "session_id": "session\nwith\twhitespace",
+            "transcript_path": "x" * 2_000,
+        }
+    )
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert "session with whitespace" in context
+    assert "x" * 513 not in context
 
 
 def test_bash_git_commit_injects_discipline_reminder() -> None:

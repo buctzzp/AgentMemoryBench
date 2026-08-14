@@ -56,6 +56,26 @@ def test_benchmark_prompt_layer_does_not_depend_on_methods() -> None:
     assert violations == []
 
 
+def test_all_prompt_assets_do_not_depend_on_evaluator_execution() -> None:
+    """作者与 benchmark prompt 都只能声明 key，不能反向保存 evaluator class。"""
+
+    prompt_root = _PROJECT_ROOT / "src" / "memory_benchmark" / "prompts"
+    violations: list[str] = []
+    for path in sorted(prompt_root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""]
+            else:
+                continue
+            for module in modules:
+                if module.startswith("memory_benchmark.evaluators"):
+                    violations.append(f"{path.name}:{node.lineno}: {module}")
+    assert violations == []
+
+
 def test_unified_answer_builders_have_single_canonical_owner() -> None:
     """五家主配置 builder 只能定义在 prompts/benchmarks，adapter 只可转发。"""
 

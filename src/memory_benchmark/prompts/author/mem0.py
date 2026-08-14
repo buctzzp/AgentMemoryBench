@@ -4,10 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from memory_benchmark.evaluators.beam_rubric_judge import BeamRubricJudgeEvaluator
-from memory_benchmark.evaluators.locomo_judge import LoCoMoJudgeEvaluator
-from memory_benchmark.evaluators.longmemeval_judge import LongMemEvalJudgeEvaluator
-
 MEM0_LOCOMO_NATIVE_ANSWER_PROMPT = ('You are answering a question using retrieved memories from past conversations. '
  'Follow these reasoning steps IN ORDER.\n'
  '\n'
@@ -677,7 +673,7 @@ class Mem0NativeJudgeProfile:
     profile_name: str
     prompt_template: str
     system_prompt: str
-    evaluator_type: type
+    evaluator_key: str
     temperature: float
     max_tokens: int
     n: int
@@ -718,7 +714,7 @@ MEM0_NATIVE_JUDGE_PROFILES = {
         profile_name="mem0_locomo_memory_benchmarks_native_judge_v1",
         prompt_template=MEM0_LOCOMO_NATIVE_JUDGE_PROMPT,
         system_prompt=MEM0_LOCOMO_NATIVE_JUDGE_SYSTEM_PROMPT,
-        evaluator_type=LoCoMoJudgeEvaluator,
+        evaluator_key="locomo-judge",
         temperature=0.0, max_tokens=4096, n=1,
         response_format={"type": "json_object"},
         skipped_categories=frozenset({"5"}),
@@ -728,7 +724,7 @@ MEM0_NATIVE_JUDGE_PROFILES = {
         profile_name="mem0_longmemeval_memory_benchmarks_native_judge_v1",
         prompt_template=MEM0_LONGMEMEVAL_NATIVE_JUDGE_PROMPT,
         system_prompt="",
-        evaluator_type=LongMemEvalJudgeEvaluator,
+        evaluator_key="longmemeval-judge",
         temperature=0.0, max_tokens=4096, n=1,
         response_format=None,
         skipped_categories=frozenset(),
@@ -738,7 +734,7 @@ MEM0_NATIVE_JUDGE_PROFILES = {
         profile_name="mem0_beam_memory_benchmarks_native_judge_v1",
         prompt_template=MEM0_BEAM_NATIVE_JUDGE_PROMPT,
         system_prompt=MEM0_BEAM_NATIVE_JUDGE_SYSTEM_PROMPT,
-        evaluator_type=BeamRubricJudgeEvaluator,
+        evaluator_key="beam-rubric-judge",
         temperature=0.0, max_tokens=4096, n=1,
         response_format={"type": "json_object"},
         skipped_categories=frozenset(),

@@ -110,6 +110,12 @@ worker transport、MemOS scheduler waiter、Letta Docker 生命周期之所以�
 新结论先落 L3，架构师验收后把承重摘要回填 L2；状态只更新 L1。L1 不复制 L3 的完整
 证据，L2 不保存每日施工进度。这样既避免“失忆”，也避免恢复过程再次挤爆上下文。
 
+Codex 会话另有一条外层恢复链：active context 是易失 working set；
+`SessionStart(source=compact)` 只注入有界 Git 快照、L1 胶囊和会话定位器；项目文档保存
+经裁决的语义记忆；本地 transcript 是按需回放的逐字证据档案。旧对话中的用户、actor 或
+架构师主张都可能已过时，优先级始终低于 current code/data 与最新裁决。经验只有同时具备
+“稳定落点 + 索引入口 + 任务触发器 + supersede 路径”才算可复用资产，不能只写不读。
+
 ## 4. 本仓库的具体判法
 
 | 现象 | 裁决方法 |

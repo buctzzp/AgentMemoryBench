@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Literal
 import warnings
 
-from memory_benchmark.cli.run_prediction import (
+from memory_benchmark.runners.registered_prediction import (
     PredictionBatchResult,
     run_registered_conversation_qa_prediction,
 )

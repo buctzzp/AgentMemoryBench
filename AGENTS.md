@@ -108,13 +108,15 @@
 - **上下文不是持久记忆**：Codex 上下文窗口有限且会压缩；对话里已经裁定但未落盘的
   内容等同于尚未交接。每次用户拍板、验收阻断、派卡/回卡和架构裁决都应先写入活跃
   workstream README 或对应 spec/note/手册，再依 `git log` 恢复。冷启动才读
-  `architect-onboarding.md`；同一会话压缩后只走下条四步恢复门，禁止把冷启动全文读序
-  搬进 compact 恢复，也禁止凭残余摘要装作记得。
+  `architect-onboarding.md`；同一会话压缩后只走下条热快照恢复，热快照失败才走四步兜底，
+  禁止把冷启动全文读序搬进 compact 恢复，也禁止凭残余摘要装作记得。
 - **压缩恢复必须可自举**：项目 `.codex/hooks.json` 用
-  `SessionStart(source=compact)` 重新注入四步恢复门；hook 首次/变更后须由用户在
-  `/hooks` 审核信任。若 hook 未加载，本文就是兜底触发器：只读 `git status --short`、
-  `git log -5 --oneline`、活跃 README 顶部恢复胶囊和当前动作的一份判据，禁止全文扫
-  docs。hook 只提醒/注入 context，不自动总结或修改项目文档。
+  `SessionStart(source=compact)` 注入 hook 时刻的有界 Git 快照、唯一活跃 README 热胶囊、
+  `session_id` 与 `transcript_path`；hook 首次/变更后须由用户在 `/hooks` 审核信任。
+  快照与胶囊一致时不重复读热层，只在承重细节缺失时定点读一份当前 note；生成失败或
+  hook 未加载时，本文才触发四步兜底：`git status --short`、`git log -5 --oneline`、
+  热胶囊、当前判据。会话 transcript 只证明“当时说过什么”，不得替代当前代码、数据或
+  裁决，也不得全文注入。hook 不自动修改项目文档；长期记忆仍必须在裁决/验收时落盘。
 - **指标资格不是 method 的义务**：每个 method × benchmark × metric 独立判
   valid/N/A/pending；不能为了填满矩阵而伪造能力。变换输入 lineage 只证明“参与过
   生成”，不等于当前 memory 仍语义承载每个 source fact，禁止直接拿它计算

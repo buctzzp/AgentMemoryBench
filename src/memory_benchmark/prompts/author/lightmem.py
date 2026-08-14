@@ -11,7 +11,6 @@ from typing import Callable
 
 from memory_benchmark.core import AnswerPromptResult, ConfigurationError, Question
 from memory_benchmark.core.provider_protocol import RetrievalResult
-from memory_benchmark.evaluators.longmemeval_judge import LongMemEvalJudgeEvaluator
 
 
 LIGHTMEM_LOCOMO_NATIVE_ANSWER_PROMPT = '''
@@ -119,7 +118,7 @@ class LightMemNativeJudgeProfile:
 
     profile_name: str
     prompt_template: str | None
-    evaluator_type: type | None
+    evaluator_key: str
     temperature: float
     max_tokens: int | None
     n: int | None
@@ -232,7 +231,7 @@ LIGHTMEM_NATIVE_JUDGE_PROFILES = {
     "locomo": LightMemNativeJudgeProfile(
         profile_name="lightmem_locomo_paper_native_judge_v1",
         prompt_template=LIGHTMEM_LOCOMO_NATIVE_JUDGE_PROMPT,
-        evaluator_type=None,
+        evaluator_key="locomo-judge",
         temperature=0.0,
         max_tokens=None,
         n=None,
@@ -246,7 +245,7 @@ LIGHTMEM_NATIVE_JUDGE_PROFILES = {
     "longmemeval": LightMemNativeJudgeProfile(
         profile_name="longmemeval_official_evaluate_qa_v1",
         prompt_template=None,
-        evaluator_type=LongMemEvalJudgeEvaluator,
+        evaluator_key="longmemeval-judge",
         temperature=0.0,
         max_tokens=10,
         n=1,

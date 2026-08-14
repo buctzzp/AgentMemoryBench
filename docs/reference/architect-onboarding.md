@@ -194,12 +194,16 @@ advisory，不会替代显式路径纪律。
    时才定点打开相关小节。
 3. **冷层**：README 历史时间线、archive、旧交接信。只有溯源时读，不参与日常恢复。
 
-压缩后固定恢复命令面：`git status --short`、`git log -5 --oneline`、热层胶囊、当前
-动作的一份判据。不得为“重新了解全局”通读 800 行历史或整本手册；全局结构由
-roadmap/integration-status 的当前行提供。每个裁决、验收阻断和用户纠正先落热层/对应
-note 并 commit，再继续大规模取证。若原始对话已不可见，必须明确说发生压缩，不能把
-摘要冒充完整记忆。受信任的 `SessionStart(source=compact)` hook 是这个恢复协议的
-自举入口；若它未加载，AGENTS 的静态入口仍是兜底。
+受信任的 `SessionStart(source=compact)` hook 会直接注入 hook 时刻的有界 Git
+status/log、唯一热层胶囊、`session_id` 与 `transcript_path`。快照与胶囊一致时，原四步门
+的前三步已经完成，只在当前裁决需要承重细节时再读胶囊链接的一份 note；若热快照生成
+失败或 hook 未加载，才执行 `git status --short`、`git log -5 --oneline`、热胶囊、当前
+判据四步兜底。不得为“重新了解全局”通读历史或整本手册。
+
+每个裁决、验收阻断和用户纠正仍须先落热层/对应 note 并 commit；hook 不替项目写长期
+记忆。逐字旧对话只在它实质影响授权或裁决时，按 session/关键词定点回查少量 turn：会话
+记录证明“当时说过什么”，不能替代 current code/data/ruling。除非用户明确询问，或压缩
+导致的信息缺口影响可靠性，不机械播报 compaction；但绝不能把摘要冒充完整记忆。
 
 ## 6. 硬规则高频项（全文见 AGENTS.md）
 

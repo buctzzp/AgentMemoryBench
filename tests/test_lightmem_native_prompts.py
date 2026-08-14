@@ -11,7 +11,6 @@ from memory_benchmark.benchmark_adapters.locomo_prompt import (
 from memory_benchmark.core import AnswerResult, GoldAnswerInfo, PromptMessage, Question
 from memory_benchmark.core.provider_protocol import RetrievalResult
 from memory_benchmark.evaluators.locomo_judge import LoCoMoJudgeEvaluator
-from memory_benchmark.evaluators.longmemeval_judge import LongMemEvalJudgeEvaluator
 from memory_benchmark.methods.lightmem_native_prompts import (
     LIGHTMEM_LOCOMO_NATIVE_ANSWER_PROMPT,
     LIGHTMEM_LOCOMO_NATIVE_JUDGE_PROMPT,
@@ -93,7 +92,7 @@ def test_longmemeval_native_judge_reuses_existing_official_evaluator() -> None:
     """LongMemEval native judge 应映射到现有官方 parity evaluator，不重复实现。"""
 
     profile = LIGHTMEM_NATIVE_JUDGE_PROFILES["longmemeval"]
-    assert profile.evaluator_type is LongMemEvalJudgeEvaluator
+    assert profile.evaluator_key == "longmemeval-judge"
     assert profile.prompt_template is None
     assert (profile.temperature, profile.max_tokens, profile.n) == (0.0, 10, 1)
 

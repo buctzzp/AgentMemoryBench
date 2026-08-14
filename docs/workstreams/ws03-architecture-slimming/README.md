@@ -10,8 +10,8 @@ created: 2026-07-05
 
 - **当前目标**：十家 method/5×10 smoke 已闭合，暂停 ws05 成本 pilot；执行有停手线的
   maintainability M1，不调用真实 API。
-- **当前批次**：M1-A freshness 与依赖方向——先切断 `runners → cli`、
-  `prompts → evaluators`，补最小 architecture/live-link gate，再盘点兼容层退出。
+- **当前批次**：M1-B TOML profile migration——新 run 由 method TOML section + 完整 answer
+  builder 选择；active identity 与旧 `TrackIdentity v1` artifact readback 分离。
 - **当前判据**：只读
   [十家 method 后的可维护性审计与 M1 裁决](notes/2026-08-14-maintainability-audit-and-m1-ruling.md)；
   结构灰区查 [`code-structure-principles.md`](../../reference/code-structure-principles.md)。
@@ -29,6 +29,15 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
 
 ## 当前断点
 
+- 2026-08-14：**M1-A 已关闭**。registered prediction application service 下沉到
+  `runners/registered_prediction.py`，旧 CLI import 保留同 module object 的薄 shim；
+  `prompts/author` 改存 evaluator key，`runners → cli` 与 `prompts → evaluators` 均由 AST
+  门防回归。live-link gate 修出根 README 三条陈旧链接；compact hook 现注入有界 Git
+  快照、唯一热胶囊与会话定位器。兼容消费者/退出门见
+  [M1-A 施工与验收记录](notes/2026-08-14-maintainability-m1a-implementation.md)。定向门
+  `234 passed`，compileall exit 0；无 API 全量门
+  `2164 passed, 3 deselected, 13 warnings, 29 subtests passed in 173.27s`。下一动作严格为 M1-B，
+  不提前拆 worker/prediction。
 - 2026-08-14：用户裁定成本估算实验暂缓，先做项目“瘦身/规范化”。架构师完成 current-main
   只读审计并发布
   [M1 裁决](notes/2026-08-14-maintainability-audit-and-m1-ruling.md)：
@@ -57,6 +66,7 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
 ## 设计文档
 
 - [十家 method 后的可维护性审计与 M1 裁决](notes/2026-08-14-maintainability-audit-and-m1-ruling.md)
+- [M1-A 依赖方向、freshness 与恢复自举施工记录](notes/2026-08-14-maintainability-m1a-implementation.md)
 - [稳定代码结构判据](../../reference/code-structure-principles.md)
 - [2026-06-21-registry-capability-simplification-design.md](2026-06-21-registry-capability-simplification-design.md)
 - [2026-06-21-llm-provider-config-design.md](2026-06-21-llm-provider-config-design.md)
@@ -65,7 +75,7 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
 
 ## 任务清单
 
-- [ ] **M1-A freshness / dependency direction**：修 live 状态与链接；切断
+- [x] **M1-A freshness / dependency direction**：修 live 状态与链接；切断
   `runners → cli`、`prompts → evaluators`；补最小 AST/import gate；完成 shim/legacy
   消费者和退出门清单。
 - [ ] **M1-B TOML profile migration**：新 run 由 TOML section + 完整 answer builder

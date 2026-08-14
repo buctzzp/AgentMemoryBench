@@ -8,6 +8,7 @@
             "type": "command",
             "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/project_guard.py\"",
             "timeout": 5,
+            "additionalContextLimit": 1800,
             "statusMessage": "Injecting compact recovery gate"
           }
         ]

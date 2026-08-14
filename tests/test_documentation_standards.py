@@ -5,8 +5,10 @@
 """
 
 import ast
+import re
 import unittest
 from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
 
@@ -14,6 +16,17 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 FIRST_PARTY_SOURCE = ROOT / "src" / "memory_benchmark"
 TESTS_ROOT = ROOT / "tests"
+LIVE_DOCUMENTS = (
+    ROOT / "AGENTS.md",
+    ROOT / "README.md",
+    ROOT / "docs" / "README.md",
+    ROOT / "docs" / "roadmap.md",
+    ROOT / "docs" / "reference" / "architect-onboarding.md",
+    ROOT / "docs" / "reference" / "architect-playbook.md",
+    ROOT / "docs" / "reference" / "code-structure-principles.md",
+    ROOT / "docs" / "workstreams" / "ws03-architecture-slimming" / "README.md",
+)
+MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")
 
 
 pytestmark = pytest.mark.unit
@@ -83,6 +96,27 @@ class DocumentationStandardsTests(unittest.TestCase):
         self.assertIn("YYYY-MM-DD", content)
         self.assertIn("phase", content)
         self.assertIn("project-log", content)
+
+    def test_live_document_relative_links_resolve(self):
+        """热入口的本地相对链接必须存在，archive 不纳入本批无边界扫描。"""
+
+        missing: list[str] = []
+        for document in LIVE_DOCUMENTS:
+            self.assertTrue(document.is_file(), f"live document missing: {document}")
+            text = document.read_text(encoding="utf-8")
+            for raw_target in MARKDOWN_LINK.findall(text):
+                target = raw_target.strip().strip("<>")
+                if target.startswith(("http://", "https://", "mailto:", "#")):
+                    continue
+                relative = unquote(target.split("#", 1)[0])
+                if not relative:
+                    continue
+                resolved = (document.parent / relative).resolve()
+                if not resolved.exists():
+                    missing.append(
+                        f"{document.relative_to(ROOT)} -> {target}"
+                    )
+        self.assertEqual(missing, [])
 
     def test_every_python_module_has_chinese_module_docstring(self):
         """测试每个 Python 文件顶端是否有中文模块说明。"""

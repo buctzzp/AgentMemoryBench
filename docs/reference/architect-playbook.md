@@ -69,6 +69,12 @@
 16. **重构必须先写停手线**：删除量、文件数和行数都不是 KPI。每批只修一类依赖或职责，
     以行为/identity/artifact 守恒和自动边界门验收；达到预先声明的终态后回到研究主线，禁止
     用“长期可维护性”包装无限重写。
+17. **经验必须有读取触发器**：落盘不等于形成长期记忆。每条稳定经验都要进入热规则或
+    检索索引，写清适用任务、何时读取、被什么新证据 supersede；任务开工先定点复用，再做
+    current-source 复核。孤立 note、无入口调查和只写不读，都是“看似积累、实际失忆”。
+18. **会话历史是飞行记录器，不是事实源**：compaction 后优先使用 Git + 热胶囊 + 当前
+    note；只有逐字旧对话实质影响裁决时，才用 `session_id`/`transcript_path` 定点回查少量
+    user/assistant turn。回查能证明当时的主张与授权，不能替代 current code/data/ruling。
 
 完整 33 条历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。
