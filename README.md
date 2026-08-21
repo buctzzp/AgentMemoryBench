@@ -18,7 +18,7 @@ method 接入统一 benchmark 的研究者。
 conversation history -> question -> answer-level score
 ```
 
-### Phase 1 目标与进展（2026-08-09）
+### Phase 1 目标与进展（2026-08-21）
 
 Phase 1 范围是 **5 个 benchmark × 10 个 method**。
 多模态字段已在 core 中保留，但当前阶段不主动运行多模态 benchmark。
@@ -30,13 +30,17 @@ Phase 1 的**交付物是 5×10 smoke 矩阵**（每格极小规模真实测试 
 
 - 5 个 benchmark adapter 全部 frozen-v1；canonical、Gold Evidence Group、异常账、answer/judge
   和 metric 资格均有稳定文档。
-- 6 个 method 已完成五格真实 smoke 并冻结：LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS。
-- Letta/MemGPT、LangMem、EverOS 已完成 product-faithful adapter、五格 dossier、机器 smoke plan
-  与无 API 回归；Letta 首次真实 smoke 已到达 OpenCodeGo endpoint，但区域 opt-in 返回 403，
-  三家 B11 暂停在同一个外部账号门，不能标 frozen。
-- Graphiti OSS `v0.29.3` 已通过 source/product M1，正在做产品运行时与 metric 资格审计；它于
-  2026-08-09 接替 source-unavailable 的 Supermemory，且不代表 Zep hosted product。
-- 最新已记录的无 API 全量基线为 **2078 passed, 3 deselected, 13 warnings, 29 subtests**。
+- Phase 1 十家 method 已完成全部可行格的真实 smoke、B1-B11 与冻结；不适用组合以
+  N/A/unsupported 留痕，不为填矩阵伪造能力。Graphiti OSS `v0.29.3` 已接替
+  source-unavailable 的 Supermemory，且不代表 Zep hosted product。
+- 2026-08-21 冻结后差量审计只发现 A-Mem 的 runtime provenance stamp 与既有 N/A 裁决
+  不一致；现已做零 API 精确修复，不撤销既有 build smoke，也不改写历史 artifact。
+- 十家产品调用签名、参数/返回类型、framework granularity 与产品 list/batch 语义集中在
+  [Method 产品接口与注入粒度总账](docs/reference/method-interface-inventory.md)，逐家细节由
+  对应 integration 页承载。
+- 当前主树无 API 全量基线为
+  **2200 passed, 3 deselected, 25 warnings, 29 subtests passed**；测试总数较 ws04 当时的
+  历史基线变化来自后续 legacy 退役与新契约门增删，不能只比较裸计数判断退化。
 
 协议全文见 [spec-protocol-v3.md](docs/workstreams/ws02-phase1-matrix/spec-protocol-v3.md)，
 逐家进度与恢复断点见 [ws02.7](docs/workstreams/ws02.7-method-track/README.md)。

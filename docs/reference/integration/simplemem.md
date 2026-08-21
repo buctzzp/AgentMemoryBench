@@ -18,6 +18,24 @@
 | `retrieve` | `hybrid_retriever.retrieve(query)` | framework 自己回答，不走 `ask()` |
 | clean retry | 删除 conversation 独占 state dir | 物理隔离 |
 
+## 产品接口契约（参数、返回与批次）
+
+完整粒度矩阵见
+[`../method-interface-inventory.md`](../method-interface-inventory.md)。SimpleMem 五格均为
+`consume_granularity="turn"`；虽然产品另有 `add_dialogues(List[Dialogue])`，主轨并不调用它，
+而是让每个 canonical turn 独立进入 `add_dialogue()`，从而保留产品窗口、overlap 与
+`previous_entries` 的串行链。
+
+| 产品调用 | 参数类型与本项目传值 | 产品返回 | adapter 映射 |
+| --- | --- | --- | --- |
+| `SimpleMemSystem.add_dialogue(speaker: str, content: str, timestamp: Optional[str] = None) -> None` | `speaker=event.speaker_name or event.role`；`content` 为原文+共享 caption；`timestamp` 经产品可接受格式解析，源缺失保持 `None` | 无显式 return，即 `None`；内部把一条 `Dialogue` 放入 buffer，窗口满时同步 synthesis | `IngestResult` 只报告公开 turn/time；不把 `None` 当写入失败 |
+| `SimpleMemSystem.finalize() -> None` | 无参数；处理不足一个窗口的残余 buffer | 无显式 return，即 `None` | conversation 末尾调用；HaluMem 每个 session 边界调用后读取新 entry delta，并只清 extraction context，不删长期 memory |
+| `HybridRetriever.retrieve(query: str, enable_reflection: Optional[bool] = None) -> list[MemoryEntry]` | `query=query.query_text`；主配置保留产品 reflection/planning；adapter 最终按 `query.top_k` 截公开结果 | 有序 `MemoryEntry` 列表；entry 含 `entry_id/lossless_restatement/timestamp/location/persons/entities/topic/keywords` 等产品字段 | 转为 `tuple[RetrievedItem, ...]` 与包含全部 reader 字段的 `formatted_memory`；绕开会自行答题的 `ask()` |
+
+这里的 `list[MemoryEntry]` 是**检索返回容器**，不是 ingest 粒度。SimpleMem 不要求
+user/assistant 交替，也不要求偶数条；LoCoMo speaker、LongMemEval 异形 role、MemBench
+ThirdAgent 与 BEAM orphan 都逐 turn 原样写入，不造 placeholder。
+
 ## B1-B11
 
 - **B1 ✅**：官方 repo 快照 `third_party/methods/SimpleMem`，upstream

@@ -152,5 +152,20 @@ run identity 改动，不重烧 smoke。
 SimpleMem 与 MemOS 的 `DOC_FIX` 在本轮直接修正稳定文档。全部 `BACKLOG` 都是 source upgrade、
 author calibration 或正式实验前依赖刷新，不改变当前 frozen build。
 
-停手线已达到：七行都有 verdict。六家保持当前 frozen build；A-Mem 只临时重开 B5/GRID，
-待一张小修关闭后恢复完整 frozen。这样保留完整审查视野，同时不让复核吞掉 ws05/后续主线。
+**§5.2 当时的停手线**：七行都有 verdict。六家保持 current frozen build；A-Mem 只临时
+重开 B5/GRID，待一张小修关闭后恢复完整 frozen。后续实际 closure 见 §5.3。
+
+### 5.3 A-Mem closure（2026-08-21）
+
+精确重开已按 §5.2 原边界关闭：runtime `RetrievalEvidence`、method registration、manifest
+预期与零 API 强反例统一为 `semantic_provenance=n_a`、`provenance_granularity=none`；
+`search_agentic()` 的真实返回顺序未被 adapter 重排，故 `stable_ranking=valid` 继续作为独立
+assertion。LoCoMo、LongMemEval、MemBench、BEAM 的 provenance-qrel Recall/Precision/F1/NDCG
+仍为 N/A；sidecar source ids 只服务审计、HaluMem session delta 与隔离验货。
+
+修复没有改变 A-Mem product source、memory build/state bytes、检索算法或 answer artifact，
+因此不重烧真实 API smoke。旧 artifact 永久按旧 adapter/manifest identity 回读且不改写；
+current build 恢复完整 `method-frozen-v1`，ws02.7 恢复 done。零 API 验收：定向集合
+`138 passed in 12.71s`；全量
+`2200 passed, 3 deselected, 25 warnings, 29 subtests passed in 200.86s`；compileall 与
+`git diff --check` 均为 exit 0。

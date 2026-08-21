@@ -162,6 +162,28 @@ runtime。
 生命周期补丁：
 [`memos-product-runtime-observability.patch`](../../../scripts/patches/memos-product-runtime-observability.patch)。
 
+## 产品接口契约（参数、返回与批次）
+
+跨 method 粒度矩阵见
+[`../method-interface-inventory.md`](../method-interface-inventory.md)。本项目直接调用 typed
+handler，不启动 HTTP host；`APIADDRequest`/`APISearchRequest` 是 Pydantic request model，
+不是“已经发出 HTTP”的标志。
+
+| typed 调用 | 关键参数类型与本项目取值 | handler 返回/完成语义 | adapter 映射 |
+| --- | --- | --- | --- |
+| `AddHandler.handle_add_memories(request: APIADDRequest)` | `user_id: str`；`writable_cube_ids: list[str]`；`session_id: Optional[str]`；`task_id: str`；`messages: list[dict]`，每项 `role/content: str`、`chat_time: Optional[str]`、`message_id: str`；`async_mode="async"`；`mode=None` | immediate response 只证明任务已提交，不证明 fine memory 完成 | adapter 保存 `(namespace, task_id)`，逐个 `wait_for_business_task(...)` 到唯一 terminal success 后才返回 `IngestResult` |
+| `SearchHandler.handle_search_memories(request: APISearchRequest)` | `query/user_id: str`；`readable_cube_ids: list[str]`；`mode="fast"`；`top_k: int`；`relativity/dedup/rerank/neighbor_discovery: bool`；其余 include/tool/filter/history/reference-time 字段见 §2.1 | `SearchResponse`；adapter 只消费 `response.data["text_mem"]` 的 bucket/memory list | 按产品 bucket→memory 原序生成 `tuple[RetrievedItem, ...]` 与 `formatted_memory`；LoCoMo 两 namespace 分槽，不伪造跨库 global rank |
+| `local_tracker.wait_for_business_task(user_id: str, business_task_id: str, timeout_seconds: float)` | 与 add 的 namespace/task 完全相同 | terminal task record；失败/超时抛错 | 是 async build 的真实完成门，不是额外算法步骤 |
+
+framework 五格统一给 MemOS `SessionBatch`。普通四格的整个 session 对应一个
+`APIADDRequest.messages` list；LoCoMo 按官方双 namespace/正反 role 映射，每路再按
+`batch_size=2` 切多个 list，奇数尾为 singleton，**不补 placeholder**。因此这里同时存在
+“framework session 粒度”和“产品 pair-size batch”，两者不矛盾。
+
+`retrieve(RetrievalQuery) -> RetrievalResult` 的 `items` 保留产品 text-memory 元素；当前
+MemOS 没有 lossless source mapping，semantic provenance 仍按资格页声明 pending/N/A，不能因
+`SearchResponse` 是 list 就自动解锁 Recall。完整请求示例、namespace 与返回消费边界见 §2.1。
+
 ## 3. 本项目对 MemOS 的修改（patch 内容）
 
 patch 只改**失败可见性**与**已支持能力的暴露**，成功路径算法零变化：

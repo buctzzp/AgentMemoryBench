@@ -37,6 +37,56 @@ current stable repo 只含 LongMemEval graph-building eval：逐 message `role: 
 单 user group。它没有完整 question search/answer/judge，因此只提供 payload parity；LoCoMo、
 HaluMem、BEAM、MemBench 都是 framework extension。Graphiti OSS 也不等于 Zep cloud 产品。
 
+## 产品接口契约（参数、返回与批次）
+
+跨 method 粒度矩阵见
+[`../method-interface-inventory.md`](../method-interface-inventory.md)。Graphiti 五格均为
+`consume_granularity="turn"`；产品入口不是 list batch，每个有可见 content 且有 source time
+的 canonical turn 恰好一次 `add_episode()`。
+
+### 写入
+
+```python
+await Graphiti.add_episode(
+    name: str,
+    episode_body: str,
+    source_description: str,
+    reference_time: datetime,
+    source: EpisodeType = EpisodeType.message,
+    group_id: str | None = None,
+    uuid: str | None = None,
+    update_communities: bool = False,
+    ...,
+) -> AddEpisodeResults
+```
+
+adapter 传 `name=turn_id`、`episode_body="speaker/role: rendered content"`、固定公开
+source description、timezone-aware source time、`source=message`、conversation 物理库内固定
+group，且关闭 communities。worker 从 `AddEpisodeResults.episode.uuid: str` 与
+`edges: list[EntityEdge]` 提取本 episode 新解析的 edge ids，返回
+`episode_uuid: str`、`edge_count: int`、`reused_operation: bool` 与 LLM/embedding
+observations；adapter 映射为 `IngestResult.metadata` 并保存 episode→turn sidecar。
+
+### 检索
+
+```python
+await Graphiti.search(
+    query: str,
+    center_node_uuid: str | None = None,
+    group_ids: list[str] | None = None,
+    num_results: int = DEFAULT_SEARCH_LIMIT,
+    search_filter: SearchFilters | None = None,
+    driver: GraphDriver | None = None,
+) -> list[EntityEdge]
+```
+
+主轨传 `query=query.query_text`、当前 group、`num_results=query.top_k`，保留默认 edge
+BM25+cosine+RRF。每个 `EntityEdge` 消费 `uuid/fact/score/valid_at/invalid_at/episodes`；worker
+用 episodes 精确反查 source turn ids，返回 `items: list[dict]`、`latency_ms: float` 与 embedding
+observations。adapter 不重排，生成 `tuple[RetrievedItem, ...]`、完整 `formatted_memory` 与
+valid/turn provenance。Graphiti 没有消息 list 或偶数约束，不配 pair、不造 placeholder；
+MemBench 100k 缺 source time 时在产品调用前 fail-fast。
+
 ## 五格资格
 
 | Benchmark | 输入与异常边界 | Retrieval metric | 运行状态 |

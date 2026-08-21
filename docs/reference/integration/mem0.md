@@ -33,6 +33,64 @@
 | `end_conversation` | —（无钩子；Mem0 add 即建，无缓冲） | — |
 | `retrieve(query)` | `retrieve` 处理公开 Question；`_retrieve_native` 处理 v3 `RetrievalQuery` | `Memory.search(..., filters={"run_id": isolation_key}, top_k=…)` |
 
+## 产品接口契约（参数、返回与批次）
+
+完整粒度矩阵见
+[`../method-interface-inventory.md`](../method-interface-inventory.md)。Mem0 的
+`messages` 接受 `str | dict[str, str] | list[dict[str, str]]`，但主轨统一传
+`list[dict[str, str]]`；list 只是一笔 `Memory.add()` 的消息容器，不是固定 ingest 粒度。
+
+### `Memory.add(...)`
+
+```python
+Memory.add(
+    messages: str | dict[str, str] | list[dict[str, str]],
+    *,
+    user_id: str | None = None,
+    agent_id: str | None = None,
+    run_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    infer: bool = True,
+    memory_type: str | None = None,
+    prompt: str | None = None,
+) -> dict[str, Any]
+```
+
+主轨固定 `run_id=isolation_key`，`user_id/agent_id=None`；`metadata` 只含公开时间、session 与
+审计字段；`infer` 取 TOML；`memory_type=None`；`prompt` 只承载 source-time observation
+instruction。产品返回典型为
+`{"results": list[{"id": str, "memory": str, "event": str, ...}]}`。adapter 从每个
+`results[*].id` 建立 ingest-batch→source-turn sidecar；HaluMem 才把本 session add results
+转成 `SessionMemoryReport`。
+
+| benchmark | framework unit | 一次 `Memory.add()` 的 list |
+| --- | --- | --- |
+| LoCoMo、MemBench | `TurnEvent` | 长度 1 |
+| BEAM | `TurnPair` | 长度 1 或 2；singleton 合法，不补空 assistant |
+| LongMemEval | `SessionBatch` | adapter 按原位置每 2 条切块，尾部可长度 1 |
+| HaluMem | `SessionBatch` | 完整 session 的全部 canonical messages，供 add result 构成 session-local report |
+
+### `Memory.search(...)`
+
+```python
+Memory.search(
+    query: str,
+    *,
+    top_k: int = 20,
+    filters: dict[str, Any] | None = None,
+    threshold: float = 0.1,
+    rerank: bool = False,
+    **kwargs: Any,
+) -> dict[str, Any]
+```
+
+adapter 传 `query=query.query_text`、`filters={"run_id": isolation_key}`、实际 top-k；
+threshold/rerank 沿产品默认。返回为
+`{"results": list[{"id": str, "memory": str, "score": float, "created_at": ..., ...}]}`。
+adapter 强校结果与 sidecar，保留产品顺序/score，生成 `tuple[RetrievedItem, ...]`、完整
+`formatted_memory` 和 `RetrievalEvidence`。产品 list 返回同样不自动证明 turn-level qrel；
+资格按每个 benchmark 的实际 batch/provenance 单独裁定。
+
 HaluMem update 的 `top_k=10` 只对 Mem0 原生接口有直接含义：`_retrieve_native()` 现在只在
 `purpose="memory_update_probe"` 时把 `RetrievalQuery.top_k` 忠实传给 `Memory.search()`
 （五格输入/readout 保真 R1 已实现）；普通 QA/其他 benchmark 仍用 TOML product profile 的

@@ -264,7 +264,7 @@ class AMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
     """使用官方 A-Mem 通用产品 layer 的统一 memory system。"""
 
     consume_granularity: ConsumeGranularity = "turn"
-    provenance_granularity = "turn"
+    provenance_granularity = "none"
 
     def __init__(
         self,
@@ -661,8 +661,16 @@ class AMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
                 ),
             )
         evidence = RetrievalEvidence(
-            semantic_provenance=EvidenceAssertion(status="valid"),
-            provenance_granularity="turn",
+            semantic_provenance=EvidenceAssertion(
+                status="n_a",
+                reason_code="amem_evolved_memory_not_source_exact",
+                reason=(
+                    "A-Mem evolves current memories and linked neighbours after "
+                    "ingest; source turn ids remain audit lineage, but do not prove "
+                    "that the retrieved memory is a lossless benchmark evidence unit."
+                ),
+            ),
+            provenance_granularity="none",
             stable_ranking=EvidenceAssertion(status="valid"),
         )
         return RetrievalResult(
@@ -673,7 +681,7 @@ class AMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
                 "retrieval_path": "AgenticMemorySystem.search_agentic",
                 "retrieve_k": top_k,
                 "prompt_track": "unified",
-                "provenance_granularity": "turn",
+                "provenance_granularity": "none",
             },
             evidence=evidence,
         )

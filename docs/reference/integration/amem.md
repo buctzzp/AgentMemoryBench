@@ -2,19 +2,17 @@
 
 > adapter：`src/memory_benchmark/methods/amem_adapter.py`
 >
-> 状态：current product/source、输入、lifecycle 与既有 smoke 资产仍保持
-> `method-frozen-v1`；2026-08-21 冻结后差量审计发现 runtime evidence stamp 与 B5 的
-> N/A 裁决矛盾，故**仅 B5/GRID retrieval eligibility 临时重开**。
+> 状态：**`method-frozen-v1`**。2026-08-21 冻结后差量审计发现 runtime evidence stamp
+> 与 B5 的 N/A 裁决矛盾；现已把 semantic provenance 改为 N/A/none，同时独立保留
+> stable product ranking=valid，B5/GRID 小修关闭且无需重烧 build smoke。
 >
 > 2026-08-21 后的新 smoke 改用 `opencodego/mimo-v2.5`；既有冻结 run 仍按
 > `gpt-4o-mini` 历史身份解释。现行运行身份见
 > [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
 
-> **当前红点**：adapter 与既有测试/LoCoMo artifact 实际声明
-> `semantic_provenance=valid + provenance_granularity=turn + stable_ranking=valid`；但产品检索
-> 对象是 evolution 后的 current memory，sidecar id 不能证明它仍是原 dataset turn。
-> 在小修关闭前，所有 provenance-qrel retrieval metric 仍按 N/A 解释；旧 artifact 只按旧
-> adapter identity 回读，不得据其 `valid` stamp 补算 Recall/Precision/F1/NDCG。
+> **历史 artifact 边界**：小修前的 artifact 可能仍写
+> `semantic_provenance=valid + provenance_granularity=turn`；它们只按当时 manifest 回读，
+> 不得据此补算 Recall/Precision/F1/NDCG，也不改写历史文件。
 
 ## 接口调用面
 
@@ -26,6 +24,24 @@
 | `end_conversation` | pickle note + JSON lineage | resume 不重跑 LLM |
 | clean retry | 删除该 conversation 独占 state dir | 物理隔离 |
 
+## 产品接口契约（参数、返回与批次）
+
+完整跨 method 粒度矩阵见
+[`../method-interface-inventory.md`](../method-interface-inventory.md)。A-Mem 的产品入口不是
+list batch：框架五格均以 `TurnEvent` 调一次 `ingest()`，每个真实非空 turn 恰好创建一条
+新 `MemoryNote`，不配 pair、不造 placeholder。
+
+| 产品调用 | 参数类型与本项目传值 | 产品返回 | adapter 映射 |
+| --- | --- | --- | --- |
+| `AgenticMemorySystem.analyze_content(content: str) -> dict` | `content` 是已渲染 speaker/role、图片 caption 的单 turn 文本 | `dict`，期望 `keywords: list[str]`、`context: str`、`tags: list[str]`；产品失败时会给空/General fallback | adapter 要求返回 dict，并把固定失败 sentinel 升格为异常；存在的三个键再作为下一步 `add_note(**analysis)` metadata，不直接公开 |
+| `add_note(content: str, time: Optional[str] = None, **kwargs) -> str` | `content: str`；`time` 取 `turn → session → None`；`kwargs` 传上一步 metadata | 新 `MemoryNote.id: str`；写入 current memory、Chroma 与 evolution links | `IngestResult(unit_ref=UnitRef(...))`；note id→source turn id 进入审计 sidecar，HaluMem 边界可据新 id delta 生成 `SessionMemoryReport` |
+| `search_agentic(query: str, k: int = 5) -> list[dict[str, Any]]` | `query=query.query_text`，`k=query.top_k` | 有序列表；每项至少可含 `id/content/context/keywords/tags/timestamp/category/score/is_neighbor` | 强校 list，保留产品顺序与 score，构造 `tuple[RetrievedItem, ...]` 和完整 `formatted_memory` |
+
+`retrieve(RetrievalQuery) -> RetrievalResult` 的逐项 `source_turn_ids` 只保留“参与过演化”的
+审计 lineage。current memory 的 content/context/tags/links 可能已被后续 turn evolution，故
+`semantic_provenance=n_a`、`provenance_granularity=none`；`search_agentic()` 的产品返回顺序
+未被 adapter 重排，所以 `stable_ranking=valid`。这两个 assertion 彼此独立。
+
 ## B1-B11
 
 - **B1 ✅**：官方通用仓库 `third_party/methods/A-mem-product`，upstream
@@ -35,12 +51,12 @@
   scoped retriever；clean retry 物理删除。
 - **B4 ✅**：content/role/speaker/caption 无损；typed time 走
   `turn → session → None`；formatted_memory 回带 time/context/keywords/tags。
-- **B5 🟡（目标裁决仍为 retrieval metric=N/A；runtime stamp 待修）**：Chroma 检索对象是 evolution 后的当前
+- **B5 ✅（retrieval qrel metric=N/A）**：Chroma 检索对象是 evolution 后的当前
   `MemoryNote`，其 links/context/tags 已不是原始 dataset turn；即使 content/id/source time
   字段仍稳定，sidecar 也只能证明该 turn 参与过生成，不能把当前记忆重新解释成原始 evidence。
   因此 Recall@K/Precision@K/F1/NDCG 不运行、不报告；sidecar 只用于审计、HaluMem delta 与
-  隔离验货。当前 adapter 的 `valid/turn` capability stamp 违反本裁决，重开范围仅限 B5/GRID；
-  不推翻 B1-B4/B6-B11，也不要求重烧 build smoke。
+  隔离验货。runtime、registry、manifest 与零 API 强反例现均声明 N/A/none；排序 assertion
+  仍独立为 valid，不推翻 B1-B4/B6-B11，也不要求重烧 build smoke。
 - **B6 ✅**：add_note 同步完成 note 写入与 evolution；无待 flush 的 buffer。
 - **B7 ✅**：build LLM、embedding、retrieval 与 framework answer 真实 observation 可落盘。
 - **B8 ✅**：检索只读；官方 swallow-error 两处在 wrapper fail-fast；endpoint/timeout/retry 注入。

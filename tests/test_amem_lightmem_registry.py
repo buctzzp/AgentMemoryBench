@@ -30,7 +30,7 @@ def test_amem_is_registered_for_conversation_qa() -> None:
     assert "smoke" in registration.profile_names
     assert "official-full" in registration.profile_names
     assert registration.requires_api is True
-    assert registration.provenance_granularity == "turn"
+    assert registration.provenance_granularity == "none"
     assert registration.retrieval_evidence_contract_version == "v1"
 
 

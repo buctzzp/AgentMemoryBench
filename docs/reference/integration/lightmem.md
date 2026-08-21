@@ -189,6 +189,29 @@ fail-fast（不从 conversation 的 source_path 或 question 字段猜身份）�
 （lightmem.py:323）强制抽取，两者行为不受 `lifecycle_profile` 影响。真实 API 数字
 尚待用户授权预算后另跑，本次施工只切代码路径，不产出新实验数字。
 
+## 产品接口契约（参数、返回与批次）
+
+跨 method 粒度矩阵见
+[`../method-interface-inventory.md`](../method-interface-inventory.md)，逐参数与逐返回分支见紧随
+其后的 §0.5。这里先锁 list 与调用边界：
+
+| benchmark | framework unit | 一次 `LightMemory.add_memory(messages, ...)` |
+| --- | --- | --- |
+| LoCoMo | `TurnEvent` | adapter 还原官方 pair 结构：真实 speaker 发言在 user 槽，assistant 结构槽为空；pending batch 在下一 unit 到来或边界时写出 |
+| LongMemEval、MemBench、BEAM | `TurnPair` | 长度固定为产品 pair 结构；缺一侧时为空 placeholder。placeholder 带显式 marker，并镜像同 pair 真实 child 的 id/time 以保持 slot 对齐，但不创造独立 source unit、不会冒充真实发言 |
+| HaluMem | `SessionBatch` | 整个 session 的 native pair messages 一次 `force_segment=True, force_extract=True`，用于精确 session flush |
+
+`messages` 官方接受 `dict | list[dict]`；每条 dict 的实际字段为
+`role/content/speaker_id/speaker_name/time_stamp/external_id`。这份 list 只是产品 normalizer/
+segmenter 的输入容器，不能反推 framework 粒度。`add_memory(...) -> dict[str, Any]` 只返回
+prompt/API-call/segment 诊断，不返回新 `MemoryEntry` 列表；HaluMem session report 因此由 adapter
+在该次强制 flush 周围旁听真实 insert delta，而不是把 add return 冒充 memory points。
+
+公开 `LightMemory.retrieve(...) -> list[str]` 会丢 id/score/payload；adapter 为审计 readout
+复用同一 `text_embedder.embed(query)` 与
+`embedding_retriever.search(..., return_full=True) -> list[dict]`，再映射为
+`RetrievalResult`。这不是自造检索算法，完整参数与返回键见 §0.5.2。
+
 ## 0.5 接口契约详解（官方 API）
 
 以下签名、字段和返回分支均按 vendored 官方实现现场核对；adapter 的实际传参另以

@@ -31,6 +31,9 @@
 - 想知道"某个决定为什么这样定"：先查 workstream README 的"决策记录"，再查 `archive/`。
 - 想找"某 benchmark/method 以前是否调查过"：先看 `survey/README.md`；benchmark 走三联
   survey，method 走 `reference/integration/<method>.md`，再顺链接读承重 evidence note。
+- 想知道十家 method 的产品调用签名、参数/返回类型、框架注入粒度，以及 API 中
+  `list[...]` 到底是 session、pair 还是内部 batch：先看
+  `reference/method-interface-inventory.md`，再进入对应 integration 页的“产品接口契约”。
 - 想知道 method 超参数、作者配置与 answer prompt 如何选择：
   `reference/method-toml-and-answer-builder-policy.md`。
 - 想知道 smoke/official 使用哪个 API provider、model、transport，以及如何进入

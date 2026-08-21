@@ -602,9 +602,14 @@ def test_amem_v3_preserves_roles_speakers_caption_time_and_exact_lineage(
     assert result.items[0].timestamp == "1:56 pm on 8 May, 2023"
     assert "Time: 1:56 pm on 8 May, 2023" in result.formatted_memory
     assert result.evidence is not None
-    assert result.evidence.semantic_provenance.status == "valid"
-    assert result.evidence.provenance_granularity == "turn"
+    assert result.evidence.semantic_provenance.status == "n_a"
+    assert (
+        result.evidence.semantic_provenance.reason_code
+        == "amem_evolved_memory_not_source_exact"
+    )
+    assert result.evidence.provenance_granularity == "none"
     assert result.evidence.stable_ranking.status == "valid"
+    assert result.metadata["provenance_granularity"] == "none"
     assert runtime.queries[-1] == {
         "query": "What pet did Caroline adopt?",
         "k": 10,

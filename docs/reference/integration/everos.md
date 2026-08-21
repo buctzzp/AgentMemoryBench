@@ -21,6 +21,71 @@
   LongMemEval，但没有公开 loader/final payload。HaluMem、BEAM、MemBench 均为 framework
   extension。
 
+## 产品接口契约（参数、返回与批次）
+
+跨 method 粒度矩阵见
+[`../method-interface-inventory.md`](../method-interface-inventory.md)。EverOS 五格统一接收
+`SessionBatch`。adapter 先构造整个 session 的 typed message list，独立 worker 再按产品
+`add_batch_size=25` 分批调用 memorize，所有分批仍属于同一个 session operation，末尾只 flush
+一次并等待 exact drain。
+
+### 写入与 session readout
+
+```python
+runtime.ingest_session(
+    *,
+    isolation_key: str,
+    operation_id: str,
+    session_id: str,
+    messages: list[dict[str, Any]],
+    owner_ids: list[str],
+) -> dict[str, Any]
+```
+
+每条 message 的精确 shape 为：`sender_id: str`、`sender_name: str | None`、
+`role: Literal["user", "assistant"]`、`timestamp: int`（Unix milliseconds）、
+`content: str`。worker 每批构造
+`MemorizeAddRequest(session_id: str, app_id: str, project_id: str,
+messages: list[MessageItemDTO])` 并调用 `service.memorize(dict) -> MemorizeResult`；随后用空
+messages+`is_final=True` flush。runtime 对 adapter 返回：
+
+```text
+{
+  operation_id: str,
+  exact_drain: True,
+  exact_drain_details: dict[str, Any],
+  session_items: list[dict[str, Any]],
+  llm_observations: list[dict],
+  embedding_observations: list[dict],
+  rerank_observations: list[dict],
+}
+```
+
+`session_items` 来自 public `GetRequest(..., memory_type="episode",
+filters={"session_id": session_id}) -> GetResponse`，不是 raw message echo。adapter 将其作为
+可选 `SessionMemoryReport`，同时把 operation identity/drain/count 放入 `IngestResult.metadata`。
+
+### 检索
+
+```python
+runtime.retrieve(
+    *, isolation_key: str, owner_ids: list[str], query: str, top_k: int
+) -> dict[str, Any]
+```
+
+worker 对每个 owner 调
+`SearchRequest(user_id: str, app_id: str, project_id: str, query: str,
+method: str, top_k: int, include_profile=False, enable_llm_rerank=False,
+filters=None) -> SearchResponse`。返回 episode list 先保持各 owner 产品 rank，再按
+`score desc → owner order → product rank → id` 稳定合并和去重，最终 runtime dict 含
+`items: list[dict]`、`latency_ms: float` 与三类 observation list；adapter 映射成
+`tuple[RetrievedItem, ...]`、`formatted_memory` 与 `RetrievalEvidence`。
+
+list 并未改变 framework session 粒度。唯一结构补位是 pure-assistant session 的首个空 user
+anchor：它没有 source identity，只满足 EverOS Episode 边界；其他 singleton/odd/连续 role
+均不重配。产品会把 timestamp 写进 Episode，因此缺 source time 的 MemBench 100k 在 runtime
+前明确 unsupported，不用墙钟伪造。
+
 ## 已关闭
 
 - **B0 official identity**：current product LoCoMo harness 与 research `v93.05` harness

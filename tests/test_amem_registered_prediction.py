@@ -63,7 +63,7 @@ class FakeAMemForRegisteredPrediction(MemoryProvider):
 
     instances: list["FakeAMemForRegisteredPrediction"] = []
     consume_granularity = "turn"
-    provenance_granularity = "turn"
+    provenance_granularity = "none"
     session_memory_report = False
 
     def __init__(self, **kwargs) -> None:
@@ -107,10 +107,17 @@ class FakeAMemForRegisteredPrediction(MemoryProvider):
                     source_turn_ids=(source_turn_id,),
                 ),
             ),
-            metadata={"method": "amem", "provenance_granularity": "turn"},
+            metadata={"method": "amem", "provenance_granularity": "none"},
             evidence=RetrievalEvidence(
-                semantic_provenance=EvidenceAssertion(status="valid"),
-                provenance_granularity="turn",
+                semantic_provenance=EvidenceAssertion(
+                    status="n_a",
+                    reason_code="amem_evolved_memory_not_source_exact",
+                    reason=(
+                        "A-Mem current memories are evolved and are not lossless "
+                        "benchmark evidence units."
+                    ),
+                ),
+                provenance_granularity="none",
                 stable_ranking=EvidenceAssertion(status="valid"),
             ),
         )
@@ -325,14 +332,22 @@ def test_amem_registered_prediction_runs_generic_runner_offline(
     run_dir = tmp_path / "outputs" / "amem-offline-smoke"
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     predictions = read_jsonl(run_dir / "artifacts" / "method_predictions.jsonl")
+    prompts = read_jsonl(run_dir / "artifacts" / "answer_prompts.prediction.jsonl")
     public_questions = read_jsonl(run_dir / "artifacts" / "public_questions.jsonl")
 
     assert manifest["method_name"] == "A-Mem"
     assert manifest["method"]["config"]["profile_name"] == "smoke"
     assert manifest["method"]["protocol_version"] == "v3"
-    assert manifest["method"]["provenance_granularity"] == "turn"
+    assert manifest["method"]["provenance_granularity"] == "none"
     assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"
     assert predictions[0]["answer"] == "framework fake answer"
+    evidence = prompts[0]["retrieval_evidence"]
+    assert evidence["semantic_provenance"]["status"] == "n_a"
+    assert evidence["semantic_provenance"]["reason_code"] == (
+        "amem_evolved_memory_not_source_exact"
+    )
+    assert evidence["provenance_granularity"] == "none"
+    assert evidence["stable_ranking"]["status"] == "valid"
     assert public_questions[0]["question_id"] == "q-1"
     assert "gold_answers" not in public_questions[0]
 

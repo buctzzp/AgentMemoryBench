@@ -27,6 +27,55 @@
 - LangMem message contract 不要求 user-first、交替或偶数；assistant-first、same-role、
   singleton、odd tail 均合法，所以不补 placeholder。
 
+## 产品接口契约（参数、返回与批次）
+
+跨 method 粒度矩阵见
+[`../method-interface-inventory.md`](../method-interface-inventory.md)。LangMem 五格统一接收
+`SessionBatch`；整个非空 session 映射成**一次** manager transaction，其中
+`messages: list[dict[str, str]]` 每项只有 `role/content`，保持 canonical 原序。
+
+### 写入
+
+```python
+MemoryStoreManager.ainvoke(
+    input={
+        "messages": list[dict[str, str]],
+        "max_steps": int,
+    },
+    config={
+        "configurable": {"langgraph_user_id": str},
+        "callbacks": list[BaseCallbackHandler],
+    },
+) -> list[dict[str, Any]]
+```
+
+主轨 manager 由 `create_memory_store_manager(...)` 构造，namespace template 是
+`("memories", "{langgraph_user_id}")`。产品返回 list 中每个 changed item 必须是 dict 且有
+`key: str`；它表示本次 insert/update 后发生变化的 current memory，不是逐 source-turn 回声。
+worker 随后读取 exact store snapshot，并向 adapter 返回
+`changed_memory_keys: list[str]`、`memory_count: int`、`reused_operation: bool`、LLM/embedding
+observation list 与 rehydration counts；adapter 映射为 `IngestResult.metadata`。
+
+### 检索
+
+```python
+MemoryStoreManager.asearch(
+    *,
+    query: str,
+    limit: int,
+    config={"configurable": {"langgraph_user_id": str}},
+) -> list[StoreItem]
+```
+
+每个 `StoreItem` 至少消费 `key: str`、`value: Memory | dict`、`score: float | None`。worker
+归一为 `list[{key: str, content: str, kind: str, score: float | None}]`，另返回
+`latency_ms: float` 与 embedding observations；adapter 不重排，生成
+`tuple[RetrievedItem, ...]` 和 `formatted_memory`。
+
+这里两处 list 含义不同：ingest list 是一个 session 的原始 message 容器，retrieve list 是
+evolved current memory 的 ranked result。后者有稳定 key/score/order，却没有 lossless
+source semantic mapping，因此 stable ranking=valid 与 provenance=N/A 必须分开声明。
+
 ## Runtime 与状态
 
 - framework 主进程不导入 LangMem/LangChain 依赖；每个 provider 独占一个 Python 3.12

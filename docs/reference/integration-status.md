@@ -59,7 +59,7 @@ ws02.6 于 2026-07-12 将五家全部 frozen-v1；2026-07-15 MemBench 因 100k m
 | [**LightMem**](integration/lightmem.md) | ✅ | ✅ | ✅caption v6 + MemBench/BEAM pair + HaluMem session | ✅五格真实 state；并行格物理隔离 | ✅v7 五格 readout/时间真实验收 | ✅LoCoMo/MemBench valid；LME/BEAM/HaluMem N/A；ranking pending 如实披露 | ✅online-soft + forced flush R1 | ✅prediction 与 artifact judge observations 实测 | ✅ | ✅当前 MiniLM smoke build | ✅主 TOML；author builder 按政策延后到校准前 | ✅五格 `REAL_SMOKE_PASSED` + 100K current-identity refill | **method-frozen-v3** |
 | [Mem0](integration/mem0.md) | ✅ | ✅content-hash锁(声明1) | ✅五格 role/granularity v3 | ✅混合(W2×4实弹) | ✅time/caption/role 单次渲染 | ✅turn/session；BEAM recall=N/A | ✅零flush | ✅五格 prediction+judge 实测 | ✅clean retry + 精确失败 stage | ✅当前 MiniLM smoke build；性能主配置待裁 | ✅current 主配置 truthful；author builder 待迁 | ✅五格 8 run 开箱 + inventory R1 | **method-frozen-v2** |
 | [MemoryOS](integration/memoryos.md) | ✅ | ✅PyPI；Chroma=reproduction variant | ✅pair/session | ✅物理 | ✅全层+时间 | ✅turn + M0 v1 | ✅no-op | ✅五格 prediction+judge 实测 | ✅降级审计 | ✅当前 MiniLM smoke build | ✅current 身份 truthful；author builder 待迁 | ✅五格 8 run 开箱 | **method-frozen-v1** |
-| [A-Mem](integration/amem.md) | ✅ | ✅官方 general product | ✅turn | ✅conversation 物理隔离 | ✅speaker/role/time/caption | 🟡目标=N/A；runtime `valid/turn` stamp 待修 | ✅同步 add/evolution | ✅五格 prediction+judge 实测 | ✅fail-fast+clean retry | ✅product MiniLM-384 | ✅主 TOML | ✅五格 11 run 开箱 | **v1 build；B5/GRID reopened** |
+| [A-Mem](integration/amem.md) | ✅ | ✅官方 general product | ✅turn | ✅conversation 物理隔离 | ✅speaker/role/time/caption | ✅evolved memory semantic=N/A/none；stable rank=valid | ✅同步 add/evolution | ✅五格 prediction+judge 实测 | ✅fail-fast+clean retry | ✅product MiniLM-384 | ✅主 TOML | ✅五格 11 run 开箱 | **method-frozen-v1** |
 | [SimpleMem](integration/simplemem.md) | ✅ | ✅官方 text product | ✅turn | ✅conversation 物理隔离 | ✅speaker/content/time/caption | ✅合成 memory provenance=N/A；ranking pending | ✅conversation/session finalize | ✅五格 prediction+judge 实测 | ✅兼容 patch+clean retry | ✅controlled MiniLM-384 | ✅主 TOML；build 串行 | ✅五格 11 run 开箱 | **method-frozen-v1** |
 | [MemOS](integration/memos.md) | ✅ | ✅v2.0.25 typed product | ✅session；LoCoMo 双视角内切 2 | ✅W1 namespace；W2 N/A | ✅五格真实 payload/readout | 🟡provenance/ranking pending | ✅async exact terminal | ✅build/retrieve/answer/judge 实测 | ✅fail-closed + namespace clean | ✅MiniLM-384 + runtime 分 profile | ✅主 TOML | ✅五格真实 smoke + B7 refill | **method-frozen-v1** |
 | [Letta/MemGPT](integration/letta.md) | ✅ | ✅legacy V1 0.16.8 + ai-memory-sdk v0.2.0 | ✅session；≤10 message；无 placeholder | ✅W1 subject/agent 隔离；W2 N/A | ✅五格 role/time/place/caption | N/A 演化 core blocks 无 source lineage | ✅official Run create→step→terminal | ✅build exact usage；retrieve 无 embedding；operation/generic identity 同构 | ✅journal + namespace-safe clean retry | ✅smoke/full runtime 分 profile；embedding N/A | ✅主 TOML；五格均 framework extension | ✅11 run/17 question；artifact/效率/隐私/volume machine gate | **method-frozen-v1** |
@@ -98,9 +98,10 @@ ws02.6 于 2026-07-12 将五家全部 frozen-v1；2026-07-15 MemBench 因 100k m
 > 串行，retrieval multi-query parallelism 保留；HaluMem session delta 与长期记忆保留已实测。
 > N/A 是能力结论，不是强造指标。
 > 2026-08-21 冻结后差量审计发现 A-Mem 的 adapter/test/真实 artifact 把 evolved current
-> memory 盖成 `semantic_provenance=valid`、`provenance_granularity=turn`，与上表及 frozen note
-> 的 qrel=N/A 裁决矛盾。当前只重开 B5/GRID evidence eligibility；既有 11 个 build smoke、
-> answer metric 与其他 B 门继续有效，旧 artifact 不改写。
+> memory 盖成 `semantic_provenance=valid`、`provenance_granularity=turn`，与 frozen note 的
+> qrel=N/A 裁决矛盾。current runtime/registry/manifest 已改为 N/A/none，stable ranking 仍独立
+> valid；B5/GRID 精确重开关闭。既有 11 个 build smoke 与其他 B 门继续有效，旧 artifact
+> 永久按旧 identity 回读且不改写。
 
 **逐项证据与接口调用面**：全部收归各实体的实例文档（表中名字即链接），本文不再
 就地展开（2026-07-13 起，原"LightMem 详情"节已迁入

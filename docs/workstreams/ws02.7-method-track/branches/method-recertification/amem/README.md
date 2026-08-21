@@ -13,7 +13,8 @@
 - license：MIT
 - adapter：`conversation-qa-v2-product`
 - ingest：turn
-- provenance：turn（官方 note id 到 canonical turn id 的 sidecar）
+- semantic provenance：N/A/none（evolved current memory 非原始 qrel unit）
+- audit lineage：官方 note id 到 canonical turn id 的 sidecar；不用于解锁 Recall/NDCG
 - HaluMem：每个 session 上报本段新建的官方 MemoryNote
 
 ## 当前状态
@@ -27,3 +28,7 @@ B1-B11 已关闭，current official product build 于 2026-07-23 冻结为
 Phase 1 不运行或报告 A-Mem provenance Recall@K/Precision@K/NDCG：产品检索命中的是
 evolution 后的当前记忆，而不是原始 dataset turn。note id/sidecar 仍存在，但只证明生成
 lineage，不能把当前记忆重新解释成原始 evidence。
+
+2026-08-21 冻结后差量审计发现 runtime stamp 与上述裁决矛盾；现已把 runtime、registry、
+manifest 与强反例统一为 semantic provenance=N/A/none，并单独保留 product stable
+ranking=valid。该零 API closure 不改变 memory build/state，也不重写历史 artifact。

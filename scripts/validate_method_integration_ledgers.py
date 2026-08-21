@@ -19,6 +19,7 @@ TEMPLATE_RELATIVE_PATH = Path("docs/reference/templates/method-integration-ledge
 RECERTIFICATION_RELATIVE_PATH = Path(
     "docs/workstreams/ws02.7-method-track/branches/method-recertification"
 )
+NON_METHOD_RECERTIFICATION_DIRECTORIES = frozenset({"notes"})
 METHOD_CONFIG_RELATIVE_PATH = Path("configs/methods")
 
 # 这六家在 ledger v1 生效前已经冻结；不为整理历史而强制补写 33 格。
@@ -379,7 +380,9 @@ def required_method_ids(root: Path) -> set[str]:
     branch_ids = {
         path.name
         for path in recertification_root.iterdir()
-        if path.is_dir() and path.name not in GRANDFATHERED_METHOD_IDS
+        if path.is_dir()
+        and path.name not in GRANDFATHERED_METHOD_IDS
+        and path.name not in NON_METHOD_RECERTIFICATION_DIRECTORIES
     }
     config_root = root / METHOD_CONFIG_RELATIVE_PATH
     config_ids = {

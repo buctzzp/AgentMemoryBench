@@ -14,6 +14,7 @@ from scripts.validate_method_integration_ledgers import (
     ParsedLedger,
     _validate_structured_record,
     parse_ledger,
+    required_method_ids,
     validate_instance,
     validate_repository,
     validate_template,
@@ -83,6 +84,24 @@ def test_new_method_directory_without_ledger_fails(tmp_path: Path) -> None:
 
     with pytest.raises(LedgerValidationError, match="missing integration ledgers"):
         validate_repository(tmp_path)
+
+
+def test_shared_recertification_notes_directory_is_not_a_method(tmp_path: Path) -> None:
+    """横向审计 notes 目录不得被 ledger 门误认成一家新 method。"""
+
+    recertification_root = (
+        tmp_path
+        / "docs"
+        / "workstreams"
+        / "ws02.7-method-track"
+        / "branches"
+        / "method-recertification"
+    )
+    (recertification_root / "notes").mkdir(parents=True)
+    (recertification_root / "newmethod").mkdir()
+    (tmp_path / "configs" / "methods").mkdir(parents=True)
+
+    assert required_method_ids(tmp_path) == {"newmethod"}
 
 
 def test_instance_missing_one_checkpoint_fails(tmp_path: Path) -> None:

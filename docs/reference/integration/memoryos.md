@@ -29,6 +29,61 @@
 | provenance | add 后原子 sidecar 保存 page 精确键→全部 source turn ids；LoCoMo speaker map 共存 | 检索返回原 page dict 后精确反查；旧/损坏 state fail-fast |
 | clean-retry | 删除单 conversation 物理目录，sidecar 同删 | `clean_memoryos_conversation_state` |
 
+## 产品接口契约（参数、返回与批次）
+
+完整粒度矩阵见
+[`../method-interface-inventory.md`](../method-interface-inventory.md)。MemoryOS 产品没有
+messages list：它的最小写入单元是一个双槽 QA page。framework unit 可以是 pair 或 session，
+但 adapter 最终都拆成若干次 `add_memory()`。
+
+### `Memoryos.add_memory(...)`
+
+```python
+Memoryos.add_memory(
+    user_input: str,
+    agent_response: str,
+    timestamp: str | None | _UNSET = _UNSET,
+    meta_data: dict[str, Any] | None = None,
+) -> None
+```
+
+- `user_input/agent_response` 至少一侧非空；产品不接受双空。LongMemEval 的
+  `TurnPair` 直接映射一页；LoCoMo/MemBench/BEAM/HaluMem 的 `SessionBatch` 在 adapter 内
+  按各自 role/speaker 规则拆页。
+- orphan assistant 或 dangling user 只把缺失侧设为空字符串；这是产品结构槽，不是伪造
+  “I get it” 一类内容，也不携带额外 source id。
+- `timestamp` 若显式传 `None` 就保持缺失；只有完全省略参数才由产品写 wall clock。adapter
+  永远显式传公开 source time 或 `None`。
+- `meta_data` 只写公开 source-turn ids，随 page 从 STM 迁移到 MTM；函数无显式 return，
+  Python 返回 `None`。adapter 据 product state/sidecar 形成 `IngestResult`，不靠 return 猜成功。
+
+### 纯检索拆分
+
+产品公开 `get_response(query: str, relationship_with_user="friend", style_hint="",
+user_conversation_meta_data: dict | None = None) -> str` 会“检索→答题→把问答再写回 memory”，
+因此主轨不调用它。adapter 只复用其中的纯产品组件：
+
+```python
+Retriever.retrieve_context(
+    user_query: str,
+    user_id: str,
+    segment_similarity_threshold: float = 0.1,
+    page_similarity_threshold: float = 0.1,
+    knowledge_threshold: float = 0.01,
+    top_k_sessions: int = 5,
+    top_k_knowledge: int = 20,
+) -> dict[str, Any]
+```
+
+返回固定四槽：`retrieved_pages: list[dict]`、
+`retrieved_user_knowledge: list[dict]`、
+`retrieved_assistant_knowledge: list[dict]`、`retrieved_at: str`。adapter 另读
+`short_term_memory.get_all() -> list[dict]` 和
+`user_long_term_memory.get_raw_user_profile(user_id) -> dict`，把 STM、MTM page、profile、
+user knowledge、assistant knowledge 五层组装成 `RetrievalResult`。`RetrievalQuery.top_k`
+只是 framework 请求深度；产品 `retrieve_context` 没有统一 page top-k，实际 ranked depth
+会在 metadata 中诚实另报。
+
 ## B1-B11 当前结论
 
 - **B1 来源与接口 ✅（PyPI canonical；ChromaDB=reproduction variant）**：只用产品版 `add_memory` 和拆出的纯 retrieval，不用

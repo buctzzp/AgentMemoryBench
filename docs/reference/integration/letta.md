@@ -95,6 +95,25 @@ adapter **不把 query 送入 Letta**。它按 sidecar agent id 读取全部 att
 insert/search 会绕过 core-memory learning，只能作为以后显式 diagnostic variant，禁止进入
 主表。
 
+## 产品接口契约（参数、返回与批次）
+
+跨 method 粒度矩阵见
+[`../method-interface-inventory.md`](../method-interface-inventory.md)。Letta 五格统一接收
+`SessionBatch`，但一整个 session 不一定只触发一次 model step：adapter 先保持 canonical
+role/order，再按 `max_messages_per_batch: int = 10` 切 list，每个 list 格式化成一个 official
+SDK wrapper 字符串。
+
+| 调用层 | 参数类型与本项目传值 | 返回类型/shape | adapter 消费 |
+| --- | --- | --- | --- |
+| `runtime.ensure_subject(subject_id: str) -> dict[str, Any]` | 确定性 subject id | `subject_id: str`、`agent_id: str`、`block_ids: list[str]`、`archive_id: str` | 强校并原子保存 sidecar；不是 memory ingest |
+| `runtime.ingest(subject_id: str, operation_id: str, content: str) -> dict[str, Any]` | `content` 是一批最多 10 条 `{role, content}` message 的 `<messages>...</messages>` wrapper；不是原 list 直接交给 LLM | worker 内真实调用 `AgentLoop.step([MessageCreate(role="user", content=content, otid=operation_id)], max_steps=...)`；返回 subject identity、`stop_reason: str`、`usage: list[dict]`、`step_count: int` | 只接受 terminal `end_turn/tool_rule`，usage 数量必须等于 step_count；全部 batch 完成后返回 `IngestResult` |
+| `runtime.read_blocks(subject_id: str, agent_id: Optional[str]) -> dict[str, Any]` | query 不传入产品；只按 sidecar identity 读 attached blocks | `{"agent_id": str, "blocks": list[{"id": str, "label": str, "description": str, "value": str}]}` | 按 `(label,id)` 稳定排序并构造 `formatted_memory`；`RetrievalResult.items=None` |
+
+Letta 的 list 是 adapter 的 session 内切块容器；产品最终每块只看到一条 wrapper
+`MessageCreate`。它不要求 user/assistant 交替，因此 assistant-first、same-role、singleton 与
+odd tail 均原序保留，不补 placeholder。检索是 query-independent evolved core block readout，
+没有 top-k 或 ranked item list，semantic provenance 与 stable ranking 均 N/A。
+
 ## 3. 五格输入
 
 共同规则：一个 canonical 非空 event 恰好一条 role/content message；不补 placeholder、不按

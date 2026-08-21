@@ -17,6 +17,12 @@
 > 实际盖成 `valid/turn/valid`。因此只重开 **B5/GRID retrieval eligibility**；其余冻结门与
 > 既有 smoke 资产不变。旧 artifact 不改写，也不得按错误 stamp 离线补算 retrieval qrel 指标。
 
+> **2026-08-21 closure**：current adapter、registry、manifest 与零 API 强反例现已统一为
+> `semantic_provenance=n_a + provenance_granularity=none`；产品检索顺序仍独立声明
+> `stable_ranking=valid`。B5/GRID 精确重开关闭，`method-frozen-v1` 完整恢复；无需重烧 build
+> smoke，也不改写历史 artifact。current 主树全量为
+> `2200 passed, 3 deselected, 25 warnings, 29 subtests passed in 200.86s`。
+
 ## 1. 冻结对象
 
 主轨使用官方通用产品仓库 `third_party/methods/A-mem-product/` 的
@@ -37,7 +43,7 @@
 | B2 注入粒度 | 通过 | 五格均 turn；不强配 pair、不造 placeholder；speaker/role 独立表达 |
 | B3 隔离 | 通过 | 每 conversation 独占 Chroma/state；W2 真实 worker state 物理分离 |
 | B4 输入/时间/readout | 通过 | content/caption/place/source time 无损；readout 回带 content/time/context/keywords/tags |
-| B5 provenance | **临时重开**；目标裁决仍为 retrieval metric=N/A | 检索命中 evolution 后当前 memory，不是原始 turn；adapter/test/artifact 的 `valid/turn` stamp 与本裁决冲突，须在 GRID 层关闭 |
+| B5 provenance | 通过；retrieval qrel metric=N/A | 检索命中 evolution 后当前 memory，不是原始 turn；current capability stamp=N/A/none，audit lineage 不解锁 qrel，stable ranking 独立 valid |
 | B6 flush/finalize | 通过 | `add_note` 同步落 note/evolution，无待 flush buffer |
 | B7 效率 | 通过 | build LLM、embedding、retrieval、answer 与 judge observation 全部落盘 |
 | B8/B8+ | 通过 | 检索只读；官方 swallow-error 路径由 wrapper fail-fast；timeout/retry/clean retry 已锁 |
@@ -148,5 +154,5 @@ evaluator 语义发生变化时，按影响面局部解冻。纯 artifact-only �
 prediction；任何重新消费 provenance lineage 的 retrieval 指标必须先重开 B5 裁决。
 
 A-Mem current official product build/source 与既有 smoke 资产仍沿用
-**`method-frozen-v1`** 身份；2026-08-21 起只暂停 B5/GRID 的冻结资格，待 runtime evidence
-stamp 与 N/A 裁决重新一致后恢复完整 frozen。无需重开 SimpleMem 或重烧 A-Mem 五格 build。
+**`method-frozen-v1`** 身份；2026-08-21 的 B5/GRID 暂停已在 runtime evidence stamp 与 N/A
+裁决重新一致后关闭。无需重开 SimpleMem 或重烧 A-Mem 五格 build。

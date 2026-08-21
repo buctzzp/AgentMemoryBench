@@ -27,6 +27,21 @@ LIVE_DOCUMENTS = (
     ROOT / "docs" / "workstreams" / "ws03-architecture-slimming" / "README.md",
     ROOT / "docs" / "workstreams" / "ws04-terminal-observability" / "README.md",
 )
+METHOD_INTEGRATION_DOCUMENTS = tuple(
+    ROOT / "docs" / "reference" / "integration" / f"{method}.md"
+    for method in (
+        "amem",
+        "memoryos",
+        "memos",
+        "lightmem",
+        "simplemem",
+        "mem0",
+        "letta",
+        "everos",
+        "langmem",
+        "graphiti",
+    )
+)
 MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")
 
 
@@ -118,6 +133,20 @@ class DocumentationStandardsTests(unittest.TestCase):
                         f"{document.relative_to(ROOT)} -> {target}"
                     )
         self.assertEqual(missing, [])
+
+    def test_every_method_integration_page_documents_product_call_contract(self):
+        """十家稳定页都必须记录产品参数、返回与 batch 语义并链接接口总账。"""
+
+        inventory = ROOT / "docs" / "reference" / "method-interface-inventory.md"
+        self.assertTrue(inventory.is_file())
+        inventory_text = inventory.read_text(encoding="utf-8")
+
+        for document in METHOD_INTEGRATION_DOCUMENTS:
+            self.assertTrue(document.is_file(), f"method integration missing: {document}")
+            content = document.read_text(encoding="utf-8")
+            self.assertIn("## 产品接口契约（参数、返回与批次）", content)
+            self.assertIn("../method-interface-inventory.md", content)
+            self.assertIn(f"integration/{document.name}", inventory_text)
 
     def test_every_python_module_has_chinese_module_docstring(self):
         """测试每个 Python 文件顶端是否有中文模块说明。"""
