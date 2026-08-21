@@ -13,13 +13,13 @@
 # product profile 明确不支持 framework conversation 并行，CLI 必须在 runtime/API
 # 启动前拒绝 `--workers` 覆盖。MemOS 产品内部 async dispatcher 保持开启。
 # 2026-07-27 起 smoke 的 LLM transport/model 是预算型
-# opencodego/muse-spark-1.2-contributor；official_full 保持 primary/gpt-4o-mini。
+# opencodego/mimo-v2.5；official_full 保持 primary/gpt-4o-mini。
 #
 # secret 只声明**环境变量名**，值不进本文件、不进 manifest、不进日志。
 
 [smoke]
 answer_builder = "benchmark"
-llm_model = "muse-spark-1.2-contributor"
+llm_model = "mimo-v2.5"
 embedding_backend = "sentence_transformer"
 embedding_model_path = "models/all-MiniLM-L6-v2"
 embedding_dimension = 384

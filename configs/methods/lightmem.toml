@@ -23,7 +23,7 @@
 [smoke]
 answer_builder = "benchmark"
 # budget-only connectivity profile；真实 runtime 由 manifest 的 api_runtime v1 盖章。
-llm_model = "muse-spark-1.2-contributor"
+llm_model = "mimo-v2.5"
 embedding_model_path = "models/all-MiniLM-L6-v2"
 llmlingua_model_path = "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
 retrieve_limit = 60

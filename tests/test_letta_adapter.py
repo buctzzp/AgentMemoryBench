@@ -393,7 +393,7 @@ def test_letta_parent_stderr_tail_redacts_key_and_endpoint() -> None:
     runtime.openai_settings = OpenAISettings(
         api_key=api_key,
         base_url=endpoint,
-        model="muse-spark-1.2-contributor",
+        model="mimo-v2.5",
         provider="opencodego",
         judge_transport="chat_completions",
     )

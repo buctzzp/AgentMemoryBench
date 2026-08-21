@@ -149,7 +149,7 @@ def test_simplemem_registered_prediction_runs_locomo_and_longmemeval_fake_smoke(
         lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="muse-spark-1.2-contributor",
+            model="mimo-v2.5",
             provider="opencodego",
             judge_transport="chat_completions",
         ),
@@ -244,7 +244,7 @@ def test_simplemem_registered_prediction_workers_gt_1_manifest_has_protocol_fiel
         lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="muse-spark-1.2-contributor",
+            model="mimo-v2.5",
             provider="opencodego",
             judge_transport="chat_completions",
         ),

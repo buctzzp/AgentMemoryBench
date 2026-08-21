@@ -6,7 +6,7 @@
 
 [smoke]
 answer_builder = "benchmark"
-llm_model = "muse-spark-1.2-contributor"
+llm_model = "mimo-v2.5"
 embedding_model_path = "models/all-MiniLM-L6-v2"
 embedding_dimension = 384
 embedding_normalize = true

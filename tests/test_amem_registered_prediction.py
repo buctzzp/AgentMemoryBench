@@ -252,7 +252,7 @@ def test_amem_registered_prediction_runs_generic_runner_offline(
         lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="muse-spark-1.2-contributor",
+            model="mimo-v2.5",
             provider="opencodego",
             judge_transport="chat_completions",
         ),
@@ -357,7 +357,7 @@ def test_amem_factory_loads_completed_conversations_for_resume(
         openai_settings=OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="muse-spark-1.2-contributor",
+            model="mimo-v2.5",
             provider="opencodego",
             judge_transport="chat_completions",
         ),

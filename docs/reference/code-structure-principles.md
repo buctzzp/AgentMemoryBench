@@ -119,6 +119,8 @@ Codex 会话另有一条外层恢复链：active context 是易失 working set�
 经裁决的语义记忆；本地 transcript 是按需回放的逐字证据档案。旧对话中的用户、actor 或
 架构师主张都可能已过时，优先级始终低于 current code/data 与最新裁决。经验只有同时具备
 “稳定落点 + 索引入口 + 任务触发器 + supersede 路径”才算可复用资产，不能只写不读。
+没有 `in-progress` P0 是合法暂停态：hook 应注入 roadmap 空闲胶囊，不得为了维持“唯一活跃”
+假设而把已完成 workstream 伪标为进行中，也不得把空闲态误报成恢复失败。
 
 ## 4. 本仓库的具体判法
 

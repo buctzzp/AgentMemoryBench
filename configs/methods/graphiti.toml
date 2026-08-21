@@ -7,7 +7,7 @@
 
 [smoke]
 answer_builder = "benchmark"
-llm_model = "muse-spark-1.2-contributor"
+llm_model = "mimo-v2.5"
 structured_output_mode = "json_object"
 llm_temperature = 1.0
 llm_max_tokens = 16384

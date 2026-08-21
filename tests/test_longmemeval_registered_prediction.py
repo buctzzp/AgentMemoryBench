@@ -110,7 +110,7 @@ def test_longmemeval_registered_prediction_offline_probe_workflow(
         "load_openai_settings",
         lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
-            model="muse-spark-1.2-contributor",
+            model="mimo-v2.5",
             provider="opencodego",
             judge_transport="chat_completions",
         ),

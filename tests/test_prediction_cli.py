@@ -68,7 +68,7 @@ def _smoke_openai_settings() -> OpenAISettings:
     return OpenAISettings(
         api_key="sk-test",
         base_url="https://opencode.example/v1",
-        model="muse-spark-1.2-contributor",
+        model="mimo-v2.5",
         provider="opencodego",
         judge_transport="chat_completions",
     )
@@ -1874,7 +1874,7 @@ def test_registered_prediction_builds_framework_answer_reader(
         "answer_prompt_file_sha256": hashlib.sha256(
             prompt_path.read_bytes()
         ).hexdigest(),
-        "answer_model": "muse-spark-1.2-contributor",
+        "answer_model": "mimo-v2.5",
         "answer_parameters": {
             "message_role": "user",
             "temperature": 0.0,
@@ -1888,7 +1888,7 @@ def test_registered_prediction_builds_framework_answer_reader(
         "api_runtime": {
             "contract_version": "v2",
             "provider": "opencodego",
-            "model": "muse-spark-1.2-contributor",
+            "model": "mimo-v2.5",
             "answer_transport": "chat_completions",
             "judge_transport": "chat_completions",
             "thinking_mode": "disabled",
@@ -1899,12 +1899,12 @@ def test_registered_prediction_builds_framework_answer_reader(
         descriptor.model_id for descriptor in runner_calls[0]["model_inventory"]
     } == {
         "mem0-answer-llm",
-        "muse-spark-1.2-contributor",
+        "mimo-v2.5",
     }
     assert captured_settings == [_smoke_openai_settings()]
     assert captured_answer_settings == [
         AnswerLLMSettings(
-            model="muse-spark-1.2-contributor",
+            model="mimo-v2.5",
             message_role="user",
             temperature=0.0,
             max_tokens=4096,

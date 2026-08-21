@@ -463,14 +463,14 @@ def test_execute_evaluate_uses_prediction_api_runtime_for_judge(
     runtime = {
         "contract_version": "v2",
         "provider": "opencodego",
-        "model": "muse-spark-1.2-contributor",
+        "model": "mimo-v2.5",
         "answer_transport": "chat_completions",
         "judge_transport": "chat_completions",
         "thinking_mode": "disabled",
     }
     manifest["method"] = {
         "answer_reader": {
-            "answer_model": "muse-spark-1.2-contributor",
+            "answer_model": "mimo-v2.5",
             "api_runtime": runtime,
         }
     }
@@ -478,7 +478,7 @@ def test_execute_evaluate_uses_prediction_api_runtime_for_judge(
     settings = OpenAISettings(
         api_key="sk-test",
         base_url="https://opencode.example/v1",
-        model="muse-spark-1.2-contributor",
+        model="mimo-v2.5",
         provider="opencodego",
         judge_transport="chat_completions",
     )
@@ -518,9 +518,9 @@ def test_execute_evaluate_uses_prediction_api_runtime_for_judge(
     )
 
     assert loaded_providers == [
-        "opencodego:muse-spark-1.2-contributor"
+        "opencodego:mimo-v2.5"
     ]
-    assert evaluator_calls[0]["model"] == "muse-spark-1.2-contributor"
+    assert evaluator_calls[0]["model"] == "mimo-v2.5"
     assert evaluator_calls[0]["openai_settings"] is settings
 
 
@@ -535,11 +535,11 @@ def test_execute_evaluate_rejects_api_runtime_environment_drift(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["method"] = {
         "answer_reader": {
-            "answer_model": "muse-spark-1.2-contributor",
+            "answer_model": "mimo-v2.5",
             "api_runtime": {
                 "contract_version": "v2",
                 "provider": "opencodego",
-                "model": "muse-spark-1.2-contributor",
+                "model": "mimo-v2.5",
                 "answer_transport": "chat_completions",
                 "judge_transport": "chat_completions",
                 "thinking_mode": "disabled",

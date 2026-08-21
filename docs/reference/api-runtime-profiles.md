@@ -10,11 +10,12 @@
 
 | run profile | provider | model | answer transport | judge transport | 用途 |
 | --- | --- | --- | --- | --- | --- |
-| `smoke` | `opencodego` | `muse-spark-1.2-contributor` | Chat Completions | Chat Completions | 最低预算流通与接口验证 |
+| `smoke` | `opencodego` | `mimo-v2.5` | Chat Completions | Chat Completions | 最低预算流通与接口验证 |
 | `official_full` | `primary` | `gpt-4o-mini` | Chat Completions | Responses；官方 evaluator 自带 Chat 路径时保持其路径 | 主配置正式实验 |
 
 这是**运行身份差异**，不是暗中 fallback。新 `smoke` 与旧
-历史 `deepseek-v4-flash` smoke、旧 `gpt-4o-mini` smoke 与 `official_full` 的分数均不得
+历史 `deepseek-v4-flash`/`muse-spark-1.2-contributor` smoke、旧 `gpt-4o-mini` smoke 与
+`official_full` 的分数均不得
 直接比较；smoke 只证明当前 method、
 benchmark、artifact、resume 和 evaluator 链路在声明的 provider/model 上可运行。
 非 LLM 的 embedding、检索深度、update、summary、storage 等 method 参数不因 provider
@@ -29,12 +30,13 @@ opencode_go_key       / OPENCODE_GO_KEY
 opencode_base_url     / OPENCODE_BASE_URL
 opencode_model_name   / OPENCODE_MODEL_NAME
 opencode_model_name_2 / OPENCODE_MODEL_NAME_2
-opencode_model_name_3 / OPENCODE_MODEL_NAME_3（可选扩展槽）
+opencode_model_name_3 / OPENCODE_MODEL_NAME_3
 ```
 
-小写键优先。当前新 smoke 的 economy slot 是 `opencode_model_name_2`，并必须逐字等于
-tracked identity `muse-spark-1.2-contributor`；`opencode_model_name` 保留旧
-`deepseek-v4-flash` artifact 的 evaluate/readback，第三槽只作显式扩展，不参与默认选择。
+小写键优先。当前新 smoke 使用第三槽 `opencode_model_name_3`，并必须逐字等于 tracked
+identity `mimo-v2.5`；第一槽保留旧 `deepseek-v4-flash`，第二槽保留旧
+`muse-spark-1.2-contributor` artifact 的 evaluate/readback。三个槽都是可审计 identity，
+不是失败后自动轮询的 fallback 列表。
 任何 key 值与 base URL 都不得写入 TOML、manifest、artifact、note 或测试 stdout。
 tracked TOML 只声明公开模型身份。prediction 在 secret load 前用 tracked identity 预检，
 evaluate 则按旧 run manifest 的模型在已配置 slot 中精确匹配；找不到就 fail-fast，不能用
@@ -53,6 +55,13 @@ evaluate 则按旧 run manifest 的模型在已配置 slot 中精确匹配；找
 `LLMJudgeEvaluator` 会把字符串 prompt 映射成单条 user message，把已有 role-tagged
 message list 原样复制；不会先尝试 Responses 再隐藏回落。`primary` runtime 的通用
 judge 继续走 Responses，LoCoMo/LongMemEval 等已有官方 Chat Completions 调用形状不改。
+
+2026-08-21 对两个候选模型又用当前生产形状做了极小真调用：Chat Completions、
+`temperature=0`、JSON mode 与 `thinking={"type":"disabled"}` 同时启用。Muse 虽 HTTP 成功，
+但返回 `content=""`、`finish_reason=None`，判为语义不可用；Mimo 返回
+`{"ok": true}`、`finish_reason=stop`，usage 为 263 prompt / 6 completion tokens。由此新
+smoke 默认从 Muse 迁到 Mimo。框架不会在某个 run 请求失败后静默换模型：迁移发生在 run
+创建前，旧 Muse run 仍只能按原 manifest 回读或用新 run_id 重跑。
 
 历史 `deepseek-v4-flash` 在未成功关闭 thinking 时，reasoning token 与可见回答共享
 completion budget。2026-08-11 用生产代码实际发送的
@@ -82,7 +91,7 @@ benchmark、primary provider，以及已经显式高于 4096 的配置均保持�
 {
   "contract_version": "v2",
   "provider": "opencodego",
-  "model": "muse-spark-1.2-contributor",
+  "model": "mimo-v2.5",
   "answer_transport": "chat_completions",
   "judge_transport": "chat_completions",
   "thinking_mode": "disabled"
@@ -107,17 +116,16 @@ benchmark、primary provider，以及已经显式高于 4096 的配置均保持�
 4. evaluate 对 run identity 的继承与环境漂移反例；
 5. 本页与 `AGENTS.md`。
 
-2026-08-21 的 Muse 切换保留旧模型 slot，目的不是让同一 run 动态换模型，而是保证旧
-artifact 可回读、新 run 身份唯一。未经单独兼容性真调用，不能把 DeepSeek 上的 JSON mode、
-thinking override 结论自动宣称为 Muse 模型级能力；provider 仍走 Chat Completions，模型拒绝
-某个可选参数时必须先停工裁定，不能隐藏 fallback。
+2026-08-21 的 Muse→Mimo 迁移继续保留两代旧模型 slot，目的不是让同一 run 动态换模型，
+而是保证旧 artifact 可回读、新 run 身份唯一。模型拒绝可选参数、返回空 choice 或区域错误时
+必须先停工裁定，不能隐藏 fallback。
 
 ## 6. 成本 pilot 的模型转移边界
 
-未来 ws05 可以用 Muse 跑较大但受控的成本 pilot，观测调用次数、input/output token、latency
+未来 ws05 可以用 Mimo 跑较大但受控的成本 pilot，观测调用次数、input/output token、latency
 与 method 产生的记忆规模；再用 `gpt-4o-mini` 价格对**同一份 token 账**计算一个
 `token-price projection`。这个数不是正式 GPT 成本真值：构建记忆的 LLM 输出会改变后续记忆
 数量、检索上下文和调用拓扑。正式预算报告必须同时披露模型转移假设，并至少跑一个极小
-`gpt-4o-mini` calibration cell 校验调用拓扑/倍率；不得只用“Muse 美元 × 单价比例”换算。
+`gpt-4o-mini` calibration cell 校验调用拓扑/倍率；不得只用“Mimo 美元 × 单价比例”换算。
 
 只改 `.env` 然后复用旧 run_id 属身份污染，框架应拒绝。

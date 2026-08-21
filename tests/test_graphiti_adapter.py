@@ -115,7 +115,7 @@ def _config(**overrides: Any) -> GraphitiConfig:
     """构造合法 smoke config。"""
 
     values: dict[str, Any] = {
-        "llm_model": "muse-spark-1.2-contributor",
+        "llm_model": "mimo-v2.5",
         "structured_output_mode": "json_object",
         "llm_temperature": 1.0,
         "llm_max_tokens": 16384,
@@ -173,7 +173,7 @@ def _provider(
         openai_settings=OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="muse-spark-1.2-contributor",
+            model="mimo-v2.5",
             provider="opencodego",
             judge_transport="chat_completions",
         ),

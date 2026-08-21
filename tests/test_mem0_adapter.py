@@ -483,8 +483,8 @@ def test_mem0_profiles_separate_smoke_and_official_full_parameters() -> None:
     smoke = Mem0Config.smoke()
     full = Mem0Config.official_full()
 
-    assert smoke.extraction_model == "muse-spark-1.2-contributor"
-    assert smoke.reader_model == "muse-spark-1.2-contributor"
+    assert smoke.extraction_model == "mimo-v2.5"
+    assert smoke.reader_model == "mimo-v2.5"
     assert smoke.embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
     assert smoke.embedding_dimensions == 384
     assert smoke.embedding_provider == "huggingface"
@@ -1785,7 +1785,7 @@ def test_get_answer_searches_only_question_conversation_and_calls_reader() -> No
         "method": "mem0",
         "retrieved_memory_count": 1,
         "top_k": 20,
-        "reader_model": "muse-spark-1.2-contributor",
+        "reader_model": "mimo-v2.5",
     }
     reader_messages = reader.calls[0]["messages"]
     assert len(reader_messages) == 1

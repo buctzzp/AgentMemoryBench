@@ -18,13 +18,15 @@ ACTIVE_WORKSTREAM_ROW = re.compile(
 )
 GIT_COMMIT_COMMAND = re.compile(r"\bgit\b[^\n;&|]*\bcommit\b")
 RECOVERY_HEADING = "## Codex 恢复胶囊"
+IDLE_CAPSULE_HEADING = "## Codex 空闲恢复胶囊"
+IDLE_CAPSULE_TARGET = "docs/roadmap.md"
 MAX_STATUS_LINES = 20
 MAX_EVENT_TEXT = 512
 MAX_CAPSULE_CHARS = 6_000
 
 
 def _active_capsule_target() -> str:
-    """从 roadmap 唯一的 P0 活跃行解析恢复胶囊路径；歧义时不猜。"""
+    """从 roadmap 解析唯一 P0 活跃行；合法空闲态回到 roadmap。"""
 
     roadmap = REPO_ROOT / "docs" / "roadmap.md"
     try:
@@ -33,6 +35,8 @@ def _active_capsule_target() -> str:
         matches = []
     if len(matches) == 1:
         return f"docs/{matches[0]}"
+    if not matches:
+        return IDLE_CAPSULE_TARGET
     return (
         "当前 workstream README（先只用 rg 定位 docs/roadmap.md 的 in-progress P0 行；"
         "若当前阶段已关闭，则在 docs/workstreams/ 下只选用户本轮明确指向的一份 README）"
@@ -83,7 +87,7 @@ def _git_snapshot() -> str | None:
 
 
 def _read_capsule(capsule_target: str) -> str | None:
-    """只读取活跃 README 顶部恢复胶囊，不把整份状态页注入 context。"""
+    """读取活跃 README 胶囊；无活跃线时生成有界空闲胶囊。"""
 
     if not capsule_target.startswith("docs/"):
         return None
@@ -92,6 +96,13 @@ def _read_capsule(capsule_target: str) -> str | None:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return None
+    if capsule_target == IDLE_CAPSULE_TARGET:
+        return f"""{IDLE_CAPSULE_HEADING}
+
+- `docs/roadmap.md` 当前没有 `in-progress` P0 workstream；这是合法暂停态，不是恢复失败。
+- 先使用 hook 注入的 Git 快照判断是否有未提交收尾；没有用户新指令时不得自行重开已关闭 workstream。
+- 用户恢复工作后，按 roadmap 与本轮目标选择或新建唯一活跃 workstream，再读取对应恢复胶囊。
+""".strip()
     start = text.find(RECOVERY_HEADING)
     if start < 0:
         return None
@@ -138,7 +149,7 @@ transcript_path: {transcript_path}
 [hook 时刻 Git 快照]
 {snapshot}
 
-[唯一活跃恢复胶囊: {capsule_target}]
+[恢复胶囊: {capsule_target}]
 {capsule}
 
 恢复规则：

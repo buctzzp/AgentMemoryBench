@@ -161,7 +161,8 @@ Claude 准备执行 Bash 工具时，命令先经 `jq` 取 `.tool_input.command`
 `.codex/hooks.json` 是另一套**版本化的 Codex 项目 hook**：
 
 - `SessionStart` + matcher=`compact`：压缩完成后从 `roadmap` 唯一的
-  `in-progress + P0` 行解析活跃 README，再注入 developer context，强制只做
+  `in-progress + P0` 行解析活跃 README；没有活跃行时注入 roadmap 空闲胶囊，再注入
+  developer context，强制只做
   `git status --short`、`git log -5 --oneline`、热层胶囊和一份当前判据的四步恢复；
 - `PreToolUse` + matcher=`Bash`：命令包含 `git commit` 时返回 `systemMessage`，提醒显式
   暂存与 cached diff；普通 shell 不输出，避免噪声；
@@ -195,7 +196,8 @@ advisory，不会替代显式路径纪律。
 3. **冷层**：README 历史时间线、archive、旧交接信。只有溯源时读，不参与日常恢复。
 
 受信任的 `SessionStart(source=compact)` hook 会直接注入 hook 时刻的有界 Git
-status/log、唯一热层胶囊、`session_id` 与 `transcript_path`。快照与胶囊一致时，原四步门
+status/log、唯一热层胶囊（合法暂停态为 roadmap 空闲胶囊）、`session_id` 与
+`transcript_path`。快照与胶囊一致时，原四步门
 的前三步已经完成，只在当前裁决需要承重细节时再读胶囊链接的一份 note；若热快照生成
 失败或 hook 未加载，才执行 `git status --short`、`git log -5 --oneline`、热胶囊、当前
 判据四步兜底。不得为“重新了解全局”通读历史或整本手册。

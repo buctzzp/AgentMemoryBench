@@ -91,7 +91,7 @@ def test_observed_completions_preserves_request_and_adds_opencodego_control() ->
 
     result = asyncio.run(
         wrapper.create(
-            model="muse-spark-1.2-contributor",
+            model="mimo-v2.5",
             messages=[{"role": "user", "content": "x"}],
             response_format={"type": "json_object"},
         )
@@ -323,7 +323,7 @@ def test_real_graphiti_worker_initialize_and_shutdown_are_zero_api(tmp_path: Pat
     paths = load_path_settings(project_root=PROJECT_ROOT)
     runtime = GraphitiRuntime(
         config=GraphitiConfig(
-            llm_model="muse-spark-1.2-contributor",
+            llm_model="mimo-v2.5",
             structured_output_mode="json_object",
             llm_temperature=1.0,
             llm_max_tokens=16384,
@@ -338,7 +338,7 @@ def test_real_graphiti_worker_initialize_and_shutdown_are_zero_api(tmp_path: Pat
         openai_settings=OpenAISettings(
             api_key="dummy-never-called",
             base_url="http://127.0.0.1:9/v1",
-            model="muse-spark-1.2-contributor",
+            model="mimo-v2.5",
             provider="opencodego",
             judge_transport="chat_completions",
             timeout_seconds=1.0,
@@ -361,7 +361,7 @@ def test_graphiti_runtime_shutdown_failure_is_permanently_fail_closed(
     paths = load_path_settings(project_root=PROJECT_ROOT)
     runtime = GraphitiRuntime(
         config=GraphitiConfig(
-            llm_model="muse-spark-1.2-contributor",
+            llm_model="mimo-v2.5",
             structured_output_mode="json_object",
             llm_temperature=1.0,
             llm_max_tokens=16384,
@@ -376,7 +376,7 @@ def test_graphiti_runtime_shutdown_failure_is_permanently_fail_closed(
         openai_settings=OpenAISettings(
             api_key="dummy-never-called",
             base_url="http://127.0.0.1:9/v1",
-            model="muse-spark-1.2-contributor",
+            model="mimo-v2.5",
             provider="opencodego",
             judge_transport="chat_completions",
             timeout_seconds=1.0,
@@ -467,7 +467,7 @@ def test_real_graphiti_product_edge_chain_uses_only_local_fake_endpoint(
                 "id": "local-fake",
                 "object": "chat.completion",
                 "created": 1,
-                "model": "muse-spark-1.2-contributor",
+                "model": "mimo-v2.5",
                 "choices": [
                     {
                         "index": 0,
@@ -502,7 +502,7 @@ def test_real_graphiti_product_edge_chain_uses_only_local_fake_endpoint(
     paths = load_path_settings(project_root=PROJECT_ROOT)
     runtime = GraphitiRuntime(
         config=GraphitiConfig(
-            llm_model="muse-spark-1.2-contributor",
+            llm_model="mimo-v2.5",
             structured_output_mode="json_object",
             llm_temperature=1.0,
             llm_max_tokens=16384,
@@ -517,7 +517,7 @@ def test_real_graphiti_product_edge_chain_uses_only_local_fake_endpoint(
         openai_settings=OpenAISettings(
             api_key="local-fake-key",
             base_url=f"http://127.0.0.1:{server.server_port}/v1",
-            model="muse-spark-1.2-contributor",
+            model="mimo-v2.5",
             provider="opencodego",
             judge_transport="chat_completions",
             timeout_seconds=30.0,

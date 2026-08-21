@@ -14,9 +14,9 @@ created: 2026-07-05
 - **当前判据**：[spec](spec.md) 与 [plan](plan.md)。已完成前置证据是
   `observability/method_log_scope.py` 及 `tests/test_method_log_scope.py`；它只覆盖 Python
   logging，不等于 stdout/tqdm 已治理。
-- **并行支线**：用户于 2026-08-21 指定 OpenCodeGo economy 模型
-  `muse-spark-1.2-contributor` 作为新 smoke runtime，并要求未来成本 pilot 用其采集调用量；
-  runtime 身份/旧 artifact 回读仍由 `docs/reference/api-runtime-profiles.md` 约束。
+- **并行支线**：OpenCodeGo economy 模型最初切到 Muse，随后真调用发现空 choice，已在 run
+  创建前改判为 `mimo-v2.5`；Muse 只保留旧 artifact 精确回读。runtime 身份与证据见
+  `docs/reference/api-runtime-profiles.md`。
 - **禁止事项**：零真实 API；不改 method 算法/metric/prompt，不碰 outputs/data/models/
   third_party 与用户未跟踪资产；不把 progress heartbeat 写成高频 artifact 洪泛。
 - **完成证据**：[M1 实现与验收](notes/ws04-m1-implementation.md)；最终无 API 全量

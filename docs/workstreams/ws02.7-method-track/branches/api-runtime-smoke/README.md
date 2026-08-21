@@ -12,6 +12,8 @@
   [`docs/reference/api-runtime-profiles.md`](../../../../reference/api-runtime-profiles.md)
 - 实施与验收：
   [`notes/opencodego-smoke-runtime-implementation.md`](notes/opencodego-smoke-runtime-implementation.md)
+- 当前 economy 模型迁移：
+  [`notes/2026-08-21-muse-to-mimo-runtime-ruling.md`](notes/2026-08-21-muse-to-mimo-runtime-ruling.md)
 
 状态与最终 test/commit 快照只写父
 [`ws02.7 README`](../../README.md)；本页不复制活状态。

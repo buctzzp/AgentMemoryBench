@@ -44,8 +44,9 @@
   兼容，迁移排在首个作者校准/真实效果 full run 前。对 retrieve 与答题耦合的 method
   （如 MemoryOS `get_response`），仍须忠实抽出 `formatted_memory` 与公开 builder 变量。
 - **API runtime 分 profile**（2026-07-27 用户改口，2026-08-21 模型更新）：新 `smoke` 使用
-  `opencodego/muse-spark-1.2-contributor` 做最低预算流通验证；历史
-  `opencodego/deepseek-v4-flash` artifact 保持按 manifest 回读，`official_full` 与作者正式校准仍使用
+  `opencodego/mimo-v2.5` 做最低预算流通验证；历史
+  `opencodego/deepseek-v4-flash` 与 `muse-spark-1.2-contributor` artifact 保持按 manifest
+  回读，`official_full` 与作者正式校准仍使用
   `primary/gpt-4o-mini`。provider/model/answer transport/judge transport 必须进入
   manifest/resume identity；两条 runtime 的分数不得直接比较。secret/base URL 只从
   `.env` 读取、不落 artifact。现行细则见
@@ -113,8 +114,9 @@
   `architect-onboarding.md`；同一会话压缩后只走下条热快照恢复，热快照失败才走四步兜底，
   禁止把冷启动全文读序搬进 compact 恢复，也禁止凭残余摘要装作记得。
 - **压缩恢复必须可自举**：项目 `.codex/hooks.json` 用
-  `SessionStart(source=compact)` 注入 hook 时刻的有界 Git 快照、唯一活跃 README 热胶囊、
-  `session_id` 与 `transcript_path`；hook 首次/变更后须由用户在 `/hooks` 审核信任。
+  `SessionStart(source=compact)` 注入 hook 时刻的有界 Git 快照、唯一活跃 README 热胶囊
+  （没有 `in-progress` P0 时注入 roadmap 空闲胶囊）、`session_id` 与 `transcript_path`；hook
+  首次/变更后须由用户在 `/hooks` 审核信任。
   快照与胶囊一致时不重复读热层，只在承重细节缺失时定点读一份当前 note；生成失败或
   hook 未加载时，本文才触发四步兜底：`git status --short`、`git log -5 --oneline`、
   热胶囊、当前判据。会话 transcript 只证明“当时说过什么”，不得替代当前代码、数据或

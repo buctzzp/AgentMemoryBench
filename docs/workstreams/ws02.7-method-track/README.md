@@ -37,6 +37,10 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   [EverOS frozen-v1](branches/method-recertification/everos/notes/everos-frozen-v1.md) 核对最后关闭项；
   下一阶段由 roadmap 新 workstream 承接成本 pilot、指标扩展、作者校准或 official-full，未获
   用户预算/范围批准不得自动启动。
+- **冻结后 runtime 更新（2026-08-21）**：新 smoke 已在 run 创建前从 Muse 改判为
+  `opencodego/mimo-v2.5`；Muse 真调用出现 HTTP 成功但空 choice，旧 Muse/DeepSeek artifact
+  仍按各自模型槽精确回读。该更新不重写既有 frozen run，见
+  [runtime ruling](branches/api-runtime-smoke/notes/2026-08-21-muse-to-mimo-runtime-ruling.md)。
 - **声明缺口**：EverOS MemBench 100k 因缺 source time 且产品会把 timestamp 写进 Episode，
   诚实 unsupported；各家 metric N/A/author/full/resume 缺口仍按 frozen note 保留。Supermemory
   退出第十格，blocked note 只作 source-gate 历史。

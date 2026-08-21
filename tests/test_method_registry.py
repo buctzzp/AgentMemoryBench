@@ -828,7 +828,7 @@ def test_memos_profiles_only_differ_in_budget_model_and_are_both_serial() -> Non
     official_fields = dataclasses.asdict(official)
     assert smoke_fields.pop("profile_name") == "smoke"
     assert official_fields.pop("profile_name") == "official_full"
-    assert smoke_fields.pop("llm_model") == "muse-spark-1.2-contributor"
+    assert smoke_fields.pop("llm_model") == "mimo-v2.5"
     assert official_fields.pop("llm_model") == "gpt-4o-mini"
     assert smoke_fields == official_fields
     assert smoke.max_workers == 1

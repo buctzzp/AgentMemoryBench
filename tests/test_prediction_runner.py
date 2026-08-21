@@ -1618,11 +1618,11 @@ def test_resume_manifest_rejects_api_runtime_identity_change(
     original = {
         "method": {
             "answer_reader": {
-                "answer_model": "muse-spark-1.2-contributor",
+                "answer_model": "mimo-v2.5",
                 "api_runtime": {
                     "contract_version": "v2",
                     "provider": "opencodego",
-                    "model": "muse-spark-1.2-contributor",
+                    "model": "mimo-v2.5",
                     "answer_transport": "chat_completions",
                     "judge_transport": "chat_completions",
                     "thinking_mode": "disabled",

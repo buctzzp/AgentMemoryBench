@@ -87,7 +87,7 @@ stdout/stderr 与 JSON-lines worker stderr 脱敏落盘；最终无 API 全量 2
 | [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | done | P0 | Phase 1 十家 method 均 frozen；5×10 smoke matrix closed |
 | [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | done | P0 | M1-A→E 已关闭：依赖方向、TOML profile、worker transport、prediction 拆责与 legacy 退役 |
 | [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | done | P0 | isolated heartbeat 与第三方输出治理已关闭；完整诊断进 method.log |
-| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | paused | P1 | 用户 2026-08-14 暂缓成本 pilot；ws03 达停手线后再显式恢复 |
+| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | paused | P1 | ws03 已完成；用户本轮仍要求暂停成本 pilot，返回后再显式恢复 |
 | [ws06](workstreams/ws06-tests-restructure/README.md) | tests-restructure | open | P2 | tests 分组重组、大文件拆分、过时断言排查 |
 
 新 workstream 的建立与命名规则见 `AGENTS.md` "文档规则"。

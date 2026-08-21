@@ -18,7 +18,7 @@ from memory_benchmark.core import ConfigurationError
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 PRIMARY_API_PROVIDER = "primary"
 OPENCODEGO_API_PROVIDER = "opencodego"
-OPENCODEGO_SMOKE_MODEL = "muse-spark-1.2-contributor"
+OPENCODEGO_SMOKE_MODEL = "mimo-v2.5"
 SUPPORTED_API_PROVIDERS = frozenset(
     {PRIMARY_API_PROVIDER, OPENCODEGO_API_PROVIDER}
 )
@@ -471,7 +471,7 @@ def load_openai_settings(
         env_file: `.env` 文件路径；为空时默认读取 `project_root/.env`。
         api_provider: `primary` 或 `opencodego`。
         expected_model: manifest/profile 已声明的公开模型。OpenCodeGo 会在已配置
-            model slot 中精确匹配它；为空时选择当前 smoke economy slot。
+            model slot 中精确匹配它；为空时选择当前第三槽 smoke 模型。
 
     输出:
         OpenAISettings: 只包含 API 连接所需字段的结构化配置。
@@ -516,11 +516,11 @@ def load_openai_settings(
             "opencode_model_name",
             "OPENCODE_MODEL_NAME",
         )
-        economy_model = _first_non_empty_env(
+        previous_smoke_model = _first_non_empty_env(
             "opencode_model_name_2",
             "OPENCODE_MODEL_NAME_2",
         )
-        additional_model = _first_non_empty_env(
+        smoke_model = _first_non_empty_env(
             "opencode_model_name_3",
             "OPENCODE_MODEL_NAME_3",
         )
@@ -532,21 +532,27 @@ def load_openai_settings(
             )
             if value is None
         ]
-        if expected_model is None and economy_model is None:
-            missing.append("opencode_model_name_2")
+        if expected_model is None and smoke_model is None:
+            missing.append("opencode_model_name_3")
         if missing:
             raise ConfigurationError(
                 "Missing opencodego setting(s): " + ", ".join(missing)
             )
         configured_models = tuple(
             candidate
-            for candidate in (economy_model, legacy_model, additional_model)
+            for candidate in (smoke_model, previous_smoke_model, legacy_model)
             if candidate is not None
         )
         if expected_model is None:
-            # 上面的 missing 门已证明 economy_model 非空。
-            assert economy_model is not None
-            model = economy_model
+            # 上面的 missing 门已证明 smoke_model 非空；再锁 tracked identity，避免
+            # 通用 loader 在 runner manifest 预检之外静默接受环境漂移。
+            assert smoke_model is not None
+            if smoke_model != OPENCODEGO_SMOKE_MODEL:
+                raise ConfigurationError(
+                    "OpenCodeGo smoke model slot does not match tracked runtime "
+                    f"identity: {smoke_model!r}"
+                )
+            model = smoke_model
         elif expected_model in configured_models:
             model = expected_model
         else:

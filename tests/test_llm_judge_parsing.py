@@ -226,7 +226,7 @@ class JudgePromptBuilderTest(unittest.TestCase):
         settings = OpenAISettings(
             api_key="sk-test",
             base_url="https://opencode.example/v1",
-            model="muse-spark-1.2-contributor",
+            model="mimo-v2.5",
             provider="opencodego",
             judge_transport=CHAT_COMPLETIONS_JUDGE_TRANSPORT,
         )
@@ -425,7 +425,7 @@ def test_opencodego_generic_judge_uses_chat_completions_transport() -> None:
     settings = OpenAISettings(
         api_key="sk-test",
         base_url="https://opencode.example/v1",
-        model="muse-spark-1.2-contributor",
+        model="mimo-v2.5",
         provider="opencodego",
         judge_transport=CHAT_COMPLETIONS_JUDGE_TRANSPORT,
     )
@@ -444,7 +444,7 @@ def test_opencodego_generic_judge_uses_chat_completions_transport() -> None:
     assert result.is_correct is True
     assert client.calls == [
         {
-            "model": "muse-spark-1.2-contributor",
+            "model": "mimo-v2.5",
             "messages": [
                 {
                     "role": "user",

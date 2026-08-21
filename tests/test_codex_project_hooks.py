@@ -50,9 +50,13 @@ def test_compact_session_injects_bounded_hot_snapshot() -> None:
     context = payload["hookSpecificOutput"]["additionalContext"]
     assert "git status --short" in context
     assert "git log -5 --oneline" in context
-    assert "docs/workstreams/ws03-architecture-slimming/README.md" in context
-    assert "## Codex 恢复胶囊" in context
-    assert "当前批次" in context
+    has_active_capsule = (
+        "docs/workstreams/" in context and "## Codex 恢复胶囊" in context
+    )
+    has_idle_capsule = (
+        "docs/roadmap.md" in context and "## Codex 空闲恢复胶囊" in context
+    )
+    assert has_active_capsule or has_idle_capsule
     assert "thread-test-123" in context
     assert "/tmp/rollout-test.jsonl" in context
     assert "上述快照与胶囊已完成原四步门的 1-3" in context

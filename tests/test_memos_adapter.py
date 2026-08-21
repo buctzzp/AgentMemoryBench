@@ -2556,7 +2556,7 @@ def test_memos_environment_selects_opencodego_reader_contract(
     openai = OpenAISettings(
         api_key="sk-opencodego-unit-test",
         base_url="https://example.invalid/v1",
-        model="muse-spark-1.2-contributor",
+        model="mimo-v2.5",
         provider="opencodego",
         judge_transport="chat_completions",
     )

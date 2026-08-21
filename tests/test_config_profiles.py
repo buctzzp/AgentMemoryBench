@@ -45,11 +45,11 @@ def test_load_typed_profile_builds_mem0_smoke_profile_from_section(tmp_path: Pat
         toml_path,
         """
         [smoke]
-        extraction_model = "muse-spark-1.2-contributor"
+        extraction_model = "mimo-v2.5"
         embedding_provider = "huggingface"
         embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
         embedding_dimensions = 384
-        reader_model = "muse-spark-1.2-contributor"
+        reader_model = "mimo-v2.5"
         top_k = 20
         max_workers = 1
         ingestion_chunk_size = 1
@@ -230,7 +230,7 @@ def test_load_openai_settings_reads_explicit_opencodego_profile(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """opencodego 默认选择 economy slot，并公开 chat-only judge 身份。"""
+    """opencodego 默认选择第三槽当前 smoke 模型，并公开 chat-only judge 身份。"""
 
     env_file = tmp_path / ".env"
     env_file.write_text(
@@ -240,6 +240,7 @@ def test_load_openai_settings_reads_explicit_opencodego_profile(
                 "opencode_base_url=https://opencode.example/v1",
                 "opencode_model_name=deepseek-v4-flash",
                 "opencode_model_name_2=muse-spark-1.2-contributor",
+                "opencode_model_name_3=mimo-v2.5",
             )
         )
         + "\n",
@@ -266,11 +267,11 @@ def test_load_openai_settings_reads_explicit_opencodego_profile(
     )
 
     assert settings.provider == "opencodego"
-    assert settings.model == "muse-spark-1.2-contributor"
+    assert settings.model == "mimo-v2.5"
     assert settings.judge_transport == CHAT_COMPLETIONS_JUDGE_TRANSPORT
     runtime = settings.to_runtime_manifest_dict()
     assert runtime["provider"] == "opencodego"
-    assert runtime["model"] == "muse-spark-1.2-contributor"
+    assert runtime["model"] == "mimo-v2.5"
     assert runtime["judge_transport"] == "chat_completions"
     assert runtime["contract_version"] == "v2"
     assert runtime["thinking_mode"] == "disabled"
@@ -279,6 +280,89 @@ def test_load_openai_settings_reads_explicit_opencodego_profile(
     }
     assert "unit-test-opencode-key" not in repr(runtime)
     assert "opencode.example" not in repr(runtime)
+
+
+def test_load_openai_settings_can_reopen_previous_smoke_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """旧 Muse artifact 应按第二槽精确回读，不能被 Mimo 默认覆盖。"""
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "opencode_go_key=unit-test-opencode-key",
+                "opencode_base_url=https://opencode.example/v1",
+                "opencode_model_name_2=muse-spark-1.2-contributor",
+                "opencode_model_name_3=mimo-v2.5",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    for key in (
+        "opencode_go_key",
+        "OPENCODE_GO_KEY",
+        "opencode_base_url",
+        "OPENCODE_BASE_URL",
+        "opencode_model_name",
+        "OPENCODE_MODEL_NAME",
+        "opencode_model_name_2",
+        "OPENCODE_MODEL_NAME_2",
+        "opencode_model_name_3",
+        "OPENCODE_MODEL_NAME_3",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = load_openai_settings(
+        project_root=tmp_path,
+        env_file=env_file,
+        api_provider=OPENCODEGO_API_PROVIDER,
+        expected_model="muse-spark-1.2-contributor",
+    )
+
+    assert settings.model == "muse-spark-1.2-contributor"
+
+
+def test_load_openai_settings_rejects_drifted_default_smoke_slot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """未给 expected_model 时第三槽也必须匹配 tracked smoke identity。"""
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "opencode_go_key=unit-test-opencode-key",
+                "opencode_base_url=https://opencode.example/v1",
+                "opencode_model_name_3=unexpected-model",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    for key in (
+        "opencode_go_key",
+        "OPENCODE_GO_KEY",
+        "opencode_base_url",
+        "OPENCODE_BASE_URL",
+        "opencode_model_name",
+        "OPENCODE_MODEL_NAME",
+        "opencode_model_name_2",
+        "OPENCODE_MODEL_NAME_2",
+        "opencode_model_name_3",
+        "OPENCODE_MODEL_NAME_3",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    with pytest.raises(ConfigurationError, match="tracked runtime identity"):
+        load_openai_settings(
+            project_root=tmp_path,
+            env_file=env_file,
+            api_provider=OPENCODEGO_API_PROVIDER,
+        )
 
 
 def test_load_openai_settings_can_reopen_legacy_opencodego_manifest(
@@ -334,6 +418,7 @@ def test_load_openai_settings_rejects_unconfigured_expected_opencodego_model(
                 "opencode_go_key=unit-test-opencode-key",
                 "opencode_base_url=https://opencode.example/v1",
                 "opencode_model_name_2=muse-spark-1.2-contributor",
+                "opencode_model_name_3=mimo-v2.5",
             )
         )
         + "\n",
@@ -421,7 +506,7 @@ def test_load_typed_profile_builds_matching_memoryos_smoke_and_official_profiles
 
     assert smoke.profile_name == "smoke"
     assert official_full.profile_name == "official_full"
-    assert smoke.llm_model == "muse-spark-1.2-contributor"
+    assert smoke.llm_model == "mimo-v2.5"
     assert official_full.llm_model == "gpt-4o-mini"
     assert smoke.embedding_model_name == "sentence-transformers/all-MiniLM-L6-v2"
     assert official_full.embedding_model_name == "sentence-transformers/all-MiniLM-L6-v2"
