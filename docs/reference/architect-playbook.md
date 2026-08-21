@@ -95,6 +95,11 @@
     决策等待期可把旧线明确降为“只作决策门、无在途施工”，用户选定后在同一批原子切换状态、
     capsule 与 roadmap，并复跑 hook contract。否则文档状态看似更“干净”，下一次压缩却会退回
     模糊兜底，破坏长期记忆自举。
+23. **审查面完整不等于执行要重**：已冻结对象先做 source/contract 差量短表，复用现有
+    integration、ledger、dossier、测试和 artifact；只有 current-source 反例命中隐私、输入损失、
+    隔离/完成门、算法身份或 metric 误标红线时，才重开精确 B/GRID 格。文档措辞、作者校准与
+    能力 `N/A/pending` 归 `DOC_FIX/BACKLOG`，不能借“全面审计”机械重跑 B1-B11、重扫数据或
+    重烧 API，阻塞研究主线。
 
 完整 33 条历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

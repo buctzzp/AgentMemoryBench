@@ -57,8 +57,11 @@
 | SimpleMem | [integration/simplemem.md](../reference/integration/simplemem.md) |
 | MemOS | [integration/memos.md](../reference/integration/memos.md) |
 | EverOS | [integration/everos.md](../reference/integration/everos.md) |
+| Letta/MemGPT | [integration/letta.md](../reference/integration/letta.md) |
+| LangMem | [integration/langmem.md](../reference/integration/langmem.md) |
+| Graphiti | [integration/graphiti.md](../reference/integration/graphiti.md) |
 
-尚未形成接入事实页的 method 先看 `docs/reference/method-interface-inventory.md`；完成首轮一手
+尚未形成接入事实页的新 method 先看 `docs/reference/method-interface-inventory.md`；完成首轮一手
 审计后再建对应 integration 页，不用散落的 actor 卡冒充稳定文档。
 
 ## 4. 当前跨切面调查入口
@@ -72,3 +75,12 @@
 | 逐 method 重认证 | [method-recertification](../workstreams/ws02.7-method-track/branches/method-recertification/README.md) |
 
 这些支线结束后，本表应指向稳定 policy/integration/survey，而不是永久依赖活跃任务卡。
+
+## 5. 第三方评测框架参考
+
+| Framework | Upstream / local mirror | 本次锁定 | 用途与边界 |
+| --- | --- | --- | --- |
+| OmniMemEval | `MemTensor/OmniMemEval`；本地 `第三方框架参考/OmniMemEval/` | `main@0b1ea8d28aa2d3e03ac4a6aee17b3006a131da7d` | User Memory 覆盖 LoCoMo/LME/BEAM/PersonaMem v2/HaluMem；用于交叉核 final payload 与 coverage，不自动高于 pinned method source 或 benchmark 官方规则。使用细则见[七家轻量差量核对表](../workstreams/ws02.7-method-track/branches/method-recertification/notes/seven-method-post-freeze-delta-review.md)。 |
+
+`第三方框架参考/` 整体 gitignored；需要引用更新版时先记录 upstream SHA，禁止无身份 `git pull`
+后让稳定文档静默漂移。

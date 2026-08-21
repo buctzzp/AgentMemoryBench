@@ -93,3 +93,11 @@ Letta/MemGPT、LangMem、EverOS）均已冻结；状态与证据从父级
 保留为历史；Graphiti 旧失败 run 只作外部门与 checkpoint 证据，不重复或续跑。
 继续复用五个 benchmark 稳定层，不重做 dataset census。
 权威实时动作仍看父级恢复胶囊与最新断点。
+
+## 冻结后轻量差量复核
+
+用户与架构师后续要共同核对七家自主接入 method，但这不等于再走一轮 B1-B11。统一使用
+[七家 method 冻结后轻量差量核对表](notes/seven-method-post-freeze-delta-review.md)：复用现有
+integration/frozen/ledger/dossier，只寻找 current source、官方 final payload 或 shared contract
+对冻结判词的实质反证。没有红线即保持 frozen；措辞与待办只作 `DOC_FIX/BACKLOG`，不得阻塞
+研究主线。
