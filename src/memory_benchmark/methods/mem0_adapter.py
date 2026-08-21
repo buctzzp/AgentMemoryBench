@@ -168,11 +168,11 @@ class Mem0Config:
         """
 
         return cls(
-            extraction_model="deepseek-v4-flash",
+            extraction_model="muse-spark-1.2-contributor",
             embedding_model="sentence-transformers/all-MiniLM-L6-v2",
             embedding_dimensions=384,
             embedding_provider="huggingface",
-            reader_model="deepseek-v4-flash",
+            reader_model="muse-spark-1.2-contributor",
             top_k=20,
             max_workers=1,
             ingestion_chunk_size=1,

@@ -287,7 +287,7 @@ def _install_offline_registered_stack(
         lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="deepseek-v4-flash",
+            model="muse-spark-1.2-contributor",
             provider="opencodego",
             judge_transport="chat_completions",
         ),

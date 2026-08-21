@@ -26,7 +26,7 @@ tag：`v0.29.3` 仍是最新稳定版，`v0.30.0` 仅有 pre-release。Supermemo
 - ingest：每个 nonblank canonical turn 一次 `add_episode(source=message)`，逐条 await；
 - retrieve：默认 edge BM25 + cosine + RRF；返回有序 EntityEdge fact 与 temporal validity；
 - runtime：不启动 HTTP host，独立 Python 3.12 worker 直调与官方 server 相同的 core；
-- smoke：`.env` 的 `opencodego/deepseek-v4-flash`，Chat Completions + `json_object` +
+- smoke：`.env` 的 `opencodego/muse-spark-1.2-contributor`，Chat Completions + `json_object` +
   `thinking=disabled`，成功 response 必须带 exact usage；
 - official_full：`primary/gpt-4o-mini` + `json_schema`；
 - cross encoder：主 search 不调用；官方基类 sentinel 一旦被调用即 fail-fast；

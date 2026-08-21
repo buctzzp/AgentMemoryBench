@@ -463,14 +463,14 @@ def test_execute_evaluate_uses_prediction_api_runtime_for_judge(
     runtime = {
         "contract_version": "v2",
         "provider": "opencodego",
-        "model": "deepseek-v4-flash",
+        "model": "muse-spark-1.2-contributor",
         "answer_transport": "chat_completions",
         "judge_transport": "chat_completions",
         "thinking_mode": "disabled",
     }
     manifest["method"] = {
         "answer_reader": {
-            "answer_model": "deepseek-v4-flash",
+            "answer_model": "muse-spark-1.2-contributor",
             "api_runtime": runtime,
         }
     }
@@ -478,7 +478,7 @@ def test_execute_evaluate_uses_prediction_api_runtime_for_judge(
     settings = OpenAISettings(
         api_key="sk-test",
         base_url="https://opencode.example/v1",
-        model="deepseek-v4-flash",
+        model="muse-spark-1.2-contributor",
         provider="opencodego",
         judge_transport="chat_completions",
     )
@@ -488,8 +488,8 @@ def test_execute_evaluate_uses_prediction_api_runtime_for_judge(
     monkeypatch.setattr(
         commands,
         "load_openai_settings",
-        lambda *, project_root, api_provider: (
-            loaded_providers.append(api_provider) or settings
+        lambda *, project_root, api_provider, expected_model=None: (
+            loaded_providers.append(f"{api_provider}:{expected_model}") or settings
         ),
     )
     monkeypatch.setattr(
@@ -517,8 +517,10 @@ def test_execute_evaluate_uses_prediction_api_runtime_for_judge(
         )
     )
 
-    assert loaded_providers == ["opencodego"]
-    assert evaluator_calls[0]["model"] == "deepseek-v4-flash"
+    assert loaded_providers == [
+        "opencodego:muse-spark-1.2-contributor"
+    ]
+    assert evaluator_calls[0]["model"] == "muse-spark-1.2-contributor"
     assert evaluator_calls[0]["openai_settings"] is settings
 
 
@@ -533,11 +535,11 @@ def test_execute_evaluate_rejects_api_runtime_environment_drift(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["method"] = {
         "answer_reader": {
-            "answer_model": "deepseek-v4-flash",
+            "answer_model": "muse-spark-1.2-contributor",
             "api_runtime": {
                 "contract_version": "v2",
                 "provider": "opencodego",
-                "model": "deepseek-v4-flash",
+                "model": "muse-spark-1.2-contributor",
                 "answer_transport": "chat_completions",
                 "judge_transport": "chat_completions",
                 "thinking_mode": "disabled",

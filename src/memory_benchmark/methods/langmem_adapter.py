@@ -247,6 +247,7 @@ class LangMemRuntime:
         openai_settings: OpenAISettings,
         path_settings: PathSettings,
         storage_root: Path,
+        diagnostic_log_path: Path | None = None,
     ) -> None:
         """保存依赖；第三方 import 与模型加载推迟到 ``ensure_started``。"""
 
@@ -262,6 +263,7 @@ class LangMemRuntime:
             terminate_on_timeout=True,
             terminate_on_protocol_error=True,
             forget_process_on_terminate=False,
+            diagnostic_log_path=diagnostic_log_path,
         )
         self._closed = False
 
@@ -471,6 +473,7 @@ class LangMem(MemoryProvider):
         openai_settings: OpenAISettings,
         efficiency_collector: EfficiencyCollector | None = None,
         benchmark_name: str | None = None,
+        diagnostic_log_path: Path | None = None,
         runtime_factory: RuntimeFactory | None = None,
     ) -> None:
         """保存构造依赖并保持 runtime lazy。"""
@@ -486,6 +489,7 @@ class LangMem(MemoryProvider):
         self.openai_settings = openai_settings
         self.efficiency_collector = efficiency_collector
         self.benchmark_name = benchmark_name
+        self.diagnostic_log_path = diagnostic_log_path
         self._runtime_factory = runtime_factory or LangMemRuntime
         self._runtime: LangMemRuntimeProtocol | None = None
         self._observed_operation_ids: set[str] = set()
@@ -710,12 +714,15 @@ class LangMem(MemoryProvider):
         if self._cleaned:
             raise ConfigurationError("LangMem provider is already cleaned")
         if self._runtime is None:
-            self._runtime = self._runtime_factory(
+            runtime_kwargs: dict[str, Any] = dict(
                 config=self.config,
                 openai_settings=self.openai_settings,
                 path_settings=self.path_settings,
                 storage_root=self.storage_root,
             )
+            if self.diagnostic_log_path is not None:
+                runtime_kwargs["diagnostic_log_path"] = self.diagnostic_log_path
+            self._runtime = self._runtime_factory(**runtime_kwargs)
         return self._runtime
 
 

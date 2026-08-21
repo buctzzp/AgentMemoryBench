@@ -48,9 +48,9 @@ Phase 1 的**交付物是 5×10 smoke 矩阵**（每格极小规模真实测试 
 | Phase 1 目标 Benchmark | LoCoMo、LongMemEval、HaluMem、BEAM、MemBench |
 | Phase 1 目标 Method | A-Mem、MemoryOS、MemOS、LightMem、SimpleMem、Mem0、Letta/MemGPT、EverOS、LangMem、Graphiti OSS |
 | 已接入 Benchmark | LoCoMo、LongMemEval、HaluMem、BEAM、MemBench（均 frozen-v1） |
-| 已冻结 Method | LightMem、Mem0、MemoryOS、A-Mem、SimpleMem、MemOS |
-| 待真实 B11 Method | Letta/MemGPT、LangMem、EverOS（OpenCodeGo 区域 opt-in 外部阻断） |
-| 正在接入 | Graphiti OSS v0.29.3；不是 Zep parity |
+| 已冻结 Method | Phase 1 十家全部 frozen：A-Mem、MemoryOS、MemOS、LightMem、SimpleMem、Mem0、Letta/MemGPT、EverOS、LangMem、Graphiti OSS |
+| 当前工程主线 | ws04 isolated heartbeat 与第三方输出治理；成本 pilot 暂缓 |
+| 方法身份边界 | Graphiti OSS 不是 Zep hosted parity；Supermemory blocked 仅保留 source-gate 判例 |
 | 指标与观测 | answer/retrieval/operation evaluator + token、latency、model/runtime identity、memory context observations |
 | 历史 source gate | Supermemory stable self-host binary 的运行时核心未公开，已退出 Phase 1 第十格 |
 | 已移除 | PrefEval（不恢复 adapter、测试、文档或原始仓库） |
@@ -59,8 +59,9 @@ Phase 1 的**交付物是 5×10 smoke 矩阵**（每格极小规模真实测试 
 
 - **预算强约束**：全量实验必须先有成本估算表并经导师批准；当前一切真实 run 均为极小
   smoke。真实 API 调用须用户显式确认 method、benchmark、样本规模和 `run_id`。
-- smoke 使用 `.env` 中 `opencode_go_key/opencode_base_url/opencode_model_name` 对应的
-  `opencodego/deepseek-v4-flash`；`official_full` 与作者正式校准使用
+- 新 smoke 使用 `.env` 中 `opencode_go_key/opencode_base_url/opencode_model_name_2` 对应的
+  `opencodego/muse-spark-1.2-contributor`；旧 DeepSeek artifact 仍按 manifest 从第一模型槽
+  精确回读；`official_full` 与作者正式校准使用
   `primary/gpt-4o-mini`。两条 runtime 身份进入 manifest，分数不可直接混比。
 - 真实费用按实际 API 服务商价格离线计算，不绑定 OpenAI 官方价。
 - smoke 使用官方 method 参数；成本控制只通过数据规模裁剪。
@@ -83,7 +84,8 @@ uv sync
 # 低预算 smoke profile
 opencode_go_key=<your-opencodego-key>
 opencode_base_url=<your-opencodego-base-url>
-opencode_model_name=deepseek-v4-flash
+opencode_model_name=deepseek-v4-flash  # 仅用于旧 artifact 精确回读
+opencode_model_name_2=muse-spark-1.2-contributor  # 新 smoke 默认
 
 # official_full / 作者正式校准 profile
 OPENAI_KEY=<your-api-key>

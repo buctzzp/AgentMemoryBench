@@ -292,7 +292,7 @@ def test_langmem_halumem_operation_runner_keeps_update_and_qa_but_extraction_na(
         run_id="langmem-halumem-operation-fake",
         benchmark_name="halumem",
         method_name="LangMem",
-        model_name="deepseek-v4-flash",
+        model_name="muse-spark-1.2-contributor",
         output_root=tmp_path,
     )
     provider = _RegisteredLangMem(
@@ -302,7 +302,7 @@ def test_langmem_halumem_operation_runner_keeps_update_and_qa_but_extraction_na(
         openai_settings=OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="deepseek-v4-flash",
+            model="muse-spark-1.2-contributor",
             provider="opencodego",
             judge_transport="chat_completions",
         ),
@@ -467,7 +467,7 @@ def _install_offline_stack(
         lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="deepseek-v4-flash",
+            model="muse-spark-1.2-contributor",
             provider="opencodego",
             judge_transport="chat_completions",
         ),

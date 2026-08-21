@@ -126,6 +126,8 @@ class MethodBuildContext:
             method 实例级协议声明。
         completed_conversations: resume 时已确认完成写入的 conversation。
         efficiency_collector: runner 创建的可选效率 observation collector。
+        diagnostic_log_path: 当前 run 的第三方诊断日志；只作输出治理，不进入
+            method 配置、manifest 或算法输入。
     """
 
     config: Any
@@ -135,6 +137,7 @@ class MethodBuildContext:
     benchmark_name: str | None = None
     completed_conversations: tuple[Conversation, ...] = ()
     efficiency_collector: EfficiencyCollector | None = None
+    diagnostic_log_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -366,6 +369,7 @@ def _build_letta_system(context: MethodBuildContext) -> BaseMemorySystem:
         openai_settings=context.openai_settings,
         efficiency_collector=context.efficiency_collector,
         benchmark_name=context.benchmark_name,
+        diagnostic_log_path=context.diagnostic_log_path,
     )
 
 
@@ -383,6 +387,7 @@ def _build_langmem_system(context: MethodBuildContext) -> BaseMemorySystem:
         openai_settings=context.openai_settings,
         efficiency_collector=context.efficiency_collector,
         benchmark_name=context.benchmark_name,
+        diagnostic_log_path=context.diagnostic_log_path,
     )
 
 
@@ -405,6 +410,7 @@ def _build_everos_system(context: MethodBuildContext) -> BaseMemorySystem:
             conversation.conversation_id
             for conversation in context.completed_conversations
         },
+        diagnostic_log_path=context.diagnostic_log_path,
     )
 
 
@@ -423,6 +429,7 @@ def _build_graphiti_system(context: MethodBuildContext) -> BaseMemorySystem:
         benchmark_name=context.benchmark_name,
         session_memory_report=context.benchmark_name == "halumem",
         efficiency_collector=context.efficiency_collector,
+        diagnostic_log_path=context.diagnostic_log_path,
     )
 
 
@@ -516,6 +523,7 @@ def _clean_everos_failed_ingest_state(
         path_settings=context.path_settings,
         storage_root=storage_root,
         benchmark_name=context.benchmark_name,
+        diagnostic_log_path=context.diagnostic_log_path,
     )
     system = _build_everos_system(clean_context)
     if not isinstance(system, EverOS):
@@ -661,6 +669,7 @@ def _clean_graphiti_failed_ingest_state(
         path_settings=context.path_settings,
         storage_root=storage_root,
         benchmark_name=context.benchmark_name,
+        diagnostic_log_path=context.diagnostic_log_path,
     )
     system = _build_graphiti_system(clean_context)
     if not isinstance(system, GraphitiOSS):
@@ -863,6 +872,7 @@ def _clean_letta_failed_ingest_state(
         path_settings=context.path_settings,
         storage_root=storage_root,
         benchmark_name=context.benchmark_name,
+        diagnostic_log_path=context.diagnostic_log_path,
     )
     system = _build_letta_system(clean_context)
     if not isinstance(system, Letta):
@@ -892,6 +902,7 @@ def _clean_langmem_failed_ingest_state(
         path_settings=context.path_settings,
         storage_root=storage_root,
         benchmark_name=context.benchmark_name,
+        diagnostic_log_path=context.diagnostic_log_path,
     )
     system = _build_langmem_system(clean_context)
     if not isinstance(system, LangMem):
@@ -1012,6 +1023,7 @@ def _clean_memos_failed_ingest_state(
         path_settings=context.path_settings,
         storage_root=storage_root,
         benchmark_name=context.benchmark_name,
+        diagnostic_log_path=context.diagnostic_log_path,
     )
     system = _build_memos_system(clean_context)
     if not isinstance(system, MemOS):
@@ -1160,6 +1172,7 @@ def _build_amem_system(context: MethodBuildContext) -> BaseMemorySystem:
         efficiency_collector=context.efficiency_collector,
         session_memory_report=context.benchmark_name == "halumem",
         benchmark_name=context.benchmark_name,
+        diagnostic_log_path=context.diagnostic_log_path,
     )
     for conversation in context.completed_conversations:
         system.load_existing_conversation_state(conversation)
@@ -1255,6 +1268,7 @@ def _build_lightmem_system(context: MethodBuildContext) -> BaseMemorySystem:
         consume_granularity=_lightmem_consume_granularity(context.benchmark_name),
         session_memory_report=context.benchmark_name == "halumem",
         benchmark_name=context.benchmark_name,
+        diagnostic_log_path=context.diagnostic_log_path,
     )
     for conversation in context.completed_conversations:
         system.load_existing_conversation_state(conversation)
@@ -1422,6 +1436,7 @@ def _build_memoryos_system(context: MethodBuildContext) -> BaseMemorySystem:
         # speaker 配对成 add_memory。详见 plan-memoryos-migration.md T2。
         consume_granularity=_memoryos_consume_granularity(context.benchmark_name),
         benchmark_name=context.benchmark_name,
+        diagnostic_log_path=context.diagnostic_log_path,
     )
     for conversation in context.completed_conversations:
         system.load_existing_conversation_state(conversation)
@@ -1455,6 +1470,7 @@ def _clean_mem0_failed_ingest_state(
         path_settings=context.path_settings,
         storage_root=storage_root,
         benchmark_name=context.benchmark_name,
+        diagnostic_log_path=context.diagnostic_log_path,
     )
     system = _build_mem0_system(clean_context)
     if not isinstance(system, Mem0):

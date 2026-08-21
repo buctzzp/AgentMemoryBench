@@ -25,6 +25,9 @@ from memory_benchmark.observability.efficiency import (
 from memory_benchmark.observability.method_log_scope import (
     METHOD_LOG_FILENAME,
     NOISY_THIRD_PARTY_NAMESPACES,
+    append_method_output,
+    capture_method_output,
+    ensure_method_log_handler,
     method_log_scope,
 )
 from memory_benchmark.observability.progress_reporter import ProgressReporter
@@ -50,6 +53,9 @@ __all__ = [
     "ResolvedTokenUsage",
     "RunContext",
     "TokenCounter",
+    "append_method_output",
+    "capture_method_output",
+    "ensure_method_log_handler",
     "method_log_scope",
     "resolve_token_usage",
 ]

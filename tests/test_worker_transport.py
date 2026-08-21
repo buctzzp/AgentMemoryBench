@@ -37,6 +37,11 @@ for raw in sys.stdin:
         }
         print(json.dumps(response, ensure_ascii=False), flush=True)
         continue
+    if mode == "stderr_many":
+        for index in range(5):
+            print(f"diagnostic-{index} secret=s3cr3t", file=sys.stderr, flush=True)
+        print(json.dumps({"request_id": request_id, "ok": True, "result": {}}), flush=True)
+        continue
     if mode == "bad_json":
         print("not-json", flush=True)
         time.sleep(5)
@@ -78,6 +83,8 @@ def _start_transport(
     terminate_on_timeout: bool = True,
     terminate_on_protocol_error: bool = True,
     forget_process_on_terminate: bool = False,
+    diagnostic_log_path: Path | None = None,
+    stderr_tail_lines: int = 80,
 ) -> JsonLinesWorkerTransport:
     """启动一个不访问网络的最小协议 worker。"""
 
@@ -87,9 +94,11 @@ def _start_transport(
         timeout_detail=timeout_detail,
         request_sort_keys=sort_keys,
         stderr_tail_char_limit=2000,
+        stderr_tail_lines=stderr_tail_lines,
         terminate_on_timeout=terminate_on_timeout,
         terminate_on_protocol_error=terminate_on_protocol_error,
         forget_process_on_terminate=forget_process_on_terminate,
+        diagnostic_log_path=diagnostic_log_path,
     )
     transport.start(
         argv=[sys.executable, "-u", "-c", _WORKER_SCRIPT, mode],
@@ -99,6 +108,31 @@ def _start_transport(
         stderr_redactor=lambda line: line.replace("s3cr3t", "<redacted>"),
     )
     return transport
+
+
+def test_worker_transport_persists_full_redacted_stderr_beyond_tail(
+    tmp_path: Path,
+) -> None:
+    """worker stderr 全量写 method.log，失败摘要仍只保留有限脱敏 tail。"""
+
+    log_path = tmp_path / "logs" / "method.log"
+    transport = _start_transport(
+        tmp_path,
+        mode="stderr_many",
+        diagnostic_log_path=log_path,
+        stderr_tail_lines=2,
+    )
+    try:
+        assert transport.request("ingest", {}) == {}
+    finally:
+        transport.terminate()
+
+    content = log_path.read_text(encoding="utf-8")
+    for index in range(5):
+        assert f"diagnostic-{index} secret=<redacted>" in content
+    assert "s3cr3t" not in content
+    assert len(transport.stderr_tail) == 2
+    assert transport.stderr_tail[0].startswith("diagnostic-3")
 
 
 def test_worker_transport_preserves_request_bytes_order_and_sequence(

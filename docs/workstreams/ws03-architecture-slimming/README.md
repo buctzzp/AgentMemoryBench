@@ -6,21 +6,24 @@ created: 2026-07-05
 ---
 # ws03 架构减重（registry / legacy 接口 / CLI / LLM 配置）
 
-## Codex 恢复胶囊（2026-08-14）
+## Codex 恢复胶囊（2026-08-21）
 
-- **当前目标**：十家 method/5×10 smoke 已闭合；maintainability M1-A→D 已完成并达到停手线。
-  ws03 仅作为下一主线的决策门保持活跃，不继续自动施工。
-- **当前批次**：等待用户选择下一条研究/工程主线。M1-D 已把
+- **当前目标**：十家 method/5×10 smoke 与 ws04 已闭合；恢复有边界的 M1-E legacy 退役，
+  让活代码只保留一套 provider v3 主协议与通用 prediction 入口。
+- **当前批次**：M1-E 生产可达性与退出批。M1-D 已把
   planning/preflight/ingest/answer/parallel 抽成单向 leaf，原 `runners.prediction` 只保留
   兼容 façade 与顶层 orchestration。
 - **当前判据**：只读
   [M1-D prediction 拆责记录](notes/2026-08-14-prediction-decomposition-m1d.md)；M1 原始停手线见
   [十家 method 后的可维护性审计与 M1 裁决](notes/2026-08-14-maintainability-audit-and-m1-ruling.md) §7；
   结构灰区查 [`code-structure-principles.md`](../../reference/code-structure-principles.md)。
-- **禁止事项**：不跑成本/official-full/API，不改 metric/prompt/method 算法，不按文件行数
-  大搬家，不碰 data/models/outputs/third-party 或用户未跟踪资产。
-- **完成门**：已满足。最终无 API 全量门 `2228 passed, 3 deselected, 25 warnings,
-  29 subtests passed in 154.30s`；未经用户重新立项，不从长期 backlog 自动开工。
+- **本批顺序**：先删除无生产消费者的 MemoryOS 专用 runner 与只服务它的测试；再把
+  `--method-class` custom provider 组合根迁到 v3 后删除 bridge；registry 只做责任审计，
+  不按 2400 行数字强拆。
+- **禁止事项**：不跑成本/official-full/API，不改
+  metric/prompt/method 算法，不碰 data/models/outputs/third-party 或用户未跟踪资产。
+- **完成门**：M1-A→D 的旧门已满足；M1-E 须分别证明生产消费者清零、旧 import/CLI
+  强反例退出、文档与测试不再教授旧路径，并重新跑 compileall/无 API 全量。
 
 ## 目标
 

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import logging
 from pathlib import Path
 
@@ -39,6 +40,9 @@ from memory_benchmark.observability import (
     METHOD_LOG_FILENAME,
     NOISY_THIRD_PARTY_NAMESPACES,
     RunContext,
+    append_method_output,
+    capture_method_output,
+    ensure_method_log_handler,
     method_log_scope,
 )
 from memory_benchmark.readers.answer import FakeAnswerLLMClient, FrameworkAnswerReader
@@ -186,6 +190,147 @@ def test_method_log_scope_does_not_duplicate_handler_within_run(
         assert len(_root_file_handlers()) == 1
         logging.getLogger("LightMemory").info("single handler line")
     assert len(_root_file_handlers()) == 0
+
+
+def test_ensure_method_log_handler_restores_factory_removed_handler(
+    tmp_path: Path,
+    _root_logger_at_info,
+) -> None:
+    """isolated factory 摘掉并 close handler 后，应恢复同一 active run handler。"""
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    log_path = log_dir / METHOD_LOG_FILENAME
+    root = logging.getLogger()
+
+    with method_log_scope(log_dir):
+        handler = _root_file_handlers()[0]
+        root.removeHandler(handler)
+        handler.close()
+        ensure_method_log_handler(log_path)
+        logging.getLogger("LightMemory").info("after factory reconfigure")
+
+    assert "after factory reconfigure" in log_path.read_text(encoding="utf-8")
+    assert handler not in root.handlers
+
+    # scope 外重复调用不得创建 handler 或文件。
+    ensure_method_log_handler(log_path)
+    assert handler not in root.handlers
+
+
+def test_append_method_output_redacts_and_normalizes_multiline_text(
+    tmp_path: Path,
+) -> None:
+    """直接 diagnostic writer 应逐行落盘、跳空行并替换受保护值。"""
+
+    log_path = tmp_path / "logs" / METHOD_LOG_FILENAME
+    append_method_output(
+        log_path=log_path,
+        source="LightMem.stdout",
+        text="first secret-value\n\nsecond https://private.example/v1\n",
+        protected_values=("secret-value", "https://private.example/v1"),
+    )
+
+    content = log_path.read_text(encoding="utf-8")
+    assert "LightMem.stdout INFO first <redacted>" in content
+    assert "LightMem.stdout INFO second <redacted>" in content
+    assert "secret-value" not in content
+    assert "https://private.example/v1" not in content
+    assert len(content.splitlines()) == 2
+
+
+def test_append_method_output_none_path_is_noop(tmp_path: Path) -> None:
+    """未由 runner 注入日志路径时不得猜测或创建默认诊断文件。"""
+
+    append_method_output(
+        log_path=None,
+        source="fake.stdout",
+        text="not persisted",
+    )
+
+    assert list(tmp_path.rglob(METHOD_LOG_FILENAME)) == []
+
+
+def test_logging_and_direct_output_share_one_line_write_lock(
+    tmp_path: Path,
+    _root_logger_at_info,
+) -> None:
+    """logging 与直接 writer 并发追加时，每个 marker 仍应保持完整单行。"""
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    log_path = log_dir / METHOD_LOG_FILENAME
+
+    def write_direct(index: int) -> None:
+        """追加一条直接诊断 marker。"""
+
+        append_method_output(
+            log_path=log_path,
+            source="worker.stderr",
+            text=f"direct-marker-{index}",
+        )
+
+    def write_logging(index: int) -> None:
+        """通过标准 logging 追加一条 marker。"""
+
+        logging.getLogger("LightMemory").info("logging-marker-%s", index)
+
+    with method_log_scope(log_dir):
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = []
+            for index in range(20):
+                futures.append(executor.submit(write_direct, index))
+                futures.append(executor.submit(write_logging, index))
+            for future in futures:
+                future.result()
+
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    for index in range(20):
+        assert sum(line.endswith(f"direct-marker-{index}") for line in lines) == 1
+        assert sum(line.endswith(f"logging-marker-{index}") for line in lines) == 1
+
+
+def test_capture_method_output_persists_redacted_text_and_mirrors_by_switch(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """窄作用域应始终脱敏落盘，显示开关只控制终端镜像。"""
+
+    log_path = tmp_path / "logs" / METHOD_LOG_FILENAME
+    with capture_method_output(
+        log_path=log_path,
+        source="Example",
+        protected_values=("sk-private", "https://private.example"),
+        mirror_to_terminal=True,
+    ):
+        print("stdout sk-private")
+        print("stderr https://private.example", file=__import__("sys").stderr)
+
+    captured = capsys.readouterr()
+    assert captured.out == "stdout sk-private\n"
+    assert captured.err == "stderr https://private.example\n"
+    content = log_path.read_text(encoding="utf-8")
+    assert "Example.stdout INFO stdout <redacted>" in content
+    assert "Example.stderr WARNING stderr <redacted>" in content
+    assert "sk-private" not in content
+    assert "https://private.example" not in content
+
+
+def test_capture_method_output_flushes_before_propagating_failure(
+    tmp_path: Path,
+) -> None:
+    """第三方调用失败时先保存诊断，再原样传播业务异常。"""
+
+    log_path = tmp_path / "logs" / METHOD_LOG_FILENAME
+    with pytest.raises(RuntimeError, match="method exploded"):
+        with capture_method_output(
+            log_path=log_path,
+            source="Example",
+        ):
+            print("before failure")
+            raise RuntimeError("method exploded")
+
+    assert "before failure" in log_path.read_text(encoding="utf-8")
 
 
 class _LoggingV3TurnProvider(MemoryProvider):

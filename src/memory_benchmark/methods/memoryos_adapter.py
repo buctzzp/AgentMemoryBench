@@ -24,7 +24,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import importlib.util
-import io
 import json
 import math
 import os
@@ -84,6 +83,7 @@ from memory_benchmark.observability.efficiency import (
     extract_api_token_usage,
     resolve_token_usage,
 )
+from memory_benchmark.observability import capture_method_output
 from memory_benchmark.methods.image_text import turn_text_with_images
 from memory_benchmark.utils.logger import get_logger
 
@@ -479,6 +479,7 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
         path_settings: PathSettings | None = None,
         consume_granularity: ConsumeGranularity | None = None,
         benchmark_name: str | None = None,
+        diagnostic_log_path: str | Path | None = None,
     ):
         """初始化 MemoryOS adapter。
 
@@ -500,12 +501,16 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
                 adapter 内部按 speaker 配对。与 LightMem/A-Mem 既有模式一致。
             benchmark_name: registry 显式注入的 benchmark identity；用于只在
                 LoCoMo 出口恢复真实 speaker 名和 native prompt。
+            diagnostic_log_path: runner 显式注入的第三方诊断日志；不进入算法配置。
         """
 
         self.config = config or MemoryOSPaperConfig()
         self._efficiency_collector = efficiency_collector
         self._backend_factory = backend_factory
         self._answer_client = answer_client
+        self._diagnostic_log_path = (
+            Path(diagnostic_log_path) if diagnostic_log_path is not None else None
+        )
         self.benchmark_name = benchmark_name.strip().lower() if benchmark_name else None
         self.path_settings = path_settings or load_path_settings()
         if consume_granularity is not None:
@@ -1679,27 +1684,25 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
             raise ConfigurationError(
                 f"MemoryOS answer client is not available for {question.conversation_id}"
             )
-        response = self._suppress_stdout_if_needed(
-            self._answer_client.create_answer,
-            prompt,
-        )
+        with self._suppress_stdout_if_needed():
+            response = self._answer_client.create_answer(prompt)
         return str(response)
 
     @contextlib.contextmanager
-    def _suppress_stdout_if_needed(self, *args: Any, **kwargs: Any):
-        """按配置压制第三方 stdout；可作 contextmanager 或函数包装器。"""
+    def _suppress_stdout_if_needed(self):
+        """捕获第三方输出并按配置决定是否镜像回终端。"""
 
-        if not self.config.suppress_official_stdout:
-            if args or kwargs:
-                func = args[0]
-                return func(*args[1:], **kwargs)
-            yield
-            return
-        if args:
-            func = args[0]
-            with contextlib.redirect_stdout(io.StringIO()):
-                return func(*args[1:], **kwargs)
-        with contextlib.redirect_stdout(io.StringIO()):
+        protected_values = tuple(
+            value
+            for value in (self.openai_api_key, self.openai_base_url)
+            if isinstance(value, str) and value
+        )
+        with capture_method_output(
+            log_path=self._diagnostic_log_path,
+            source="MemoryOS",
+            protected_values=protected_values,
+            mirror_to_terminal=not self.config.suppress_official_stdout,
+        ):
             yield
 
     def _safe_config_metadata(self) -> dict[str, Any]:

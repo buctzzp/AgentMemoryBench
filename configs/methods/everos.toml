@@ -7,7 +7,7 @@
 
 [smoke]
 answer_builder = "benchmark"
-llm_model = "deepseek-v4-flash"
+llm_model = "muse-spark-1.2-contributor"
 memory_mode = "chat"
 search_method = "hybrid"
 add_batch_size = 25

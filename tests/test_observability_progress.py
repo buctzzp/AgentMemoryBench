@@ -229,6 +229,38 @@ class ProgressReporterTests(unittest.TestCase):
                 any("conv-a:q2" in description for description in descriptions)
             )
 
+    def test_worker_heartbeat_updates_public_snapshot_without_advancing_totals(self):
+        """worker 活性只更新 worker 状态，不得伪造全局业务完成数。"""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            progress_path = Path(temp_dir) / "progress.json"
+            reporter = ProgressReporter(progress_path=progress_path, enabled=False)
+
+            with reporter:
+                reporter.set_stage("Ingest + answer", step_index=1, step_count=2)
+                reporter.start_conversations(total=2)
+                reporter.start_questions(total=2)
+                reporter.update_worker_heartbeat(
+                    worker_idx=1,
+                    phase="answering",
+                    conversation_id="conv-2",
+                    turn_completed=4,
+                    turn_total=4,
+                    question_completed=0,
+                    question_total=1,
+                    current_question_id="conv-2:q1",
+                    phase_elapsed_seconds=1.23456,
+                )
+
+            snapshot = self._read_snapshot(progress_path)
+            worker = snapshot["workers"]["1"]
+            self.assertEqual(worker["phase"], "answering")
+            self.assertEqual(worker["phase_elapsed_seconds"], 1.235)
+            self.assertEqual(snapshot["active_worker_count"], 1)
+            self.assertEqual(snapshot["current_worker_idx"], 1)
+            self.assertEqual(snapshot["conversation_completed"], 0)
+            self.assertEqual(snapshot["question_completed"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

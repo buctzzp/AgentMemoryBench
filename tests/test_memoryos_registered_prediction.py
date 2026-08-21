@@ -55,7 +55,7 @@ def _write_memoryos_profiles(project_root: Path) -> None:
         """
 [smoke]
 answer_builder = "benchmark"
-llm_model = "deepseek-v4-flash"
+llm_model = "muse-spark-1.2-contributor"
 embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
 short_term_capacity = 1
 mid_term_capacity = 2000
@@ -262,6 +262,7 @@ class _FakeMemoryOS(BaseMemoryProvider):
         efficiency_collector=None,
         consume_granularity: str | None = None,
         benchmark_name: str | None = None,
+        diagnostic_log_path: str | Path | None = None,
     ):
         """保存 factory 参数，并初始化恢复与写入调用记录。"""
 
@@ -273,6 +274,9 @@ class _FakeMemoryOS(BaseMemoryProvider):
         if consume_granularity is not None:
             self.consume_granularity = consume_granularity
         self.benchmark_name = benchmark_name
+        self.diagnostic_log_path = (
+            Path(diagnostic_log_path) if diagnostic_log_path is not None else None
+        )
         self.loaded_conversation_ids: list[str] = []
         self.add_calls: list[list[Conversation]] = []
         self.answered_question_ids: list[str] = []
@@ -366,7 +370,7 @@ def _openai_settings() -> OpenAISettings:
     return OpenAISettings(
         api_key="sk-test",
         base_url="https://example.invalid/v1",
-        model="deepseek-v4-flash",
+        model="muse-spark-1.2-contributor",
         provider="opencodego",
         judge_transport="chat_completions",
     )
@@ -601,7 +605,7 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
     # LoCoMo reader 参数由 benchmark 统一冻结，不能继续沿用 MemoryOS 旧 profile。
     assert captured["method_manifest"] == {
         "answer_reader": {
-            "answer_model": "deepseek-v4-flash",
+            "answer_model": "muse-spark-1.2-contributor",
             "answer_parameters": {
                 "message_role": "user",
                 "temperature": 0.0,
@@ -616,7 +620,7 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
             "api_runtime": {
                 "contract_version": "v2",
                 "provider": "opencodego",
-                "model": "deepseek-v4-flash",
+                "model": "muse-spark-1.2-contributor",
                 "answer_transport": "chat_completions",
                 "judge_transport": "chat_completions",
                 "thinking_mode": "disabled",

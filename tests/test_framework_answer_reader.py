@@ -281,12 +281,12 @@ def test_opencodego_answer_client_disables_thinking(
         settings=OpenAISettings(
             api_key="sk-test",
             base_url="https://opencode.example/v1",
-            model="deepseek-v4-flash",
+            model="muse-spark-1.2-contributor",
             provider="opencodego",
             judge_transport="chat_completions",
         ),
         answer_settings=AnswerLLMSettings(
-            model="deepseek-v4-flash",
+            model="muse-spark-1.2-contributor",
             max_tokens=128,
         ),
     )

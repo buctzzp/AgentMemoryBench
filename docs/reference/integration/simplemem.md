@@ -4,7 +4,7 @@
 >
 > 状态：**B1-B11 已按 current text product 重认证，`method-frozen-v1`。**
 >
-> 2026-07-27 后的新 smoke 改用 `opencodego/deepseek-v4-flash`；既有冻结 run 仍按
+> 2026-08-21 后的新 smoke 改用 `opencodego/muse-spark-1.2-contributor`；既有冻结 run 仍按
 > `gpt-4o-mini` 历史身份解释。现行运行身份见
 > [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
 

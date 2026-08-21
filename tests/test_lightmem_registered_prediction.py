@@ -248,7 +248,7 @@ def test_lightmem_registered_prediction_runs_generic_runner_offline(
         lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="deepseek-v4-flash",
+            model="muse-spark-1.2-contributor",
             provider="opencodego",
             judge_transport="chat_completions",
         ),

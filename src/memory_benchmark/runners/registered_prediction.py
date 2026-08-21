@@ -58,7 +58,7 @@ from memory_benchmark.methods.run_identity import (
     MethodRunIdentity,
     build_method_run_identity,
 )
-from memory_benchmark.observability import RunContext
+from memory_benchmark.observability import METHOD_LOG_FILENAME, RunContext
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     ModelDescriptor,
@@ -714,6 +714,9 @@ def run_registered_conversation_qa_prediction(
             benchmark_name=benchmark_name,
             completed_conversations=completed_conversations,
             efficiency_collector=child.efficiency_collector,
+            diagnostic_log_path=(
+                child.run_context.logs_dir / METHOD_LOG_FILENAME
+            ),
         )
         clean_failed_ingest_conversation = _bind_clean_failed_ingest_conversation(
             method_registration=method_registration,
@@ -1088,6 +1091,9 @@ def _run_custom_conversation_qa_prediction(
             storage_root=child.run_context.method_state_dir,
             completed_conversations=completed_conversations,
             efficiency_collector=child.efficiency_collector,
+            diagnostic_log_path=(
+                child.run_context.logs_dir / METHOD_LOG_FILENAME
+            ),
         )
         use_isolated_worker_instances = child.policy.max_workers > 1
         system: BaseMemorySystem | BaseMemoryProvider = (

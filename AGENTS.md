@@ -42,8 +42,9 @@
   `docs/reference/method-toml-and-answer-builder-policy.md`；旧 `config_track` 只作历史产物
   兼容，迁移排在首个作者校准/真实效果 full run 前。对 retrieve 与答题耦合的 method
   （如 MemoryOS `get_response`），仍须忠实抽出 `formatted_memory` 与公开 builder 变量。
-- **API runtime 分 profile**（2026-07-27 用户改口）：新 `smoke` 使用
-  `opencodego/deepseek-v4-flash` 做低预算流通验证，`official_full` 与作者正式校准仍使用
+- **API runtime 分 profile**（2026-07-27 用户改口，2026-08-21 模型更新）：新 `smoke` 使用
+  `opencodego/muse-spark-1.2-contributor` 做最低预算流通验证；历史
+  `opencodego/deepseek-v4-flash` artifact 保持按 manifest 回读，`official_full` 与作者正式校准仍使用
   `primary/gpt-4o-mini`。provider/model/answer transport/judge transport 必须进入
   manifest/resume identity；两条 runtime 的分数不得直接比较。secret/base URL 只从
   `.env` 读取、不落 artifact。现行细则见

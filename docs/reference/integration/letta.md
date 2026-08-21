@@ -146,7 +146,7 @@ resume。named volume 是本机外部状态：跨机器只复制 outputs 不足�
 
 ## 6. API runtime 与观测
 
-- smoke：`opencodego/deepseek-v4-flash`，Chat Completions，显式
+- smoke：`opencodego/muse-spark-1.2-contributor`，Chat Completions，显式
   `thinking={type: disabled}`；
 - official_full：`primary/gpt-4o-mini`，provider default Chat Completions 行为；
 - build LLM 每次真实 response usage 逐调用记录；缺 usage fail-fast；

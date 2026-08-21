@@ -45,11 +45,11 @@ def test_load_typed_profile_builds_mem0_smoke_profile_from_section(tmp_path: Pat
         toml_path,
         """
         [smoke]
-        extraction_model = "deepseek-v4-flash"
+        extraction_model = "muse-spark-1.2-contributor"
         embedding_provider = "huggingface"
         embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
         embedding_dimensions = 384
-        reader_model = "deepseek-v4-flash"
+        reader_model = "muse-spark-1.2-contributor"
         top_k = 20
         max_workers = 1
         ingestion_chunk_size = 1
@@ -230,7 +230,62 @@ def test_load_openai_settings_reads_explicit_opencodego_profile(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """opencodego 只读自己的三项配置，并公开 chat-only judge 身份。"""
+    """opencodego 默认选择 economy slot，并公开 chat-only judge 身份。"""
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "opencode_go_key=unit-test-opencode-key",
+                "opencode_base_url=https://opencode.example/v1",
+                "opencode_model_name=deepseek-v4-flash",
+                "opencode_model_name_2=muse-spark-1.2-contributor",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    for key in (
+        "opencode_go_key",
+        "OPENCODE_GO_KEY",
+        "opencode_base_url",
+        "OPENCODE_BASE_URL",
+        "opencode_model_name",
+        "OPENCODE_MODEL_NAME",
+        "opencode_model_name_2",
+        "OPENCODE_MODEL_NAME_2",
+        "opencode_model_name_3",
+        "OPENCODE_MODEL_NAME_3",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = load_openai_settings(
+        project_root=tmp_path,
+        env_file=env_file,
+        api_provider=OPENCODEGO_API_PROVIDER,
+    )
+
+    assert settings.provider == "opencodego"
+    assert settings.model == "muse-spark-1.2-contributor"
+    assert settings.judge_transport == CHAT_COMPLETIONS_JUDGE_TRANSPORT
+    runtime = settings.to_runtime_manifest_dict()
+    assert runtime["provider"] == "opencodego"
+    assert runtime["model"] == "muse-spark-1.2-contributor"
+    assert runtime["judge_transport"] == "chat_completions"
+    assert runtime["contract_version"] == "v2"
+    assert runtime["thinking_mode"] == "disabled"
+    assert settings.chat_completions_request_overrides() == {
+        "extra_body": {"thinking": {"type": "disabled"}}
+    }
+    assert "unit-test-opencode-key" not in repr(runtime)
+    assert "opencode.example" not in repr(runtime)
+
+
+def test_load_openai_settings_can_reopen_legacy_opencodego_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """evaluate 应能按旧 manifest 精确选择 legacy slot，不能被新默认覆盖。"""
 
     env_file = tmp_path / ".env"
     env_file.write_text(
@@ -251,6 +306,8 @@ def test_load_openai_settings_reads_explicit_opencodego_profile(
         "OPENCODE_BASE_URL",
         "opencode_model_name",
         "OPENCODE_MODEL_NAME",
+        "opencode_model_name_2",
+        "OPENCODE_MODEL_NAME_2",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -258,22 +315,51 @@ def test_load_openai_settings_reads_explicit_opencodego_profile(
         project_root=tmp_path,
         env_file=env_file,
         api_provider=OPENCODEGO_API_PROVIDER,
+        expected_model="deepseek-v4-flash",
     )
 
-    assert settings.provider == "opencodego"
     assert settings.model == "deepseek-v4-flash"
-    assert settings.judge_transport == CHAT_COMPLETIONS_JUDGE_TRANSPORT
-    runtime = settings.to_runtime_manifest_dict()
-    assert runtime["provider"] == "opencodego"
-    assert runtime["model"] == "deepseek-v4-flash"
-    assert runtime["judge_transport"] == "chat_completions"
-    assert runtime["contract_version"] == "v2"
-    assert runtime["thinking_mode"] == "disabled"
-    assert settings.chat_completions_request_overrides() == {
-        "extra_body": {"thinking": {"type": "disabled"}}
-    }
-    assert "unit-test-opencode-key" not in repr(runtime)
-    assert "opencode.example" not in repr(runtime)
+
+
+def test_load_openai_settings_rejects_unconfigured_expected_opencodego_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """manifest 模型不在任一显式 slot 时必须在调用 API 前失败。"""
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "opencode_go_key=unit-test-opencode-key",
+                "opencode_base_url=https://opencode.example/v1",
+                "opencode_model_name_2=muse-spark-1.2-contributor",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    for key in (
+        "opencode_go_key",
+        "OPENCODE_GO_KEY",
+        "opencode_base_url",
+        "OPENCODE_BASE_URL",
+        "opencode_model_name",
+        "OPENCODE_MODEL_NAME",
+        "opencode_model_name_2",
+        "OPENCODE_MODEL_NAME_2",
+        "opencode_model_name_3",
+        "OPENCODE_MODEL_NAME_3",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    with pytest.raises(ConfigurationError, match="not present"):
+        load_openai_settings(
+            project_root=tmp_path,
+            env_file=env_file,
+            api_provider=OPENCODEGO_API_PROVIDER,
+            expected_model="missing-model",
+        )
 
 
 @pytest.mark.parametrize(
@@ -335,7 +421,7 @@ def test_load_typed_profile_builds_matching_memoryos_smoke_and_official_profiles
 
     assert smoke.profile_name == "smoke"
     assert official_full.profile_name == "official_full"
-    assert smoke.llm_model == "deepseek-v4-flash"
+    assert smoke.llm_model == "muse-spark-1.2-contributor"
     assert official_full.llm_model == "gpt-4o-mini"
     assert smoke.embedding_model_name == "sentence-transformers/all-MiniLM-L6-v2"
     assert official_full.embedding_model_name == "sentence-transformers/all-MiniLM-L6-v2"

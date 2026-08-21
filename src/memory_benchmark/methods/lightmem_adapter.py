@@ -13,7 +13,6 @@ from datetime import datetime
 import hashlib
 import importlib
 import importlib.util
-import io
 from pathlib import Path
 import re
 import shutil
@@ -60,6 +59,7 @@ from memory_benchmark.core.provider_protocol import (
     UnitRef,
 )
 from memory_benchmark.methods.image_text import turn_text_with_images
+from memory_benchmark.observability import capture_method_output
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     EfficiencyStage,
@@ -406,6 +406,7 @@ class LightMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
         consume_granularity: ConsumeGranularity | None = None,
         session_memory_report: bool = False,
         benchmark_name: str | None = None,
+        diagnostic_log_path: str | Path | None = None,
     ):
         """初始化 LightMem adapter。
 
@@ -423,6 +424,7 @@ class LightMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
             benchmark_name: registry 显式传入的 benchmark 身份；只有它等于
                 `"locomo"` 时才允许启用 `lifecycle_profile="locomo_offline_consolidated"`。
                 不从 conversation 的 source_path 或 question 字段猜测。
+            diagnostic_log_path: runner 显式注入的第三方诊断日志；不进入算法配置。
 
         异常:
             ConfigurationError: `config.lifecycle_profile` 为
@@ -446,6 +448,9 @@ class LightMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
             )
         self._answer_client = answer_client
         self._efficiency_collector = efficiency_collector
+        self._diagnostic_log_path = (
+            Path(diagnostic_log_path) if diagnostic_log_path is not None else None
+        )
         self._backends: dict[str, Any] = {}
         self._conversation_metadata: dict[str, dict[str, Any]] = {}
         self._memory_manager_usage_lock = threading.Lock()
@@ -1943,11 +1948,22 @@ class LightMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
         *args: Any,
         **kwargs: Any,
     ) -> Any:
-        """按配置压制第三方 stdout。"""
+        """捕获第三方输出并按配置决定是否镜像回终端。"""
 
-        if not self.config.suppress_official_stdout:
-            return func(*args, **kwargs)
-        with contextlib.redirect_stdout(io.StringIO()):
+        protected_values = tuple(
+            value
+            for value in (
+                getattr(self._openai_settings, "api_key", None),
+                getattr(self._openai_settings, "base_url", None),
+            )
+            if isinstance(value, str) and value
+        )
+        with capture_method_output(
+            log_path=self._diagnostic_log_path,
+            source="LightMem",
+            protected_values=protected_values,
+            mirror_to_terminal=not self.config.suppress_official_stdout,
+        ):
             return func(*args, **kwargs)
 
 

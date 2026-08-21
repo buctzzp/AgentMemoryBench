@@ -1610,11 +1610,11 @@ def test_resume_manifest_rejects_api_runtime_identity_change(
     original = {
         "method": {
             "answer_reader": {
-                "answer_model": "deepseek-v4-flash",
+                "answer_model": "muse-spark-1.2-contributor",
                 "api_runtime": {
                     "contract_version": "v2",
                     "provider": "opencodego",
-                    "model": "deepseek-v4-flash",
+                    "model": "muse-spark-1.2-contributor",
                     "answer_transport": "chat_completions",
                     "judge_transport": "chat_completions",
                     "thinking_mode": "disabled",
@@ -3218,6 +3218,100 @@ def test_isolated_worker_pipeline_creates_per_worker_instances(
         question_status[qid]["status"] == "completed"
         for qid in question_order
     )
+    heartbeat_rows = [
+        row["payload"]
+        for row in read_jsonl(paths.logs_dir / "events.jsonl")
+        if row["event"] == "isolated_worker_heartbeat"
+    ]
+    assert heartbeat_rows
+    assert {row["worker_idx"] for row in heartbeat_rows} == {0, 1, 2, 3}
+    assert {row["phase"] for row in heartbeat_rows} >= {
+        "starting",
+        "ingesting",
+        "answering",
+        "completed",
+    }
+    assert all(
+        "gold" not in json.dumps(row, ensure_ascii=False).lower()
+        for row in heartbeat_rows
+    )
+    progress_snapshot = json.loads(paths.progress_path.read_text(encoding="utf-8"))
+    assert set(progress_snapshot["workers"]) == {"0", "1", "2", "3"}
+    assert all(
+        worker["phase"] == "completed"
+        for worker in progress_snapshot["workers"].values()
+    )
+    assert progress_snapshot["active_worker_count"] == 0
+
+
+def test_worker_heartbeat_contract_rejects_invalid_phase_and_counts() -> None:
+    """heartbeat 实体必须在进入 queue 前拒绝未知阶段与虚假完成数。"""
+
+    from memory_benchmark.runners.prediction_parallel import _WorkerHeartbeat
+
+    with pytest.raises(ValueError, match="unsupported"):
+        _WorkerHeartbeat(worker_idx=0, phase="retrieving-secret")
+    with pytest.raises(ValueError, match="cannot exceed"):
+        _WorkerHeartbeat(
+            worker_idx=0,
+            phase="ingesting",
+            turn_completed=2,
+            turn_total=1,
+        )
+
+
+def test_heartbeat_poll_refreshes_elapsed_without_event_flood(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """长阻塞期间刷新 elapsed，但 events 只记录真实 worker 状态转移。"""
+
+    from concurrent.futures import ThreadPoolExecutor
+    from queue import Queue
+
+    from memory_benchmark.observability import ProgressReporter
+    from memory_benchmark.runners import prediction_parallel
+    from memory_benchmark.runners.prediction_parallel import (
+        _WorkerHeartbeat,
+        _iter_completed_futures_with_heartbeats,
+    )
+    from memory_benchmark.utils.run_logger import RunLogger
+
+    monkeypatch.setattr(
+        prediction_parallel,
+        "_WORKER_HEARTBEAT_POLL_SECONDS",
+        0.005,
+    )
+    heartbeat_queue: Queue[_WorkerHeartbeat] = Queue()
+    heartbeat_queue.put(_WorkerHeartbeat(worker_idx=0, phase="starting"))
+    logs_dir = tmp_path / "logs"
+    progress_path = tmp_path / "progress.json"
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(time.sleep, 0.03)
+        with ProgressReporter(
+            progress_path,
+            enabled=False,
+            snapshot_interval=0,
+        ) as progress:
+            progress.set_stage("Ingest + answer", step_index=1, step_count=2)
+            completed = list(
+                _iter_completed_futures_with_heartbeats(
+                    future_to_worker={future: 0},
+                    heartbeat_queue=heartbeat_queue,
+                    progress=progress,
+                    logger=RunLogger(logs_dir),
+                )
+            )
+
+    assert completed == [future]
+    snapshot = json.loads(progress_path.read_text(encoding="utf-8"))
+    assert snapshot["workers"]["0"]["phase_elapsed_seconds"] > 0
+    heartbeat_events = [
+        row
+        for row in read_jsonl(logs_dir / "events.jsonl")
+        if row["event"] == "isolated_worker_heartbeat"
+    ]
+    assert len(heartbeat_events) == 1
 
 
 def test_isolated_worker_restores_state_and_skips_completed_questions(

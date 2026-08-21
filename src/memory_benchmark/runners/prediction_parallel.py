@@ -7,11 +7,13 @@ retrieve/answer 与 manifest 规则由对应叶模块拥有。
 from __future__ import annotations
 
 import traceback
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from collections.abc import Callable, Iterator
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
+from queue import Empty, Queue
 from threading import Event
-from time import perf_counter_ns
-from typing import Any, Callable
+from time import monotonic, perf_counter_ns
+from typing import Any
 
 from memory_benchmark.core import (
     AnswerPromptResult,
@@ -24,7 +26,11 @@ from memory_benchmark.core.interfaces import BaseMemoryProvider, BaseMemorySyste
 from memory_benchmark.core.provider_protocol import MemoryProvider, RetrievalResult
 from memory_benchmark.core.validators import validate_no_private_keys
 from memory_benchmark.methods.registry import MethodBuildContext
-from memory_benchmark.observability import ProgressReporter, RunContext
+from memory_benchmark.observability import (
+    ProgressReporter,
+    RunContext,
+    ensure_method_log_handler,
+)
 from memory_benchmark.observability.efficiency import (
     EfficiencyArtifactStore,
     EfficiencyCollector,
@@ -75,6 +81,63 @@ from memory_benchmark.utils.run_logger import RunLogger
 
 
 _PredictionSystem = BaseMemorySystem | BaseMemoryProvider | MemoryProvider
+_WORKER_HEARTBEAT_PHASES = frozenset(
+    {"starting", "ingesting", "answering", "completed", "failed", "cancelled"}
+)
+_WORKER_HEARTBEAT_POLL_SECONDS = 0.5
+
+
+@dataclass(frozen=True)
+class _WorkerHeartbeat:
+    """isolated worker 发给 coordinator 的公开活性事件。"""
+
+    worker_idx: int
+    phase: str
+    conversation_id: str | None = None
+    turn_completed: int = 0
+    turn_total: int = 0
+    question_completed: int = 0
+    question_total: int = 0
+    current_question_id: str | None = None
+
+    def __post_init__(self) -> None:
+        """拒绝非法阶段、负数、越界计数和空白公开 id。"""
+
+        if self.worker_idx < 0:
+            raise ValueError("worker_idx must be non-negative")
+        if self.phase not in _WORKER_HEARTBEAT_PHASES:
+            raise ValueError(f"unsupported worker heartbeat phase: {self.phase!r}")
+        for field_name in (
+            "turn_completed",
+            "turn_total",
+            "question_completed",
+            "question_total",
+        ):
+            value = getattr(self, field_name)
+            if value < 0:
+                raise ValueError(f"{field_name} must be non-negative")
+        if self.turn_completed > self.turn_total:
+            raise ValueError("turn_completed cannot exceed turn_total")
+        if self.question_completed > self.question_total:
+            raise ValueError("question_completed cannot exceed question_total")
+        for field_name in ("conversation_id", "current_question_id"):
+            value = getattr(self, field_name)
+            if value is not None and not value.strip():
+                raise ValueError(f"{field_name} must be None or non-blank")
+
+    def to_payload(self) -> dict[str, object]:
+        """返回可写入 events.jsonl 的公开载荷。"""
+
+        return {
+            "worker_idx": self.worker_idx,
+            "phase": self.phase,
+            "conversation_id": self.conversation_id,
+            "turn_completed": self.turn_completed,
+            "turn_total": self.turn_total,
+            "question_completed": self.question_completed,
+            "question_total": self.question_total,
+            "current_question_id": self.current_question_id,
+        }
 
 
 @dataclass(frozen=True)
@@ -192,6 +255,91 @@ def _split_work_items_by_stable_conversation_order(
     )
 
 
+def _drain_worker_heartbeats(
+    *,
+    heartbeat_queue: Queue[_WorkerHeartbeat],
+    latest_by_worker: dict[int, tuple[_WorkerHeartbeat, float]],
+    progress: ProgressReporter,
+    logger: RunLogger,
+) -> None:
+    """由 coordinator 排空 worker 事件，并独占更新日志与进度对象。"""
+
+    while True:
+        try:
+            heartbeat = heartbeat_queue.get_nowait()
+        except Empty:
+            return
+        now = monotonic()
+        previous = latest_by_worker.get(heartbeat.worker_idx)
+        phase_started_at = (
+            previous[1]
+            if previous is not None and previous[0].phase == heartbeat.phase
+            else now
+        )
+        latest_by_worker[heartbeat.worker_idx] = (heartbeat, phase_started_at)
+        progress.update_worker_heartbeat(
+            **heartbeat.to_payload(),
+            phase_elapsed_seconds=max(0.0, now - phase_started_at),
+        )
+        logger.log_event("isolated_worker_heartbeat", heartbeat.to_payload())
+
+
+def _refresh_worker_heartbeats(
+    *,
+    latest_by_worker: dict[int, tuple[_WorkerHeartbeat, float]],
+    progress: ProgressReporter,
+) -> None:
+    """阻塞期间刷新 phase 存活时间，但不写虚假业务完成数。"""
+
+    now = monotonic()
+    for heartbeat, phase_started_at in latest_by_worker.values():
+        if heartbeat.phase in {"completed", "failed", "cancelled"}:
+            continue
+        progress.update_worker_heartbeat(
+            **heartbeat.to_payload(),
+            phase_elapsed_seconds=max(0.0, now - phase_started_at),
+        )
+
+
+def _iter_completed_futures_with_heartbeats(
+    *,
+    future_to_worker: dict[Future[Any], int],
+    heartbeat_queue: Queue[_WorkerHeartbeat],
+    progress: ProgressReporter,
+    logger: RunLogger,
+) -> Iterator[Future[Any]]:
+    """轮询 future 并穿插消费 heartbeat，避免长调用期间终端静默。"""
+
+    pending = set(future_to_worker)
+    latest_by_worker: dict[int, tuple[_WorkerHeartbeat, float]] = {}
+    while pending:
+        completed, pending = wait(
+            pending,
+            timeout=_WORKER_HEARTBEAT_POLL_SECONDS,
+            return_when=FIRST_COMPLETED,
+        )
+        _drain_worker_heartbeats(
+            heartbeat_queue=heartbeat_queue,
+            latest_by_worker=latest_by_worker,
+            progress=progress,
+            logger=logger,
+        )
+        if not completed:
+            _refresh_worker_heartbeats(
+                latest_by_worker=latest_by_worker,
+                progress=progress,
+            )
+            continue
+        for future in completed:
+            yield future
+    _drain_worker_heartbeats(
+        heartbeat_queue=heartbeat_queue,
+        latest_by_worker=latest_by_worker,
+        progress=progress,
+        logger=logger,
+    )
+
+
 def _run_isolated_worker_pipeline(
     *,
     work_plan: _PredictionWorkPlan,
@@ -262,6 +410,7 @@ def _run_isolated_worker_pipeline(
     conversation_ingested: int = len(work_plan.ingested_conversation_ids)
     question_answered: int = len(work_plan.completed_question_ids)
     cancellation_event = Event()
+    heartbeat_queue: Queue[_WorkerHeartbeat] = Queue()
     answer_prompt_records = {
         record["question_id"]: record
         for record in read_jsonl(
@@ -295,6 +444,7 @@ def _run_isolated_worker_pipeline(
                 benchmark_name=build_context_template.benchmark_name,
                 completed_conversations=completed_for_chunk,
                 efficiency_collector=build_context_template.efficiency_collector,
+                diagnostic_log_path=build_context_template.diagnostic_log_path,
             )
             future = executor.submit(
                 _isolated_worker,
@@ -313,10 +463,17 @@ def _run_isolated_worker_pipeline(
                 policy.max_consecutive_failures,
                 protocol_version=protocol_version,
                 consume_granularity=consume_granularity,
+                worker_idx=worker_idx,
+                heartbeat_sink=heartbeat_queue.put,
             )
             future_to_chunk[future] = worker_idx
 
-        for future in as_completed(future_to_chunk):
+        for future in _iter_completed_futures_with_heartbeats(
+            future_to_worker=future_to_chunk,
+            heartbeat_queue=heartbeat_queue,
+            progress=progress,
+            logger=logger,
+        ):
             try:
                 batches = future.result()
             except Exception as exc:
@@ -502,6 +659,8 @@ def _isolated_worker(
     *,
     protocol_version: str = "",
     consume_granularity: str | None = None,
+    worker_idx: int = 0,
+    heartbeat_sink: Callable[[_WorkerHeartbeat], None] | None = None,
 ) -> tuple[_ConversationAnswerBatch | _ConversationFailureBatch, ...]:
     """单个独立 worker：创建 method instance，串行处理分配到的 conversation。
 
@@ -509,7 +668,19 @@ def _isolated_worker(
     conversation 间无共享状态。
     """
 
-    system = _normalize_memory_system(system_factory(build_context))
+    def emit(heartbeat: _WorkerHeartbeat) -> None:
+        """向 coordinator 发送事件；未启用 heartbeat 时保持零副作用。"""
+
+        if heartbeat_sink is not None:
+            heartbeat_sink(heartbeat)
+
+    emit(_WorkerHeartbeat(worker_idx=worker_idx, phase="starting"))
+    try:
+        system = _normalize_memory_system(system_factory(build_context))
+        ensure_method_log_handler(build_context.diagnostic_log_path)
+    except Exception:
+        emit(_WorkerHeartbeat(worker_idx=worker_idx, phase="failed"))
+        raise
     try:
         _validate_protocol_version(protocol_version, system)
         _validate_consume_granularity(consume_granularity, system)
@@ -519,8 +690,15 @@ def _isolated_worker(
         consecutive_failures = 0
         for work_item in work_items:
             if cancellation_event is not None and cancellation_event.is_set():
+                emit(_WorkerHeartbeat(worker_idx=worker_idx, phase="cancelled"))
                 break
             conversation = work_item.conversation
+            turn_total = sum(
+                len(session.turns) for session in conversation.sessions
+            )
+            question_total = len(work_item.pending_questions)
+            turn_completed = 0 if work_item.needs_ingest else turn_total
+            question_completed = 0
             conv_predictions: list[dict[str, Any]] = []
             conv_retrievals: list[dict[str, Any]] = []
             conv_session_reports: list[dict[str, Any]] = []
@@ -529,6 +707,17 @@ def _isolated_worker(
             try:
                 public_conversation = _make_public_conversation(conversation)
                 if work_item.needs_ingest:
+                    emit(
+                        _WorkerHeartbeat(
+                            worker_idx=worker_idx,
+                            phase="ingesting",
+                            conversation_id=conversation.conversation_id,
+                            turn_completed=0,
+                            turn_total=turn_total,
+                            question_completed=0,
+                            question_total=question_total,
+                        )
+                    )
                     if (
                         efficiency_collector is not None
                         and efficiency_collector.enabled
@@ -557,8 +746,21 @@ def _isolated_worker(
                             )
                         )
                     ingested = True
+                    turn_completed = turn_total
                 for source_question in work_item.pending_questions:
                     question = _make_public_question(source_question)
+                    emit(
+                        _WorkerHeartbeat(
+                            worker_idx=worker_idx,
+                            phase="answering",
+                            conversation_id=conversation.conversation_id,
+                            turn_completed=turn_completed,
+                            turn_total=turn_total,
+                            question_completed=question_completed,
+                            question_total=question_total,
+                            current_question_id=question.question_id,
+                        )
+                    )
                     validate_no_private_keys(question.to_dict())
                     if (
                         efficiency_collector is not None
@@ -632,7 +834,19 @@ def _isolated_worker(
                             "metadata": prediction.metadata,
                         }
                     )
+                    question_completed += 1
             except Exception as exc:
+                emit(
+                    _WorkerHeartbeat(
+                        worker_idx=worker_idx,
+                        phase="failed",
+                        conversation_id=conversation.conversation_id,
+                        turn_completed=turn_completed,
+                        turn_total=turn_total,
+                        question_completed=question_completed,
+                        question_total=question_total,
+                    )
+                )
                 results.append(
                     _ConversationFailureBatch(
                         conversation_id=conversation.conversation_id,
@@ -671,10 +885,25 @@ def _isolated_worker(
                     ingested=work_item.needs_ingest,
                 )
             )
+            emit(
+                _WorkerHeartbeat(
+                    worker_idx=worker_idx,
+                    phase="completed",
+                    conversation_id=conversation.conversation_id,
+                    turn_completed=turn_completed,
+                    turn_total=turn_total,
+                    question_completed=question_completed,
+                    question_total=question_total,
+                )
+            )
             consecutive_failures = 0
         return tuple(results)
     finally:
         # worker 自建的 v3 provider 生命周期归 worker 所有：成功 batch 交回协调
         # 线程之前、以及异常退出之前，都必须收敛恰好一次，避免后台线程随进程
         # 池复用而泄漏。
-        _cleanup_memory_provider(system)
+        try:
+            _cleanup_memory_provider(system)
+        except Exception:
+            emit(_WorkerHeartbeat(worker_idx=worker_idx, phase="failed"))
+            raise

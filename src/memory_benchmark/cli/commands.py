@@ -297,9 +297,15 @@ def _resolve_run_api_settings(
         raise ConfigurationError(
             "method.answer_reader.api_runtime.provider must be non-empty"
         )
+    model = raw_runtime.get("model")
+    if not isinstance(model, str) or not model.strip():
+        raise ConfigurationError(
+            "method.answer_reader.api_runtime.model must be non-empty"
+        )
     settings = load_openai_settings(
         project_root=project_root,
         api_provider=provider,
+        expected_model=model,
     )
     expected = settings.to_runtime_manifest_dict()
     if raw_runtime != expected:

@@ -312,7 +312,7 @@ def test_locomo_judge_registration_requires_api_and_valid_profile() -> None:
     settings = OpenAISettings(
         api_key="sk-test",
         base_url="https://opencode.example/v1",
-        model="deepseek-v4-flash",
+        model="muse-spark-1.2-contributor",
         provider="opencodego",
         judge_transport="chat_completions",
     )
@@ -326,7 +326,7 @@ def test_locomo_judge_registration_requires_api_and_valid_profile() -> None:
     )
     assert isinstance(evaluator, LoCoMoJudgeEvaluator)
     assert evaluator.mode == "compact"
-    assert evaluator.model == "deepseek-v4-flash"
+    assert evaluator.model == "muse-spark-1.2-contributor"
     assert evaluator._openai_settings is settings
 
     with pytest.raises(ConfigurationError, match="Unknown evaluator profile"):

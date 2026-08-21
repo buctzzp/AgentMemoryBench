@@ -43,7 +43,7 @@ answer_builder = "<method>_longmemeval_official"
 2. `smoke` 不为省钱篡改 embedding、检索、update、summary、storage 等 method 算法参数；
    成本优先靠数据、conversation/question/turn 范围和并发缩小。2026-07-27 起允许一个
    明确例外：低预算 smoke 的 API runtime 使用
-   `opencodego/deepseek-v4-flash`，正式 `official_full` 保持
+   `opencodego/muse-spark-1.2-contributor`，正式 `official_full` 保持
    `primary/gpt-4o-mini`。这是流通验证而非效果对比，provider/model/transport 与必要的
    reasoning completion floor 必须进入 manifest/resume；细则见
    [`api-runtime-profiles.md`](api-runtime-profiles.md)。

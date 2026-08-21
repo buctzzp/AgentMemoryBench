@@ -152,12 +152,16 @@ def test_lightmem_factory_loads_completed_conversations_for_resume(
         ),
         storage_root=tmp_path / "method_state",
         completed_conversations=(conversation,),
+        diagnostic_log_path=tmp_path / "logs" / "method.log",
     )
     registration = get_method_registration("lightmem")
 
     system = registration.system_factory(context)
 
     assert system.kwargs["storage_root"] == tmp_path / "method_state"
+    assert system.kwargs["diagnostic_log_path"] == (
+        tmp_path / "logs" / "method.log"
+    )
     assert [item.conversation_id for item in system.loaded_conversations] == [
         "conv-lightmem"
     ]

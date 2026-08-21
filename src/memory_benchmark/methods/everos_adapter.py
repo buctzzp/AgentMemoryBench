@@ -312,6 +312,7 @@ class EverOSRuntime:
         openai_settings: OpenAISettings,
         path_settings: PathSettings,
         storage_root: Path,
+        diagnostic_log_path: Path | None = None,
     ) -> None:
         """保存配置；第三方 import、lifespan 与 API client 均推迟到首个 conversation。"""
 
@@ -328,6 +329,7 @@ class EverOSRuntime:
             terminate_on_timeout=True,
             terminate_on_protocol_error=True,
             forget_process_on_terminate=True,
+            diagnostic_log_path=diagnostic_log_path,
         )
         self._active_isolation_key: str | None = None
         self._active_root: Path | None = None
@@ -747,6 +749,7 @@ class EverOS(MemoryProvider):
         benchmark_name: str | None = None,
         session_memory_report: bool = False,
         completed_conversation_ids: set[str] | None = None,
+        diagnostic_log_path: Path | None = None,
         runtime_factory: RuntimeFactory | None = None,
     ) -> None:
         """保存构造依赖；真实 product runtime 保持 lazy。"""
@@ -768,6 +771,7 @@ class EverOS(MemoryProvider):
         self._observed_operation_ids: set[str] = set()
         self._session_reports: dict[tuple[str, str | None], list[str]] = {}
         self._completed_conversation_ids = set(completed_conversation_ids or ())
+        self.diagnostic_log_path = diagnostic_log_path
 
     def prepare(self, run_context: Any) -> None:
         """只核 source/runtime 文件；conversation root 在首个 ingest/retrieve 激活。"""
@@ -1209,12 +1213,15 @@ class EverOS(MemoryProvider):
         if self._cleaned:
             raise ConfigurationError("EverOS provider is already cleaned")
         if self._runtime is None:
-            self._runtime = self._runtime_factory(
+            runtime_kwargs: dict[str, Any] = dict(
                 config=self.config,
                 openai_settings=self.openai_settings,
                 path_settings=self.path_settings,
                 storage_root=self.storage_root,
             )
+            if self.diagnostic_log_path is not None:
+                runtime_kwargs["diagnostic_log_path"] = self.diagnostic_log_path
+            self._runtime = self._runtime_factory(**runtime_kwargs)
         return self._runtime
 
     def _sidecar_path(self, isolation_key: str) -> Path:

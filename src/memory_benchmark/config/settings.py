@@ -18,7 +18,7 @@ from memory_benchmark.core import ConfigurationError
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 PRIMARY_API_PROVIDER = "primary"
 OPENCODEGO_API_PROVIDER = "opencodego"
-OPENCODEGO_SMOKE_MODEL = "deepseek-v4-flash"
+OPENCODEGO_SMOKE_MODEL = "muse-spark-1.2-contributor"
 SUPPORTED_API_PROVIDERS = frozenset(
     {PRIMARY_API_PROVIDER, OPENCODEGO_API_PROVIDER}
 )
@@ -462,6 +462,7 @@ def load_openai_settings(
     project_root: str | Path | None = None,
     env_file: str | Path | None = None,
     api_provider: str = PRIMARY_API_PROVIDER,
+    expected_model: str | None = None,
 ) -> OpenAISettings:
     """读取 OpenAI 相关配置。
 
@@ -469,6 +470,8 @@ def load_openai_settings(
         project_root: 项目根目录；为空时使用当前工作目录推断。
         env_file: `.env` 文件路径；为空时默认读取 `project_root/.env`。
         api_provider: `primary` 或 `opencodego`。
+        expected_model: manifest/profile 已声明的公开模型。OpenCodeGo 会在已配置
+            model slot 中精确匹配它；为空时选择当前 smoke economy slot。
 
     输出:
         OpenAISettings: 只包含 API 连接所需字段的结构化配置。
@@ -497,6 +500,11 @@ def load_openai_settings(
             )
         base_url = _first_non_empty_env("BASE_URL", "OPENAI_BASE_URL")
         model = DEFAULT_OPENAI_MODEL
+        if expected_model is not None and expected_model != model:
+            raise ConfigurationError(
+                "Primary API model does not match expected runtime identity: "
+                f"{expected_model!r}"
+            )
         judge_transport = RESPONSES_JUDGE_TRANSPORT
     elif normalized_provider == OPENCODEGO_API_PROVIDER:
         api_key = _first_non_empty_env("opencode_go_key", "OPENCODE_GO_KEY")
@@ -504,22 +512,47 @@ def load_openai_settings(
             "opencode_base_url",
             "OPENCODE_BASE_URL",
         )
-        model = _first_non_empty_env(
+        legacy_model = _first_non_empty_env(
             "opencode_model_name",
             "OPENCODE_MODEL_NAME",
+        )
+        economy_model = _first_non_empty_env(
+            "opencode_model_name_2",
+            "OPENCODE_MODEL_NAME_2",
+        )
+        additional_model = _first_non_empty_env(
+            "opencode_model_name_3",
+            "OPENCODE_MODEL_NAME_3",
         )
         missing = [
             field_name
             for field_name, value in (
                 ("opencode_go_key", api_key),
                 ("opencode_base_url", base_url),
-                ("opencode_model_name", model),
             )
             if value is None
         ]
+        if expected_model is None and economy_model is None:
+            missing.append("opencode_model_name_2")
         if missing:
             raise ConfigurationError(
                 "Missing opencodego setting(s): " + ", ".join(missing)
+            )
+        configured_models = tuple(
+            candidate
+            for candidate in (economy_model, legacy_model, additional_model)
+            if candidate is not None
+        )
+        if expected_model is None:
+            # 上面的 missing 门已证明 economy_model 非空。
+            assert economy_model is not None
+            model = economy_model
+        elif expected_model in configured_models:
+            model = expected_model
+        else:
+            raise ConfigurationError(
+                "Expected OpenCodeGo model is not present in configured model slots: "
+                f"{expected_model!r}"
             )
         judge_transport = CHAT_COMPLETIONS_JUDGE_TRANSPORT
     else:

@@ -3,7 +3,7 @@
 > 判据模板：`../method-integration-checklist.md` §B；勾选总表：`../integration-status.md`。
 > 状态：**METHOD_FROZEN_V3（五格 current-v7 真实行为门、forced-flush exact-smoke
 > reachability 与 MemBench 100K current-identity refill 全部通过）**。
-> 2026-07-27 后的新 smoke 改用 `opencodego/deepseek-v4-flash`；本页既有 B11 数字与
+> 2026-08-21 后的新 smoke 改用 `opencodego/muse-spark-1.2-contributor`；本页既有 B11 数字与
 > token 观测仍是当时 `gpt-4o-mini` 历史 run，不改写、不跨模型比较。现行运行身份见
 > [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
 > 2026-08-14 M1-B 后，新 run 由 `lightmem.toml` 的公开 profile + section 内

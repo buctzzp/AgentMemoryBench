@@ -77,6 +77,9 @@ class ProgressReporter:
             "question_total": 0,
             "current_conversation_id": None,
             "current_question_id": None,
+            "current_worker_idx": None,
+            "active_worker_count": 0,
+            "workers": {},
         }
         if console is not None:
             self._console = console
@@ -256,6 +259,60 @@ class ProgressReporter:
                 completed=completed,
                 total=total,
             )
+        self._persist_snapshot()
+
+    def update_worker_heartbeat(
+        self,
+        *,
+        worker_idx: int,
+        phase: str,
+        conversation_id: str | None,
+        turn_completed: int,
+        turn_total: int,
+        question_completed: int,
+        question_total: int,
+        current_question_id: str | None,
+        phase_elapsed_seconds: float,
+    ) -> None:
+        """更新一个 isolated worker 的公开活性快照。
+
+        heartbeat 只描述 worker/阶段/公开 id 与计数；全局 conversation/question
+        完成数仍由 coordinator 在 batch 提交后更新，不能由活性事件提前推进。
+        """
+
+        workers = self.snapshot["workers"]
+        if not isinstance(workers, dict):
+            raise RuntimeError("progress workers snapshot must be an object")
+        workers[str(worker_idx)] = {
+            "phase": phase,
+            "conversation_id": conversation_id,
+            "turn_completed": turn_completed,
+            "turn_total": turn_total,
+            "question_completed": question_completed,
+            "question_total": question_total,
+            "current_question_id": current_question_id,
+            "phase_elapsed_seconds": round(phase_elapsed_seconds, 3),
+        }
+        terminal_phases = {"completed", "failed", "cancelled"}
+        self.snapshot["current_worker_idx"] = worker_idx
+        self.snapshot["current_conversation_id"] = conversation_id
+        self.snapshot["current_question_id"] = current_question_id
+        self.snapshot["active_worker_count"] = sum(
+            1
+            for state in workers.values()
+            if isinstance(state, dict) and state.get("phase") not in terminal_phases
+        )
+        if self._stage_task_id is not None:
+            stage = self.snapshot.get("stage") or "Running"
+            step_index = self.snapshot.get("step_index", 0)
+            step_count = self.snapshot.get("step_count", 0)
+            description = (
+                f"Stage [{step_index}/{step_count}] {stage} | "
+                f"worker={worker_idx} phase={phase}"
+            )
+            if conversation_id is not None:
+                description += f" conversation={conversation_id}"
+            self.progress.update(self._stage_task_id, description=description)
         self._persist_snapshot()
 
     def flush(self) -> None:

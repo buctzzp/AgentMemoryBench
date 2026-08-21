@@ -191,7 +191,7 @@ def _run_beam_variant(
         "load_openai_settings",
         lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
-            model="deepseek-v4-flash",
+            model="muse-spark-1.2-contributor",
             provider="opencodego",
             judge_transport="chat_completions",
         ),

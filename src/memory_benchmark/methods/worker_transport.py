@@ -17,6 +17,7 @@ import threading
 from typing import Any
 
 from memory_benchmark.core import ConfigurationError
+from memory_benchmark.observability import append_method_output
 
 
 WORKER_TRANSPORT_LOGICAL_PATH = (
@@ -39,6 +40,7 @@ class JsonLinesWorkerTransport:
         terminate_on_timeout: bool = True,
         terminate_on_protocol_error: bool = True,
         forget_process_on_terminate: bool = False,
+        diagnostic_log_path: Path | None = None,
     ) -> None:
         """保存稳定 transport policy。
 
@@ -61,6 +63,7 @@ class JsonLinesWorkerTransport:
         self.terminate_on_timeout = terminate_on_timeout
         self.terminate_on_protocol_error = terminate_on_protocol_error
         self.forget_process_on_terminate = forget_process_on_terminate
+        self.diagnostic_log_path = diagnostic_log_path
         self._process: subprocess.Popen[str] | None = None
         self._stderr_thread: threading.Thread | None = None
         self._stderr_tail: deque[str] = deque(maxlen=stderr_tail_lines)
@@ -134,7 +137,13 @@ class JsonLinesWorkerTransport:
         if process is None or process.stderr is None:
             return
         for line in process.stderr:
-            self._stderr_tail.append(self._stderr_redactor(line.rstrip()))
+            redacted = self._stderr_redactor(line.rstrip())
+            self._stderr_tail.append(redacted)
+            append_method_output(
+                log_path=self.diagnostic_log_path,
+                source=f"{self.product_label}.worker.stderr",
+                text=redacted,
+            )
 
     def request(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         """发送一条请求，并严格验证 response id、状态与 result 形状。"""
@@ -238,6 +247,9 @@ class JsonLinesWorkerTransport:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
+        stderr_thread = self._stderr_thread
+        if stderr_thread is not None and stderr_thread.is_alive():
+            stderr_thread.join(timeout=5)
         for stream in (process.stdin, process.stdout, process.stderr):
             if stream is not None and not stream.closed:
                 stream.close()

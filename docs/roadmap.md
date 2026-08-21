@@ -1,6 +1,6 @@
 # 项目路线图
 
-更新日期：2026-08-14。本文件是唯一方向文档：Phase 1 目标、workstream 索引与
+更新日期：2026-08-21。本文件是唯一方向文档：Phase 1 目标、workstream 索引与
 全局约束。逐任务状态见各 workstream README；2026-06 的历史阶段记录（Phase E-S）
 已归档到 `archive/status/2026-07-04-current-roadmap.md` 与
 `archive/status/2026-07-04-task-ledger.md`。
@@ -67,8 +67,9 @@ registry-backed `plan-smoke` preflight 与新 method ledger v1 强制门也已�
 LangMem、EverOS 均已完成真实 B11 与冻结对表。ws02.7 method-track 至此关闭。2026-08-14 用户
 已选择并完成：成本 pilot/ws05 暂缓期间执行 ws03 maintainability M1；live 文档/依赖方向、
 TOML profile、共享 worker transport 与 prediction 编排四批均已关闭。M1 全程零真实 API，
-现已达到施工停手线；ws03 仅作为 compact hook 的唯一 P0 决策门保留，不自动扩 M1-E。下一条
-实施主线由用户在成本/指标/作者校准/official-full 中重新选择后再原子切换。
+现已达到施工停手线。2026-08-21 用户选择并完成 ws04：纠正 7 月已落地 `method.log`
+但状态页未回填的文档漂移，补齐 isolated heartbeat、factory handler 恢复、in-process
+stdout/stderr 与 JSON-lines worker stderr 脱敏落盘；最终无 API 全量 2243 passed。
 
 ## Workstream 索引
 
@@ -83,8 +84,8 @@ TOML profile、共享 worker transport 与 prediction 编排四批均已关闭�
 | [ws02.5](workstreams/ws02.5-method-interface-audit/README.md) | method-interface-audit | done | P0 | 2026-07-09 关闭：5 method 接口审计 + MemoryOS 迁移 + 当时配置归一化；shared embedder 资产保留为 controlled，ws02.7 现审计 product-default 精确身份与迁移/复证面 |
 | [ws02.6](workstreams/ws02.6-first-smoke-hardening/README.md) | first-smoke-hardening | done | P0 | 五 benchmark 全部 frozen-v1 + B6 横向总验收完成（2026-07-12）；method 侧已转 ws02.7 |
 | [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | done | P0 | Phase 1 十家 method 均 frozen；5×10 smoke matrix closed |
-| [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | in-progress | P0 | M1-A→D 已关闭；当前仅为 hook 可恢复的决策门，不自动扩 M1-E |
-| [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | open | P2 | isolated 进度心跳、第三方 stdout/tqdm 治理 |
+| [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | in-progress | P0 | ws04 后恢复 M1-E：专用 runner 退出、custom provider v3 化、registry 责任审计 |
+| [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | done | P0 | isolated heartbeat 与第三方输出治理已关闭；完整诊断进 method.log |
 | [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | paused | P1 | 用户 2026-08-14 暂缓成本 pilot；ws03 达停手线后再显式恢复 |
 | [ws06](workstreams/ws06-tests-restructure/README.md) | tests-restructure | open | P2 | tests 分组重组、大文件拆分、过时断言排查 |
 

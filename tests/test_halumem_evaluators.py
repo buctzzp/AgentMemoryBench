@@ -849,7 +849,7 @@ def test_halumem_opencodego_judge_requires_json_mode_and_disables_thinking() -> 
     settings = OpenAISettings(
         api_key="sk-test",
         base_url="https://opencode.example/v1",
-        model="deepseek-v4-flash",
+        model="muse-spark-1.2-contributor",
         provider="opencodego",
         judge_transport=CHAT_COMPLETIONS_JUDGE_TRANSPORT,
     )

@@ -296,6 +296,7 @@ class GraphitiRuntime:
         openai_settings: OpenAISettings,
         path_settings: PathSettings,
         storage_root: Path,
+        diagnostic_log_path: Path | None = None,
     ) -> None:
         """保存启动依赖；第三方 import 与模型加载保持 lazy。"""
 
@@ -313,6 +314,7 @@ class GraphitiRuntime:
             terminate_on_timeout=True,
             terminate_on_protocol_error=True,
             forget_process_on_terminate=False,
+            diagnostic_log_path=diagnostic_log_path,
         )
         self._closed = False
         self._close_failed = False
@@ -566,6 +568,7 @@ class GraphitiOSS(MemoryProvider):
         benchmark_name: str | None,
         session_memory_report: bool = False,
         efficiency_collector: EfficiencyCollector | None = None,
+        diagnostic_log_path: Path | None = None,
         runtime_factory: RuntimeFactory | None = None,
     ) -> None:
         """保存依赖，强校验 runtime/model 身份并保持 worker lazy。"""
@@ -592,6 +595,7 @@ class GraphitiOSS(MemoryProvider):
         self.benchmark_name = benchmark_name
         self.session_memory_report = session_memory_report
         self.efficiency_collector = efficiency_collector
+        self.diagnostic_log_path = diagnostic_log_path
         self._runtime_factory = runtime_factory or GraphitiRuntime
         self._runtime: GraphitiRuntimeProtocol | None = None
         self._observed_operation_ids: set[str] = set()
@@ -797,12 +801,15 @@ class GraphitiOSS(MemoryProvider):
         if self._cleaned:
             raise ConfigurationError("Graphiti provider is already cleaned")
         if self._runtime is None:
-            self._runtime = self._runtime_factory(
+            runtime_kwargs: dict[str, Any] = dict(
                 config=self.config,
                 openai_settings=self.openai_settings,
                 path_settings=self.path_settings,
                 storage_root=self.storage_root,
             )
+            if self.diagnostic_log_path is not None:
+                runtime_kwargs["diagnostic_log_path"] = self.diagnostic_log_path
+            self._runtime = self._runtime_factory(**runtime_kwargs)
         return self._runtime
 
 

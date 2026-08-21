@@ -41,7 +41,7 @@ answer                  framework benchmark unified builder
 ```
 
 两 profile 的非 LLM build/search 参数完全相同。新 `smoke` 的 LLM runtime 是
-`opencodego/deepseek-v4-flash`，`official_full` 是
+`opencodego/muse-spark-1.2-contributor`，`official_full` 是
 `primary/gpt-4o-mini`；该预算型 smoke 不与正式结果比较。运行身份和 transport 见
 [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
 
@@ -307,7 +307,7 @@ model inventory 区分三类，本地 reranker 不伪装成 LLM：
 
 | model_id | role | mode |
 | --- | --- | --- |
-| `memos-build-llm` | memory build/extraction LLM（smoke=`deepseek-v4-flash`；official=`gpt-4o-mini`） | api |
+| `memos-build-llm` | memory build/extraction LLM（smoke=`muse-spark-1.2-contributor`；official=`gpt-4o-mini`） | api |
 | `memos-embedding` | 本地 MiniLM 384 | local |
 | `memos-reranker` | `cosine_local` 本地算法 | local |
 

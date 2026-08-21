@@ -245,6 +245,7 @@ class LettaRuntime:
         openai_settings: OpenAISettings,
         path_settings: PathSettings,
         storage_root: Path,
+        diagnostic_log_path: Path | None = None,
     ) -> None:
         """保存依赖；真正启动推迟到 ``ensure_started``。"""
 
@@ -270,6 +271,7 @@ class LettaRuntime:
             terminate_on_timeout=False,
             terminate_on_protocol_error=False,
             forget_process_on_terminate=False,
+            diagnostic_log_path=diagnostic_log_path,
         )
         self._started = False
         self._closed = False
@@ -727,6 +729,7 @@ class Letta(MemoryProvider):
         openai_settings: OpenAISettings,
         efficiency_collector: EfficiencyCollector | None = None,
         benchmark_name: str | None = None,
+        diagnostic_log_path: Path | None = None,
         runtime_factory: RuntimeFactory | None = None,
     ) -> None:
         """保存构造依赖，runtime 仍延迟到 prepare/首次操作。"""
@@ -741,6 +744,7 @@ class Letta(MemoryProvider):
         self.openai_settings = openai_settings
         self.efficiency_collector = efficiency_collector
         self.benchmark_name = benchmark_name
+        self.diagnostic_log_path = diagnostic_log_path
         self._runtime_factory = runtime_factory or LettaRuntime
         self._runtime: LettaRuntimeProtocol | None = None
         self._cleaned = False
@@ -998,12 +1002,15 @@ class Letta(MemoryProvider):
         if self._cleaned:
             raise ConfigurationError("Letta provider is already cleaned")
         if self._runtime is None:
-            self._runtime = self._runtime_factory(
+            runtime_kwargs: dict[str, Any] = dict(
                 config=self.config,
                 openai_settings=self.openai_settings,
                 path_settings=self.path_settings,
                 storage_root=self.storage_root,
             )
+            if self.diagnostic_log_path is not None:
+                runtime_kwargs["diagnostic_log_path"] = self.diagnostic_log_path
+            self._runtime = self._runtime_factory(**runtime_kwargs)
         return self._runtime
 
     def _subject_id(self, isolation_key: str) -> str:

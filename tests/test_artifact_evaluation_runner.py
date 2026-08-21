@@ -80,7 +80,7 @@ def _smoke_openai_settings() -> OpenAISettings:
     return OpenAISettings(
         api_key="sk-test",
         base_url="https://opencode.example/v1",
-        model="deepseek-v4-flash",
+        model="muse-spark-1.2-contributor",
         provider="opencodego",
         judge_transport="chat_completions",
     )

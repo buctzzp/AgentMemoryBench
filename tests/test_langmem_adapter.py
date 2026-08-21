@@ -142,7 +142,7 @@ def _config(**overrides: Any) -> LangMemConfig:
     """构造最小合法 LangMem profile。"""
 
     values: dict[str, Any] = {
-        "llm_model": "deepseek-v4-flash",
+        "llm_model": "muse-spark-1.2-contributor",
         "embedding_model_path": "models/all-MiniLM-L6-v2",
         "embedding_dimension": 384,
         "embedding_normalize": True,
@@ -195,7 +195,7 @@ def _provider(
         openai_settings=OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="deepseek-v4-flash",
+            model="muse-spark-1.2-contributor",
             provider="opencodego",
             judge_transport="chat_completions",
         ),
@@ -607,7 +607,7 @@ def test_langmem_runtime_environment_does_not_forward_unrelated_secrets(
     """独立 worker 环境只携带当前 build key，不继承其他 provider secret。"""
 
     paths = _paths(tmp_path)
-    settings = OpenAISettings(api_key="chosen-secret", model="deepseek-v4-flash")
+    settings = OpenAISettings(api_key="chosen-secret", model="muse-spark-1.2-contributor")
     runtime = LangMemRuntime(
         config=_config(),
         openai_settings=settings,

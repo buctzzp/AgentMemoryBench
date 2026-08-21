@@ -96,7 +96,7 @@ def test_letta_worker_installs_log_redaction_before_server_construction(
     monkeypatch.setattr(engine, "_install_openai_runtime_patch", lambda: None)
     payload = {
         "config": {
-            "llm_model": "deepseek-v4-flash",
+            "llm_model": "muse-spark-1.2-contributor",
             "model_endpoint": "https://private-runtime.example/v1",
             "provider": "opencodego",
             "context_window": 128000,
@@ -123,7 +123,7 @@ def test_letta_worker_opencodego_transport_disables_thinking_without_mutation() 
     engine = _WorkerEngine()
     engine.config = {"provider": "opencodego"}
     request: dict[str, Any] = {
-        "model": "deepseek-v4-flash",
+        "model": "muse-spark-1.2-contributor",
         "messages": [{"role": "user", "content": "hello"}],
         "extra_body": {"existing": "kept"},
     }
@@ -131,7 +131,7 @@ def test_letta_worker_opencodego_transport_disables_thinking_without_mutation() 
     transported = engine._transport_request(request)
 
     assert transported == {
-        "model": "deepseek-v4-flash",
+        "model": "muse-spark-1.2-contributor",
         "messages": [{"role": "user", "content": "hello"}],
         "extra_body": {
             "existing": "kept",

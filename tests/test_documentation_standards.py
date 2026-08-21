@@ -25,6 +25,7 @@ LIVE_DOCUMENTS = (
     ROOT / "docs" / "reference" / "architect-playbook.md",
     ROOT / "docs" / "reference" / "code-structure-principles.md",
     ROOT / "docs" / "workstreams" / "ws03-architecture-slimming" / "README.md",
+    ROOT / "docs" / "workstreams" / "ws04-terminal-observability" / "README.md",
 )
 MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")
 

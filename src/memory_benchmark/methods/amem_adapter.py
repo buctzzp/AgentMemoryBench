@@ -13,7 +13,6 @@ import contextlib
 from dataclasses import asdict, dataclass
 import hashlib
 import importlib
-import io
 import json
 import pickle
 import shutil
@@ -53,6 +52,7 @@ from memory_benchmark.core.provider_protocol import (
     UnitRef,
 )
 from memory_benchmark.methods.image_text import turn_text_with_images
+from memory_benchmark.observability import capture_method_output
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     EfficiencyStage,
@@ -278,6 +278,7 @@ class AMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
         efficiency_collector: EfficiencyCollector | None = None,
         session_memory_report: bool = False,
         benchmark_name: str | None = None,
+        diagnostic_log_path: str | Path | None = None,
     ):
         """初始化 A-Mem adapter。
 
@@ -290,6 +291,7 @@ class AMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
             storage_root: 当前 run 的 A-Mem 状态目录；为空时使用隔离的默认输出目录。
             path_settings: 项目路径配置。
             efficiency_collector: runner 管理的可选效率 observation collector。
+            diagnostic_log_path: runner 显式注入的第三方诊断日志；不进入算法配置。
         """
 
         self.config = config
@@ -302,6 +304,9 @@ class AMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
             self.path_settings.outputs_root / "amem" / "unscoped-method-state"
         )
         self._efficiency_collector = efficiency_collector
+        self._diagnostic_log_path = (
+            Path(diagnostic_log_path) if diagnostic_log_path is not None else None
+        )
         self.session_memory_report = session_memory_report
         self.benchmark_name = benchmark_name
         self._runtimes: dict[str, Any] = {}
@@ -1333,11 +1338,19 @@ class AMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
         *args: Any,
         **kwargs: Any,
     ) -> Any:
-        """按配置压制第三方源码 stdout。"""
+        """捕获第三方输出并按配置决定是否镜像回终端。"""
 
-        if not self.config.suppress_official_stdout:
-            return func(*args, **kwargs)
-        with contextlib.redirect_stdout(io.StringIO()):
+        protected_values = tuple(
+            value
+            for value in (self._openai_api_key, self._openai_base_url)
+            if isinstance(value, str) and value
+        )
+        with capture_method_output(
+            log_path=self._diagnostic_log_path,
+            source="AMem",
+            protected_values=protected_values,
+            mirror_to_terminal=not self.config.suppress_official_stdout,
+        ):
             return func(*args, **kwargs)
 
 

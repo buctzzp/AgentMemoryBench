@@ -125,7 +125,7 @@ def _config(**overrides: Any) -> EverOSConfig:
     """构造 M2 主 profile 的最小合法配置。"""
 
     values: dict[str, Any] = {
-        "llm_model": "deepseek-v4-flash",
+        "llm_model": "muse-spark-1.2-contributor",
         "memory_mode": "chat",
         "search_method": "hybrid",
         "add_batch_size": 25,
@@ -189,7 +189,7 @@ def _provider(
         openai_settings=OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="deepseek-v4-flash",
+            model="muse-spark-1.2-contributor",
             provider="opencodego",
             judge_transport="chat_completions",
         ),
@@ -314,7 +314,7 @@ def test_everos_openrouter_embedding_transport_is_explicit_and_secret_safe(
         openai_settings=OpenAISettings(
             api_key="private-llm-key",
             base_url="https://llm.example/v1",
-            model="deepseek-v4-flash",
+            model="muse-spark-1.2-contributor",
             provider="opencodego",
             judge_transport="chat_completions",
         ),
@@ -356,7 +356,7 @@ def test_everos_product_root_omits_endpoint_template_and_keeps_ome_config(
         openai_settings=OpenAISettings(
             api_key="private-llm-key",
             base_url="https://llm.example/v1",
-            model="deepseek-v4-flash",
+            model="muse-spark-1.2-contributor",
             provider="opencodego",
             judge_transport="chat_completions",
         ),
@@ -403,7 +403,7 @@ def test_everos_openrouter_embedding_requires_its_declared_endpoint(
         openai_settings=OpenAISettings(
             api_key="private-llm-key",
             base_url="https://llm.example/v1",
-            model="deepseek-v4-flash",
+            model="muse-spark-1.2-contributor",
             provider="opencodego",
             judge_transport="chat_completions",
         ),
@@ -1068,7 +1068,7 @@ def test_everos_runtime_delete_refuses_unmarked_or_wrong_identity_root(
         openai_settings=OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="deepseek-v4-flash",
+            model="muse-spark-1.2-contributor",
             provider="opencodego",
             judge_transport="chat_completions",
         ),
@@ -1110,7 +1110,7 @@ def test_everos_runtime_delete_retries_after_partial_tombstone_removal(
         openai_settings=OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="deepseek-v4-flash",
+            model="muse-spark-1.2-contributor",
             provider="opencodego",
             judge_transport="chat_completions",
         ),
