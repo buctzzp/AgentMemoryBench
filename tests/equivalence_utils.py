@@ -8,7 +8,6 @@ from typing import Any
 
 from memory_benchmark.core import Conversation, Question
 from memory_benchmark.core.interfaces import BaseMemoryProvider
-from memory_benchmark.core.provider_bridge import LegacyProviderBridge
 from memory_benchmark.core.provider_protocol import (
     ConversationBatch,
     IngestUnit,
@@ -34,7 +33,7 @@ class SequenceRunResult:
     calls: tuple[dict[str, object], ...]
 
 
-def run_bridge_sequence(
+def run_legacy_sequence(
     *,
     provider: BaseMemoryProvider,
     conversation: Conversation,
@@ -42,12 +41,11 @@ def run_bridge_sequence(
     run_id: str,
     snapshot_calls: Callable[[BaseMemoryProvider], Sequence[dict[str, object]]] | None = None,
 ) -> SequenceRunResult:
-    """通过 LegacyProviderBridge 驱动旧 provider 并返回调用序列。"""
+    """直接驱动 adapter 的旧 add/retrieve parity 面并返回调用序列。"""
 
-    bridge = LegacyProviderBridge(provider)
-    batch = _conversation_batch(conversation=conversation, run_id=run_id)
-    bridge.ingest(batch)
-    bridge.retrieve(_retrieval_query(question=question, run_id=run_id))
+    del run_id
+    provider.add(conversation)
+    provider.retrieve(question)
     return SequenceRunResult(
         calls=tuple(_snapshot_calls(provider, snapshot_calls)),
     )
@@ -80,24 +78,6 @@ def run_native_sequence(
     return SequenceRunResult(
         calls=tuple(_snapshot_calls(provider, snapshot_calls)),
     )
-
-
-def _conversation_batch(
-    *,
-    conversation: Conversation,
-    run_id: str,
-) -> ConversationBatch:
-    """把公开 conversation 转成桥接路径使用的 ConversationBatch。"""
-
-    isolation_key = default_isolation_key(run_id, conversation.conversation_id)
-    events = tuple(build_turn_events(conversation, isolation_key))
-    for signal in GranularityAggregator("conversation").aggregate(
-        events,
-        isolation_key=isolation_key,
-    ):
-        if isinstance(signal, ConversationBatch):
-            return signal
-    raise AssertionError("conversation batch was not produced")
 
 
 def _retrieval_query(*, question: Question, run_id: str) -> RetrievalQuery:
@@ -136,4 +116,4 @@ def _is_ingest_unit(signal: object) -> bool:
     )
 
 
-__all__ = ["SequenceRunResult", "run_bridge_sequence", "run_native_sequence"]
+__all__ = ["SequenceRunResult", "run_legacy_sequence", "run_native_sequence"]

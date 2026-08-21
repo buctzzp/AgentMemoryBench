@@ -75,7 +75,7 @@ from memory_benchmark.runners.prediction import (
     _ingest_memory_provider_conversation,
     _method_manifest_with_protocol,
 )
-from tests.equivalence_utils import run_bridge_sequence, run_native_sequence
+from tests.equivalence_utils import run_legacy_sequence, run_native_sequence
 
 
 def test_lightmem_config_rejects_invalid_retrieve_limit() -> None:
@@ -2489,7 +2489,7 @@ def test_native_lightmem_locomo_matches_bridge_online_soft_force_sequence() -> N
         benchmark_name="locomo",
     )
 
-    bridge_result = run_bridge_sequence(
+    bridge_result = run_legacy_sequence(
         provider=bridge,
         conversation=conversation,
         question=question,
@@ -2558,7 +2558,7 @@ def test_native_lightmem_locomo_offline_consolidated_matches_bridge_force_and_up
         benchmark_name="locomo",
     )
 
-    bridge_result = run_bridge_sequence(
+    bridge_result = run_legacy_sequence(
         provider=bridge,
         conversation=conversation,
         question=question,
@@ -2617,7 +2617,7 @@ def test_native_lightmem_longmemeval_matches_bridge_pair_sequence() -> None:
         consume_granularity="pair",
     )
 
-    bridge_result = run_bridge_sequence(
+    bridge_result = run_legacy_sequence(
         provider=bridge,
         conversation=conversation,
         question=question,
@@ -2793,7 +2793,7 @@ def test_native_lightmem_longmemeval_assistant_first_preserves_orphan_with_place
         benchmark_name="longmemeval",
     )
 
-    bridge_result = run_bridge_sequence(
+    bridge_result = run_legacy_sequence(
         provider=bridge,
         conversation=conversation,
         question=question,

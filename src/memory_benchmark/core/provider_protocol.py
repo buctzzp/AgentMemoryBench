@@ -19,7 +19,6 @@ RetrievalPurpose: TypeAlias = Literal["qa", "memory_update_probe", "extraction_p
 RetrievalEvidenceStatus: TypeAlias = Literal["valid", "n_a", "pending"]
 # runtime 合法 status 集合，直接从 Literal 派生，避免与静态类型两处漂移。
 _RETRIEVAL_EVIDENCE_STATUSES: frozenset[str] = frozenset(get_args(RetrievalEvidenceStatus))
-BRIDGE_EMPTY_MEMORY_SENTINEL = "[bridge] legacy provider exposed no memory context"
 
 
 def _require_text(value: str, field_name: str) -> None:
@@ -392,7 +391,6 @@ class MemoryProvider(ABC):
 
 
 __all__ = [
-    "BRIDGE_EMPTY_MEMORY_SENTINEL",
     "ConsumeGranularity",
     "ConversationBatch",
     "EvidenceAssertion",

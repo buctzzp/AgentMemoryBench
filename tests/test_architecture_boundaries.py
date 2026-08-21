@@ -83,6 +83,62 @@ def test_author_prompt_assets_have_no_internal_method_shims() -> None:
         ) == []
 
 
+def test_memoryos_dedicated_prediction_runners_do_not_return() -> None:
+    """MemoryOS 新旧实验都必须走通用 prediction 入口，不得复活专用 runner。"""
+
+    for stem in ("memoryos_locomo_full", "memoryos_locomo_smoke"):
+        assert not (PACKAGE / "runners" / f"{stem}.py").exists()
+        assert _forbidden_imports(
+            PACKAGE,
+            f"memory_benchmark.runners.{stem}",
+        ) == []
+
+
+def test_provider_v2_bridge_does_not_return() -> None:
+    """custom 与 registered prediction 都只接受 v3，不得复活 v2 bridge。"""
+
+    assert not (PACKAGE / "core" / "provider_bridge.py").exists()
+    assert _forbidden_imports(
+        PACKAGE,
+        "memory_benchmark.core.provider_bridge",
+    ) == []
+    production_sources = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(PACKAGE.rglob("*.py"))
+    )
+    assert "LegacyProviderBridge" not in production_sources
+    assert "v2-bridged" not in production_sources
+
+
+def test_legacy_provider_marker_stays_on_explicit_parity_surfaces() -> None:
+    """退出预算内的 v2 ABC 只能标记四家已知 parity adapter。"""
+
+    consumers: list[str] = []
+    for path in sorted(PACKAGE.rglob("*.py")):
+        if path.name == "interfaces.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        if any(
+            isinstance(node, ast.ImportFrom)
+            and any(alias.name == "BaseMemoryProvider" for alias in node.names)
+            for node in ast.walk(tree)
+        ):
+            consumers.append(path.relative_to(PACKAGE).as_posix())
+    assert consumers == [
+        "methods/amem_adapter.py",
+        "methods/lightmem_adapter.py",
+        "methods/mem0_adapter.py",
+        "methods/memoryos_adapter.py",
+    ]
+
+
+def test_method_registry_factories_expose_only_v3_provider() -> None:
+    """registry 作为组合根不得重新声明 legacy system/provider factory。"""
+
+    source = (PACKAGE / "methods" / "registry.py").read_text(encoding="utf-8")
+    assert "BaseMemoryProvider" not in source
+    assert "BaseMemorySystem" not in source
+
+
 def test_legacy_cli_prediction_module_is_canonical_module_alias() -> None:
     """旧 import 在兼容期必须返回 canonical module 本身，避免双份状态。"""
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from time import perf_counter_ns
 from typing import Any, Callable
 
@@ -21,7 +20,6 @@ from memory_benchmark.core import (
 from memory_benchmark.core.exceptions import ConfigurationError
 from memory_benchmark.core.interfaces import BaseMemorySystem
 from memory_benchmark.core.provider_protocol import (
-    BRIDGE_EMPTY_MEMORY_SENTINEL,
     MemoryProvider,
     RetrievalQuery,
     RetrievalResult,
@@ -593,16 +591,6 @@ def _validate_retrieval(retrieval: AnswerPromptResult, question: Question) -> No
             for message in retrieval.prompt_messages
         )
     validate_no_private_keys(retrieval.metadata)
-
-
-def _count_bridge_empty_memory_sentinel(answer_prompts_path: Path) -> int:
-    """统计桥接 sentinel fallback 在 answer prompt artifact 中出现次数。"""
-
-    return sum(
-        1
-        for record in read_jsonl(answer_prompts_path)
-        if record.get("formatted_memory") == BRIDGE_EMPTY_MEMORY_SENTINEL
-    )
 
 
 def _count_answer_context_tokens(

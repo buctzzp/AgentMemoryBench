@@ -24,13 +24,12 @@ from memory_benchmark.config.profiles import (
     load_typed_profile,
 )
 from memory_benchmark.core import (
-    BaseMemorySystem,
     ConfigurationError,
     Conversation,
     MethodCapability,
     TaskFamily,
 )
-from memory_benchmark.core.provider_protocol import ConsumeGranularity
+from memory_benchmark.core.provider_protocol import ConsumeGranularity, MemoryProvider
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     ModelDescriptor,
@@ -219,7 +218,7 @@ class MethodRegistration:
     profile_relative_path: Path
     config_type: type[Any]
     requires_api: bool
-    system_factory: Callable[[MethodBuildContext], BaseMemorySystem]
+    system_factory: Callable[[MethodBuildContext], MemoryProvider]
     source_identity_factory: Callable[[PathSettings], dict[str, Any]]
     model_name_getter: Callable[[Any], str]
     max_workers_getter: Callable[[Any], int]
@@ -326,7 +325,7 @@ def _memoryos_consume_granularity(
     return "pair" if benchmark_name == "longmemeval" else "session"
 
 
-def _build_mem0_system(context: MethodBuildContext) -> BaseMemorySystem:
+def _build_mem0_system(context: MethodBuildContext) -> MemoryProvider:
     """根据统一 build context 构造本地 OSS Mem0 adapter。"""
 
     if not isinstance(context.config, Mem0Config):
@@ -355,7 +354,7 @@ def _session_consume_granularity(_benchmark_name: str | None) -> ConsumeGranular
     return "session"
 
 
-def _build_letta_system(context: MethodBuildContext) -> BaseMemorySystem:
+def _build_letta_system(context: MethodBuildContext) -> MemoryProvider:
     """根据统一 build context 构造 Letta sleeptime-memory adapter。"""
 
     if not isinstance(context.config, LettaConfig):
@@ -373,7 +372,7 @@ def _build_letta_system(context: MethodBuildContext) -> BaseMemorySystem:
     )
 
 
-def _build_langmem_system(context: MethodBuildContext) -> BaseMemorySystem:
+def _build_langmem_system(context: MethodBuildContext) -> MemoryProvider:
     """根据统一 build context 构造 LangMem background-manager adapter。"""
 
     if not isinstance(context.config, LangMemConfig):
@@ -391,7 +390,7 @@ def _build_langmem_system(context: MethodBuildContext) -> BaseMemorySystem:
     )
 
 
-def _build_everos_system(context: MethodBuildContext) -> BaseMemorySystem:
+def _build_everos_system(context: MethodBuildContext) -> MemoryProvider:
     """根据统一 build context 构造 EverOS typed-product adapter。"""
 
     if not isinstance(context.config, EverOSConfig):
@@ -414,7 +413,7 @@ def _build_everos_system(context: MethodBuildContext) -> BaseMemorySystem:
     )
 
 
-def _build_graphiti_system(context: MethodBuildContext) -> BaseMemorySystem:
+def _build_graphiti_system(context: MethodBuildContext) -> MemoryProvider:
     """根据统一 build context 构造 Graphiti OSS product adapter。"""
 
     if not isinstance(context.config, GraphitiConfig):
@@ -917,7 +916,7 @@ def _clean_langmem_failed_ingest_state(
         system.cleanup()
 
 
-def _build_memos_system(context: MethodBuildContext) -> BaseMemorySystem:
+def _build_memos_system(context: MethodBuildContext) -> MemoryProvider:
     """根据统一 build context 构造 MemOS product typed-handler adapter。"""
 
     if not isinstance(context.config, MemOSConfig):
@@ -1073,7 +1072,7 @@ def _memos_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityDecla
     )
 
 
-def _build_simplemem_system(context: MethodBuildContext) -> BaseMemorySystem:
+def _build_simplemem_system(context: MethodBuildContext) -> MemoryProvider:
     """根据统一 build context 构造 SimpleMem text backend adapter。"""
 
     if not isinstance(context.config, SimpleMemConfig):
@@ -1156,7 +1155,7 @@ def _simplemem_efficiency_instrumentation_identity(
     }
 
 
-def _build_amem_system(context: MethodBuildContext) -> BaseMemorySystem:
+def _build_amem_system(context: MethodBuildContext) -> MemoryProvider:
     """根据统一 build context 构造 A-Mem adapter。"""
 
     if not isinstance(context.config, AMemConfig):
@@ -1252,7 +1251,7 @@ def _mem0_model_name(config: Any) -> str:
     return config.reader_model
 
 
-def _build_lightmem_system(context: MethodBuildContext) -> BaseMemorySystem:
+def _build_lightmem_system(context: MethodBuildContext) -> MemoryProvider:
     """根据统一 build context 构造 LightMem adapter。"""
 
     if not isinstance(context.config, LightMemConfig):
@@ -1417,7 +1416,7 @@ def _separable_retrieval_contract(config: Any) -> RetrievalObservationContract:
     )
 
 
-def _build_memoryos_system(context: MethodBuildContext) -> BaseMemorySystem:
+def _build_memoryos_system(context: MethodBuildContext) -> MemoryProvider:
     """根据统一 build context 构造 MemoryOS adapter，并恢复已完成 conversation。"""
 
     if not isinstance(context.config, MemoryOSPaperConfig):
@@ -2271,7 +2270,7 @@ def get_method_registration(method_name: str) -> MethodRegistration:
 
 
 def resolve_registered_factory_provenance_granularity(
-    system_factory: Callable[[MethodBuildContext], BaseMemorySystem],
+    system_factory: Callable[[MethodBuildContext], MemoryProvider],
 ) -> str | None:
     """按注册 factory 身份返回静态 provenance 粒度，未注册时返回 None。"""
 
@@ -2282,7 +2281,7 @@ def resolve_registered_factory_provenance_granularity(
 
 
 def resolve_registered_factory_retrieval_evidence_contract_version(
-    system_factory: Callable[[MethodBuildContext], BaseMemorySystem],
+    system_factory: Callable[[MethodBuildContext], MemoryProvider],
 ) -> str | None:
     """按注册 factory 身份返回逐题 retrieval evidence 契约版本，未注册时返回 None。
 
@@ -2298,7 +2297,7 @@ def resolve_registered_factory_retrieval_evidence_contract_version(
 
 
 def resolve_registered_factory_consume_granularity(
-    system_factory: Callable[[MethodBuildContext], BaseMemorySystem],
+    system_factory: Callable[[MethodBuildContext], MemoryProvider],
     benchmark_name: str | None,
 ) -> ConsumeGranularity | None:
     """按注册 factory 与 benchmark 返回 concrete 消费粒度。"""

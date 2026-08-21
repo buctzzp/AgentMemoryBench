@@ -36,7 +36,6 @@ from memory_benchmark.core import (
     Turn,
 )
 from memory_benchmark.core.exceptions import ConfigurationError
-from memory_benchmark.core.interfaces import BaseMemoryProvider
 from memory_benchmark.core.provider_protocol import MemoryProvider
 from memory_benchmark.methods.config_track import (
     BuildIdentityDeclaration,
@@ -1444,22 +1443,20 @@ def test_custom_method_class_runs_without_builtin_registry(
 
     calls: dict[str, dict[str, object]] = {}
 
-    class FakeProvider(BaseMemoryProvider):
+    class FakeProvider(MemoryProvider):
         """测试用自定义 provider，只实现用户最低接口。"""
 
-        def add(self, conversation: Conversation) -> AddResult:
-            """记录 conversation 写入成功。"""
+        consume_granularity = "turn"
 
-            return AddResult(conversation_ids=[conversation.conversation_id])
+        def ingest(self, unit) -> None:
+            """本测试只验证装配，不执行事件写入。"""
 
-        def retrieve(self, question: Question) -> AnswerPromptResult:
-            """返回完整 answer prompt messages。"""
+            return None
 
-            return AnswerPromptResult(
-                question_id=question.question_id,
-                conversation_id=question.conversation_id,
-                prompt_messages=[PromptMessage(role="user", content=question.text)],
-            )
+        def retrieve(self, query):
+            """本测试只验证装配，不执行检索。"""
+
+            raise AssertionError("retrieve must not run in this assembly test")
 
     expected_summary = PredictionRunSummary(
         run_id="custom-smoke",
@@ -1494,6 +1491,7 @@ def test_custom_method_class_runs_without_builtin_registry(
         variant_names=lambda: ("locomo10",),
         prepare=lambda project_root, request: prepared_run,
         prediction_enabled=True,
+        unified_prompt_builder=_fake_registered_answer_builder,
     )
 
     class FakeOpenAIAnswerClient:
@@ -1535,8 +1533,8 @@ def test_custom_method_class_runs_without_builtin_registry(
     )
     monkeypatch.setattr(
         prediction_cli,
-        "load_custom_memory_provider",
-        lambda class_path: FakeProvider(),
+        "load_custom_memory_provider_class",
+        lambda class_path: FakeProvider,
         raising=False,
     )
     monkeypatch.setattr(
@@ -1586,6 +1584,8 @@ def test_custom_method_class_runs_without_builtin_registry(
     assert calls["kwargs"]["method_manifest"]["method_class"] == (
         "my_pkg.adapter:MyMemory"
     )
+    assert calls["kwargs"]["method_manifest"]["method_protocol"] == "MemoryProvider"
+    assert calls["kwargs"]["protocol_version"] == "v3"
     assert calls["kwargs"]["policy"].max_workers == 1
 
 
@@ -1618,6 +1618,7 @@ def test_custom_method_class_writes_prediction_artifacts(
         variant_names=lambda: ("locomo10",),
         prepare=lambda project_root, request: prepared_run,
         prediction_enabled=True,
+        unified_prompt_builder=_fake_registered_answer_builder,
     )
 
     class FakeOpenAIAnswerClient:
@@ -1689,7 +1690,8 @@ def test_custom_method_class_writes_prediction_artifacts(
     prompts = read_jsonl(run_dir / "artifacts" / "answer_prompts.prediction.jsonl")
     assert predictions[0]["answer"] == "fixture answer"
     assert prompts[0]["prompt_messages"]
-    assert prompts[0]["metadata"]["answer_context"]
+    assert prompts[0]["formatted_memory"]
+    assert prompts[0]["formatted_memory"] in prompts[0]["prompt_messages"][0]["content"]
 
 
 def test_registered_prediction_builds_framework_answer_reader(

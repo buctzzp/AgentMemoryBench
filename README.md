@@ -247,47 +247,37 @@ Dataset
 粒度由实例级 `consume_granularity` 声明、框架事件流聚合投递。协议全文：
 [docs/workstreams/ws02-phase1-matrix/spec-protocol-v3.md](docs/workstreams/ws02-phase1-matrix/spec-protocol-v3.md)。
 
-五个内置 method adapter（Mem0、MemoryOS、A-Mem、LightMem、SimpleMem）均已原生
-实现 v3 `MemoryProvider`（M-B 原生化于 2026-07-06 验收通过），registered 主路径
-不经过桥接；`LegacyProviderBridge` 仅服务 `--method-class` 自定义旧式 provider
-（`add + retrieve` 的 v2 形态）。新 method 接入应直接实现 v3 `MemoryProvider`。
+十个内置 method 的 registry factory 与 `--method-class` custom 入口都直接产出 v3；旧
+`provider_bridge.py` 和 MemoryOS 专用 prediction runner 已退役。新接入不接受
+`BaseMemoryProvider.add/retrieve` 或 method-owned `get_answer()`。
 
 ```python
-from memory_benchmark.core import (
-    AddResult,
-    AnswerPromptResult,
-    Conversation,
-    PromptMessage,
-    Question,
+from memory_benchmark.core.provider_protocol import (
+    IngestResult,
+    MemoryProvider,
+    RetrievalQuery,
+    RetrievalResult,
+    TurnEvent,
 )
 
 
-class MyMemoryProvider:
-    def add(self, conversation: Conversation) -> AddResult:
+class MyMemoryProvider(MemoryProvider):
+    consume_granularity = "turn"
+
+    def ingest(self, unit: TurnEvent) -> IngestResult:
         ...
 
-    def retrieve(self, question: Question) -> AnswerPromptResult:
-        return AnswerPromptResult(
-            question_id=question.question_id,
-            conversation_id=question.conversation_id,
-            prompt_messages=[
-                PromptMessage(role="system", content="You are a helpful assistant."),
-                PromptMessage(role="user", content="...method-owned prompt..."),
-            ],
-            metadata={"answer_context": "...optional debuggable memory text..."},
-        )
+    def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+        return RetrievalResult(formatted_memory="...retrieved memory...")
 ```
 
-`AnswerPromptResult.prompt_messages` 是核心输出。它表示 method 内部已经完成 query
-rewrite、检索、rerank、merge、格式化和 answer prompt 构造，且保留官方 system/user
-role 结构。framework answer LLM 会直接使用这些 messages 生成最终答案。
-`AnswerPromptResult.answer_prompt` 只是兼容 artifact、日志和 token 估算的文本视图；
-如果未显式传入，会由 `prompt_messages` 自动生成。method 需要保留的调试信息、拆出的
-纯记忆上下文、原始检索项和 prompt profile 放进 `AnswerPromptResult.metadata`。
+`ingest()` 的载荷由 `consume_granularity` 决定：turn/pair/session/conversation 分别对应
+`TurnEvent`、`TurnPair`、`SessionBatch`、`ConversationBatch`。框架负责遍历、顺序、聚合、
+边界与 `isolation_key`；method 只翻译到产品接口。
 
-四个内置 method adapter（Mem0、A-Mem、LightMem、MemoryOS）都已新增 `retrieve()` 并
-继承 `BaseMemoryProvider`。旧 `get_answer()` 暂时保留为兼容路径，主要用于历史复查和
-尚未删除的 legacy 测试；新 method 接入不应再实现完整 answer system。
+`RetrievalResult.formatted_memory` 是主 benchmark answer builder 的唯一 method 输入；可选
+`prompt_messages` 只服务一手证据闭合的作者校准，`items/evidence` 只在 provenance 与 ranking
+真实可证明时填写。框架统一 answer LLM 负责最终回答。
 
 framework answer LLM 当前使用 `AnswerLLMSettings` 显式记录并传递 method × benchmark 的
 官方 answer 参数，例如 temperature、max_tokens、top_p、message role、timeout 和 retry。
@@ -301,15 +291,14 @@ OpenAI-compatible framework reader；完整多 provider 配置仍处于设计后
 
 接口约束：
 
-- 依靠 `conversation_id` 做记忆隔离，不提供 reset 接口。
-- 新 `add()` 接收单个 `Conversation`；runner 负责循环、并行、resume 和失败隔离。
-- `retrieve()` 只接收公开 `Question`，不能接收标准答案、evidence、top-k 或私有标签。
-- `top_k`、reader 模型、embedding 模型等参数属于 method profile，不放进统一函数参数。
-- 旧 `get_answer()` / `BaseMemorySystem` 路径只属于迁移期兼容；不要把它作为新 method
-  接入接口。
+- 用框架发放的 `isolation_key` 做记忆隔离，不从 question/source path 猜 namespace；
+- `end_conversation()` 返回即代表 memory 已可检索，异步产品必须等待真实 terminal；
+- `retrieve()` 接收公开 `RetrievalQuery`，绝不能看到 gold answer/evidence/judge label；
+- `top_k` 是 query 字段；模型、embedding、算法超参属于 TOML profile；
+- metric 资格逐 method × benchmark × metric 判 valid/N/A/pending，不为填矩阵伪造 lineage。
 
 自定义 method 现在也可以通过 CLI 轻量接入：传
-`--method-class module:ClassName`，并让该类无参数构造且继承 `BaseMemoryProvider`。
+`--method-class module:ClassName`，并让该类无参数构造且继承 `MemoryProvider`。
 该路径不要求用户写 AgentMemoryBench 的 TOML profile、不要求接入 source identity，也不
 强制内部 LLM/embedding 观测。自定义 method 默认 `workers=1`；如果用户显式传
 `--allow-unsafe-custom-parallel`，框架才允许 `workers>1`，并由用户自行保证外部数据库、

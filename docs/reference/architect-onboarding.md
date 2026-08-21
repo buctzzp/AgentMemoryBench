@@ -86,8 +86,8 @@ BenchmarkAdapter.load() → Dataset（公开 Conversation+Question，无 gold）
   → artifacts → run_artifact_evaluation() → scores
 ```
 
-- **协议**：v3 `MemoryProvider`（`core/provider_protocol.py`）；旧协议经
-  `LegacyProviderBridge` 兼容。
+- **协议**：新 run 只有 v3 `MemoryProvider`（`core/provider_protocol.py`）；v2 bridge 已
+  退出，旧 ABC 仅按 ws03 退出预算服务已知 parity/resume 消费者。
 - **三注册表**：Benchmark / Method / Evaluator，运行时兼容校验。
 - **两条 runner**：conversation-QA 走 `runners/prediction.py`；HaluMem
   operation-level 走 `runners/operation_level.py`——**独立 runner，任何

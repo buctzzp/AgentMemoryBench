@@ -15,7 +15,8 @@ benchmark 对框架协议、dataset loader、evaluation runner 和 method adapte
 1. 论文 PDF：确认 benchmark 目标、任务定义、metric 和实验设置。
 2. 官方仓库：确认真实评测脚本、prompt、scorer、preprocessing 和 baseline 接入方式。
 3. 本地 dataset：抽样真实字段，区分 method public input 和 scorer private labels。
-4. 接口判断：判断当前 `BaseMemoryProvider.add(conversation) + retrieve(question)` 是否足够。
+4. 接口判断：判断当前 v3 `MemoryProvider` 的 ingest 粒度、边界钩子与
+   `RetrievalResult` 是否足够。
 5. 框架影响：记录需要新增的 task family、metric profile、loader 能力或公开 API。
 
 ## 单个 Benchmark 卡片字段
@@ -32,6 +33,11 @@ benchmark 对框架协议、dataset loader、evaluation runner 和 method adapte
 6. Method Adapter 接口需求：最小接口、可选接口、是否需要 update/delete/forget/write_memory、
    multimodal、environment action 或 preference-only 特殊能力。
 7. 未确认项：论文、代码、dataset 不一致或尚未核验的地方。
+
+> 2026-08-21 freshness：本目录部分 Phase S 单卡保留了 v2 时代的接口判断，作为当时研究
+> 过程证据；它们不能作为新 adapter 教程。current 接入契约只看
+> [`spec-protocol-v3.md`](../../workstreams/ws02-phase1-matrix/spec-protocol-v3.md) 与
+> [`method-integration-checklist.md`](../../reference/method-integration-checklist.md)。
 
 原则：Dataset 结构和 Evaluation 流程要写得足够细；数据生成字段、prompt 生成过程和论文
 背景只在影响 evaluation 时记录。

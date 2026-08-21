@@ -44,9 +44,9 @@ from memory_benchmark.core import (
     validate_compatibility,
 )
 from memory_benchmark.core.exceptions import ConfigurationError
-from memory_benchmark.core.interfaces import BaseMemoryProvider, BaseMemorySystem
+from memory_benchmark.core.interfaces import BaseMemorySystem
 from memory_benchmark.core.provider_protocol import MemoryProvider, RetrievalResult
-from memory_benchmark.methods.custom_loader import load_custom_memory_provider
+from memory_benchmark.methods.custom_loader import load_custom_memory_provider_class
 from memory_benchmark.methods.mem0_adapter import Mem0Config
 from memory_benchmark.methods.registry import (
     MethodBuildContext,
@@ -850,10 +850,10 @@ def _run_custom_conversation_qa_prediction(
     progress_enabled: bool,
     output_layout: str,
 ) -> PredictionBatchResult:
-    """运行用户自定义 `BaseMemoryProvider` 的轻量 prediction 路径。
+    """运行用户自定义 ``MemoryProvider`` 的轻量 prediction 路径。
 
     该路径刻意绕开内置 method registry、TOML profile 和 source identity。用户只需
-    提供无参构造的 `BaseMemoryProvider` 子类；framework 负责 benchmark 读取、answer
+    提供无参构造的 ``MemoryProvider`` 子类；framework 负责 benchmark 读取、answer
     LLM、artifact、resume 和基础效率观测。
     """
 
@@ -861,6 +861,7 @@ def _run_custom_conversation_qa_prediction(
         raise ConfigurationError(
             f"Benchmark '{benchmark_name}' prediction is not enabled"
         )
+    custom_provider_class = load_custom_memory_provider_class(method_class)
     _confirm_prediction_cost(
         method_display_name=f"custom method '{method_class}'",
         profile_name=profile_name,
@@ -940,7 +941,11 @@ def _run_custom_conversation_qa_prediction(
         api_runtime_manifest=api_runtime_manifest,
         provider_compatibility_note=answer_compatibility_note,
     )
-    prompt_track = getattr(benchmark_registration, "prompt_track", "native")
+    answer_prompt_builder = _resolve_registered_answer_builder(
+        answer_builder="benchmark",
+        benchmark_registration=benchmark_registration,
+    )
+    prompt_track = "unified"
     benchmark_policy_manifest = _build_benchmark_policy_manifest(benchmark_registration)
 
     children: list[_PreparedPredictionChild] = []
@@ -971,9 +976,12 @@ def _run_custom_conversation_qa_prediction(
         )
         method_manifest = _build_custom_method_manifest(
             method_class=method_class,
+            consume_granularity=custom_provider_class.consume_granularity,
+            provenance_granularity=custom_provider_class.provenance_granularity,
+            session_memory_report=custom_provider_class.session_memory_report,
             answer_reader_manifest=answer_reader_manifest,
             allow_unsafe_custom_parallel=allow_unsafe_custom_parallel,
-            prompt_track=prompt_track if prompt_track == "unified" else None,
+            prompt_track=prompt_track,
         )
         policy = PredictionRunPolicy(
             max_workers=max_workers,
@@ -1063,10 +1071,15 @@ def _run_custom_conversation_qa_prediction(
         ),
     )
 
-    def build_custom_system(_context: MethodBuildContext) -> BaseMemoryProvider:
+    def build_custom_system(_context: MethodBuildContext) -> MemoryProvider:
         """为 root 或 isolated worker 创建新的用户 provider 实例。"""
 
-        return load_custom_memory_provider(method_class)
+        try:
+            return custom_provider_class()
+        except Exception as exc:
+            raise ConfigurationError(
+                f"Cannot construct custom method '{method_class}': {exc}"
+            ) from exc
 
     results: list[PredictionVariantResult] = []
     for child in children:
@@ -1096,7 +1109,7 @@ def _run_custom_conversation_qa_prediction(
             ),
         )
         use_isolated_worker_instances = child.policy.max_workers > 1
-        system: BaseMemorySystem | BaseMemoryProvider = (
+        system: BaseMemorySystem | MemoryProvider = (
             _UnusedRootSystem()
             if use_isolated_worker_instances
             else build_custom_system(build_context)
@@ -1119,17 +1132,13 @@ def _run_custom_conversation_qa_prediction(
             build_context_template=build_context,
             supports_shared_instance_parallelism=False,
             answer_reader=answer_reader,
-            unified_prompt_builder=getattr(
-                benchmark_registration,
-                "unified_prompt_builder",
-                None,
-            ),
+            unified_prompt_builder=answer_prompt_builder,
             prediction_transform=getattr(
                 benchmark_registration,
                 "prediction_transform",
                 None,
             ),
-            protocol_version="v2-bridged",
+            protocol_version="v3",
         )
         results.append(
             PredictionVariantResult(
@@ -1168,6 +1177,9 @@ def _resolve_custom_max_workers(
 def _build_custom_method_manifest(
     *,
     method_class: str,
+    consume_granularity: str,
+    provenance_granularity: str,
+    session_memory_report: bool,
     answer_reader_manifest: dict[str, object],
     allow_unsafe_custom_parallel: bool,
     prompt_track: str | None = None,
@@ -1177,10 +1189,14 @@ def _build_custom_method_manifest(
     manifest: dict[str, object] = {
         "method_name": "custom",
         "method_class": method_class,
-        "method_protocol": "BaseMemoryProvider",
+        "method_protocol": "MemoryProvider",
+        "consume_granularity": consume_granularity,
+        "provenance_granularity": provenance_granularity,
+        "session_memory_report": session_memory_report,
         "integration_depth": "user_lightweight",
         "custom_method_contract": {
             "no_arg_constructor": True,
+            "event_stream_v3": True,
             "conversation_isolation_required": True,
             "parallel_requires_allow_unsafe_custom_parallel": True,
             "allow_unsafe_custom_parallel": allow_unsafe_custom_parallel,

@@ -49,7 +49,7 @@ from memory_benchmark.runners.prediction import (
     _validate_run_manifest_state,
 )
 from memory_benchmark.storage import ExperimentPaths, atomic_write_json
-from tests.equivalence_utils import run_bridge_sequence, run_native_sequence
+from tests.equivalence_utils import run_legacy_sequence, run_native_sequence
 from tests.fake_corpus import build_multimodal_consecutive_speaker_conversation
 
 
@@ -1037,7 +1037,7 @@ def test_native_mem0_locomo_matches_bridge_add_and_search_sequence() -> None:
         reader_client=FakeReaderClient(),
     )
 
-    bridge_result = run_bridge_sequence(
+    bridge_result = run_legacy_sequence(
         provider=bridge,
         conversation=conversation,
         question=question,
@@ -1082,7 +1082,7 @@ def test_native_mem0_longmemeval_matches_bridge_session_sequence() -> None:
         consume_granularity="session",
     )
 
-    bridge_result = run_bridge_sequence(
+    bridge_result = run_legacy_sequence(
         provider=bridge,
         conversation=conversation,
         question=question,
@@ -1148,7 +1148,7 @@ def test_native_mem0_longmemeval_assistant_first_session_keeps_official_chunks()
         consume_granularity="session",
     )
 
-    bridge_result = run_bridge_sequence(
+    bridge_result = run_legacy_sequence(
         provider=bridge,
         conversation=conversation,
         question=question,

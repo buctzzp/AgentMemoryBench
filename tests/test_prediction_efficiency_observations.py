@@ -14,10 +14,17 @@ from memory_benchmark.core import (
     AnswerResult,
     ConfigurationError,
     Conversation,
+    PromptMessage,
     Question,
-    AnswerPromptResult,
 )
-from memory_benchmark.core.interfaces import BaseMemoryProvider, BaseMemorySystem
+from memory_benchmark.core.interfaces import BaseMemorySystem
+from memory_benchmark.core.provider_protocol import (
+    ConversationBatch,
+    IngestResult,
+    MemoryProvider,
+    RetrievalQuery,
+    RetrievalResult,
+)
 from memory_benchmark.observability import RunContext
 from memory_benchmark.observability.efficiency import (
     ConversationEfficiencyObservation,
@@ -140,8 +147,10 @@ class _ObservedFakeMethod(BaseMemorySystem):
         )
 
 
-class _RetrieveFirstFakeProvider(BaseMemoryProvider):
-    """返回固定 retrieval context 的 retrieve-first fake provider。"""
+class _RetrieveFirstFakeProvider(MemoryProvider):
+    """返回固定 retrieval context 的 v3 fake provider。"""
+
+    consume_granularity = "conversation"
 
     def __init__(self) -> None:
         """初始化写入和检索调用记录。"""
@@ -149,23 +158,25 @@ class _RetrieveFirstFakeProvider(BaseMemoryProvider):
         self.added_conversation_ids: list[str] = []
         self.retrieved_question_ids: list[str] = []
 
-    def add(self, conversation: Conversation) -> AddResult:
-        """记录单个 conversation 写入。"""
+    def ingest(self, unit: ConversationBatch) -> IngestResult:
+        """记录单个 conversation batch 写入。"""
 
-        self.added_conversation_ids.append(conversation.conversation_id)
-        return AddResult(conversation_ids=[conversation.conversation_id])
+        self.added_conversation_ids.append(str(unit.metadata["conversation_id"]))
+        return IngestResult(unit_ref=unit.ref)
 
-    def retrieve(self, question: Question) -> AnswerPromptResult:
+    def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """返回可直接注入 framework reader 的固定上下文。"""
 
+        question = query.source_question
+        assert question is not None
         self.retrieved_question_ids.append(question.question_id)
-        return AnswerPromptResult(
-            question_id=question.question_id,
-            conversation_id=question.conversation_id,
-            answer_prompt="Alice likes tea and keeps that preference in memory.",
+        memory = "Alice likes tea and keeps that preference in memory."
+        return RetrievalResult(
+            formatted_memory=memory,
+            prompt_messages=(PromptMessage(role="user", content=memory),),
             metadata={
                 "method": "fake-provider",
-                "answer_context": "Alice likes tea and keeps that preference in memory.",
+                "answer_context": memory,
             },
         )
 
@@ -179,10 +190,10 @@ class _InstrumentedRetrieveFirstFakeProvider(_RetrieveFirstFakeProvider):
         super().__init__()
         self.collector = collector
 
-    def retrieve(self, question: Question) -> AnswerPromptResult:
+    def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """先返回 retrieval，再模拟 adapter 层已记录 retrieval observation。"""
 
-        retrieval = super().retrieve(question)
+        retrieval = super().retrieve(query)
         self.collector.record_retrieval_result(
             latency_ms=0.5,
             injected_memory_context_tokens=None,

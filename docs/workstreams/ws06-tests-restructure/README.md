@@ -21,8 +21,8 @@ created: 2026-07-05
 ## 任务清单
 
 - [ ] 写重组 spec + plan（含逐文件归属映射、pytest 配置与 marker 调整）。
-- [ ] 拆分超大文件：test_prediction_runner.py（3019 行）、
-  test_prediction_cli.py（2439 行）、test_memoryos_locomo_full_runner.py（2058 行）等。
+- [ ] 拆分 current 超大测试文件；旧 `test_memoryos_locomo_full_runner.py` 已随 ws03 M1-E
+  专用 runner 退役而删除，不得按本历史文件名重建。
 - [ ] 排查占位式/过时断言。已知条目：
   - `test_documentation_standards.py::test_archived_log_readme_keeps_naming_convention`
     现在守护的是归档文件的命名规范，已无意义（docs/logs 机制已被 workstream

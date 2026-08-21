@@ -40,7 +40,7 @@ import memory_benchmark.methods.amem_adapter as amem_adapter_module
 from memory_benchmark.methods.registry import MethodBuildContext, _build_amem_system
 from memory_benchmark.observability.efficiency import EfficiencyCollector
 from memory_benchmark.runners.prediction import _method_manifest_with_protocol
-from tests.equivalence_utils import run_bridge_sequence, run_native_sequence
+from tests.equivalence_utils import run_legacy_sequence, run_native_sequence
 
 
 def test_amem_config_rejects_invalid_retrieve_k() -> None:
@@ -792,7 +792,7 @@ def test_native_amem_preserves_add_state_but_uses_product_retrieval(
         storage_root=tmp_path / "native",
     )
 
-    bridge_result = run_bridge_sequence(
+    bridge_result = run_legacy_sequence(
         provider=bridge,
         conversation=conversation,
         question=question,

@@ -37,7 +37,13 @@ from memory_benchmark.core import (
     Turn,
 )
 from memory_benchmark.core.exceptions import ConfigurationError
-from memory_benchmark.core.interfaces import BaseMemoryProvider
+from memory_benchmark.core.provider_protocol import (
+    IngestResult,
+    IngestUnit,
+    MemoryProvider,
+    RetrievalQuery,
+    RetrievalResult,
+)
 from memory_benchmark.methods import registry as method_registry_module
 from memory_benchmark.prompts.benchmarks.locomo import (
     build_locomo_unified_answer_prompt,
@@ -49,31 +55,28 @@ from memory_benchmark.storage import read_jsonl
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-class FakeLightMemForRegisteredPrediction(BaseMemoryProvider):
+class FakeLightMemForRegisteredPrediction(MemoryProvider):
     """替代真实 LightMem adapter，避免模型加载和 API 调用。"""
 
     instances: list["FakeLightMemForRegisteredPrediction"] = []
+    consume_granularity = "turn"
 
     def __init__(self, **kwargs) -> None:
         """记录 registry factory 传入的构造参数。"""
 
         self.kwargs = kwargs
-        self.added_conversations: list[list[Conversation]] = []
+        if kwargs.get("consume_granularity") is not None:
+            self.consume_granularity = kwargs["consume_granularity"]
+        self.ingested_units: list[IngestUnit] = []
         self.answered_questions: list[Question] = []
         self.retrieved_questions: list[Question] = []
         self.instances.append(self)
 
-    def add(self, conversations: Conversation | list[Conversation]) -> AddResult:
-        """记录公开 conversation 写入请求。"""
+    def ingest(self, unit: IngestUnit) -> IngestResult:
+        """记录生产事件流交付的公开 ingest unit。"""
 
-        if isinstance(conversations, Conversation):
-            conversations = [conversations]
-        self.added_conversations.append(conversations)
-        return AddResult(
-            conversation_ids=[
-                conversation.conversation_id for conversation in conversations
-            ]
-        )
+        self.ingested_units.append(unit)
+        return IngestResult()
 
     def get_answer(self, question: Question) -> AnswerResult:
         """返回固定答案，用于验证通用 runner artifacts。"""
@@ -85,9 +88,11 @@ class FakeLightMemForRegisteredPrediction(BaseMemoryProvider):
             answer=f"fake lightmem answer for {question.question_id}",
         )
 
-    def retrieve(self, question: Question) -> AnswerPromptResult:
+    def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """返回固定检索上下文，用于验证 retrieve-first runner artifacts。"""
 
+        question = query.source_question
+        assert question is not None
         self.retrieved_questions.append(question)
         longmemeval = self.kwargs.get("consume_granularity") == "pair"
         prompt_messages = (
@@ -105,11 +110,9 @@ class FakeLightMemForRegisteredPrediction(BaseMemoryProvider):
             if longmemeval
             else [PromptMessage(role="system", content="LIGHTMEM-LOCOMO-NATIVE-PROMPT")]
         )
-        return AnswerPromptResult(
-            question_id=question.question_id,
-            conversation_id=question.conversation_id,
-            answer_prompt=f"fake lightmem context for {question.question_id}",
-            prompt_messages=prompt_messages,
+        return RetrievalResult(
+            formatted_memory=f"fake lightmem context for {question.question_id}",
+            prompt_messages=tuple(prompt_messages),
             metadata={
                 "method": "lightmem",
                 "answer_context": "reader-layout-must-not-replace-native-messages",
@@ -287,17 +290,11 @@ def test_lightmem_registered_prediction_runs_generic_runner_offline(
         "LightMem",
         FakeLightMemForRegisteredPrediction,
     )
-    # FakeLightMemForRegisteredPrediction 仍是旧协议 BaseMemoryProvider 形态（经
-    # 桥接运行），协议声明必须与 fake 实际形态一致，否则运行时交叉校验
-    # fail-fast；fake 升级为原生 v3 形态归入 ws06 tests-restructure。
-    legacy_registration = replace(
-        method_registry_module.get_method_registration("lightmem"),
-        protocol_version="v2-bridged",
-    )
+    registration = method_registry_module.get_method_registration("lightmem")
     monkeypatch.setattr(
         run_prediction_module,
         "get_method_registration",
-        lambda method_name: legacy_registration,
+        lambda method_name: registration,
     )
 
     result = run_prediction_module.run_registered_conversation_qa_prediction(
@@ -318,8 +315,11 @@ def test_lightmem_registered_prediction_runs_generic_runner_offline(
     assert len(FakeLightMemForRegisteredPrediction.instances) == 1
     fake_method = FakeLightMemForRegisteredPrediction.instances[0]
     assert fake_method.kwargs["config"].profile_name == "smoke"
-    assert len(fake_method.added_conversations) == 1
-    assert fake_method.added_conversations[0][0].conversation_id == "conv-lightmem-1"
+    assert len(fake_method.ingested_units) == 2
+    assert [unit.turn_id for unit in fake_method.ingested_units] == [
+        "turn-1",
+        "turn-2",
+    ]
     assert fake_method.answered_questions == []
     assert [question.question_id for question in fake_method.retrieved_questions] == [
         "q-1"

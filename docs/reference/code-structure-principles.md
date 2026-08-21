@@ -128,7 +128,7 @@ Codex 会话另有一条外层恢复链：active context 是易失 working set�
 | 部分 method 有 `_worker.py` | 若用于依赖/进程隔离则保留；只抽共享 transport，不合并产品 worker |
 | MemOS 有 `memos_lifecycle.py` | 保留；它承载 async task 的精确完成与失败传播，不是普通 helper |
 | `methods/*_native_prompts.py` 很薄 | 它们是旧 import shim；canonical owner 已在 `prompts/author/`，按兼容预算退出 |
-| `prediction.py`、`registry.py` 很大 | `prediction` 已按 planning/preflight/ingest/answer/parallel 拆成单向 leaf，原入口只保留 façade/orchestration；`registry` 仍须另批按 registration 变化原因裁定，不能因相邻债顺手开拆 |
+| `prediction.py`、`registry.py` 很大 | `prediction` 已按 planning/preflight/ingest/answer/parallel 拆成单向 leaf，原入口只保留 façade/orchestration；`registry` 已完成责任审计：当前是无运行时状态的单一 composition root，只有出现独立发布边界、持续 merge 冲突或第二种真实变化原因才拆，不按行数搬文件 |
 | 多个 adapter 都有 `_request/_terminate_worker` | 共用 `methods/worker_transport.py`；产品 timeout/terminate policy 与 lifecycle 留在 adapter |
 | benchmark 各有 recall evaluator | 纯 Recall 单源；gold view、排除政策与诊断保持薄 policy，不追求零 benchmark 文件 |
 | 旧 `unified/native` 仍在代码里 | 分离“新 run 配置选择”与“旧 artifact 身份回读”；前者迁 TOML profile，后者保留兼容 |

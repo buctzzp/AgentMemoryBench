@@ -22,7 +22,7 @@ from memory_benchmark.core import (
     Question,
 )
 from memory_benchmark.core.exceptions import ConfigurationError
-from memory_benchmark.core.interfaces import BaseMemoryProvider, BaseMemorySystem
+from memory_benchmark.core.interfaces import BaseMemorySystem
 from memory_benchmark.core.provider_protocol import MemoryProvider, RetrievalResult
 from memory_benchmark.core.validators import validate_no_private_keys
 from memory_benchmark.methods.registry import MethodBuildContext
@@ -66,7 +66,7 @@ from memory_benchmark.runners.prediction_planning import (
 from memory_benchmark.runners.prediction_preflight import (
     _cleanup_memory_provider,
     _is_memory_provider,
-    _normalize_memory_system,
+    _require_prediction_system,
     _prepare_memory_provider,
     _validate_consume_granularity,
     _validate_protocol_version,
@@ -80,7 +80,7 @@ from memory_benchmark.storage import (
 from memory_benchmark.utils.run_logger import RunLogger
 
 
-_PredictionSystem = BaseMemorySystem | BaseMemoryProvider | MemoryProvider
+_PredictionSystem = BaseMemorySystem | MemoryProvider
 _WORKER_HEARTBEAT_PHASES = frozenset(
     {"starting", "ingesting", "answering", "completed", "failed", "cancelled"}
 )
@@ -676,7 +676,7 @@ def _isolated_worker(
 
     emit(_WorkerHeartbeat(worker_idx=worker_idx, phase="starting"))
     try:
-        system = _normalize_memory_system(system_factory(build_context))
+        system = _require_prediction_system(system_factory(build_context))
         ensure_method_log_handler(build_context.diagnostic_log_path)
     except Exception:
         emit(_WorkerHeartbeat(worker_idx=worker_idx, phase="failed"))

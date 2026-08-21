@@ -403,7 +403,7 @@ workstream 关闭的是"**能跑通 + 数字可信**"两道门。核心教训（
 | 8 | lancedb 没进依赖 | 真：opencode 只 `uv pip install`，没进 pyproject | `pyproject.toml` | ✅Phase A |
 | 9 | protocol_version typo 静默通过 | 真：`_validate_protocol_version` 无 else 分支 | `runners/prediction.py:1249` | ✅Phase A |
 | 10 | answer LLM 各 method 不一致 | 真（公平性 bug）：按 (method,benchmark) 返回不同参数 | `config/settings.py:242-287` | Phase B（并入 unified） |
-| 11 | sentinel 泄漏给 answer LLM | 真但**latent**：只在 LegacyProviderBridge 触发，5 个 method 全是 v3，当前不触发 | `core/provider_bridge.py:83` | Phase B |
+| 11 | sentinel 泄漏给 answer LLM | 历史真、current 已退出：ws03 M1-E 将 custom 迁到 v3 并删除 bridge/sentinel | `docs/workstreams/ws03-architecture-slimming/README.md` | ✅M1-E |
 
 opencode 其余待核项（A-Mem `str(context)`、token 双来源、items=None、Mem0 无
 `clean_failed_ingest_state`、框架级 ingest/retrieve 重试）**尚未逐一验证，不采信**，

@@ -1,48 +1,51 @@
 ---
 id: ws03
 parent: null
-status: in-progress
+status: done
 created: 2026-07-05
 ---
 # ws03 架构减重（registry / legacy 接口 / CLI / LLM 配置）
 
 ## Codex 恢复胶囊（2026-08-21）
 
-- **当前目标**：十家 method/5×10 smoke 与 ws04 已闭合；恢复有边界的 M1-E legacy 退役，
-  让活代码只保留一套 provider v3 主协议与通用 prediction 入口。
-- **当前批次**：M1-E 生产可达性与退出批。M1-D 已把
-  planning/preflight/ingest/answer/parallel 抽成单向 leaf，原 `runners.prediction` 只保留
-  兼容 façade 与顶层 orchestration。
-- **当前判据**：只读
-  [M1-D prediction 拆责记录](notes/2026-08-14-prediction-decomposition-m1d.md)；M1 原始停手线见
-  [十家 method 后的可维护性审计与 M1 裁决](notes/2026-08-14-maintainability-audit-and-m1-ruling.md) §7；
-  结构灰区查 [`code-structure-principles.md`](../../reference/code-structure-principles.md)。
-- **本批顺序**：先删除无生产消费者的 MemoryOS 专用 runner 与只服务它的测试；再把
-  `--method-class` custom provider 组合根迁到 v3 后删除 bridge；registry 只做责任审计，
-  不按 2400 行数字强拆。
-- **禁止事项**：不跑成本/official-full/API，不改
-  metric/prompt/method 算法，不碰 data/models/outputs/third-party 或用户未跟踪资产。
-- **完成门**：M1-A→D 的旧门已满足；M1-E 须分别证明生产消费者清零、旧 import/CLI
-  强反例退出、文档与测试不再教授旧路径，并重新跑 compileall/无 API 全量。
+- **当前状态**：ws03 的有边界 M1-A→E 已全部关闭；本 workstream 不再是施工入口。
+- **最终结果**：新实验只保留 provider v3 + 通用 prediction 主路径；无消费者的
+  MemoryOS 专用 runner、provider v2 bridge 与 `BaseMemoryRetriever` 已退役。仍有真实消费者的
+  legacy ABC 被降为受自动门约束的 parity/resume 边界，不允许新 adapter 使用。
+- **最终判据**：见
+  [M1-E legacy 退役记录](notes/2026-08-21-legacy-retirement-m1e.md)；结构灰区查
+  [`code-structure-principles.md`](../../reference/code-structure-principles.md)。
+- **registry 裁决**：已完成责任审计并收敛为 v3 factory 类型；它仍是无运行时状态的单一组合根，
+  不因 2422 行机械拆成十份。只有出现独立发布边界、持续 merge 冲突或第二种真实变化原因才重开。
+- **后续边界**：ws05 成本实验继续 paused；六家后接 method 的 source/官方 harness 对齐复证须另开
+  有限 recertification 批，不得借此继续无限结构重构。
 
 ## 目标
 
 retrieve-first 主路径稳定后，清除迁移期留下的重复机制：capability 推理、
 legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method 兼容性由
-`BaseMemoryProvider` 继承关系表达；legacy 负担删除或明确降级；
+provider v3 契约表达；legacy 负担删除或明确降级；
 统一 `LLMRuntimeConfig` 落地且 manifest/model inventory 不回退。
 
 ## 当前断点
 
+- 2026-08-21：**M1-E 已关闭，ws03 完成。**删除无生产消费者的 MemoryOS 专用 runner、
+  provider v2 bridge 与 `BaseMemoryRetriever`；`--method-class` 已迁到严格 v3 class contract，
+  registry factory 类型全部收敛到 `MemoryProvider`。四家 adapter 的旧
+  `BaseMemoryProvider` 只用于 parity 证据，generic/custom prediction 均拒绝，且由架构门限制
+  精确消费者集合。registry 经责任审计保留为单一 composition root，不按行数强拆。施工与退出
+  预算见 [M1-E note](notes/2026-08-21-legacy-retirement-m1e.md)。定向集
+  `527 passed, 1 warning in 14.37s`；architecture/docs `19 passed in 5.41s`；compileall exit 0；
+  无 API 全量 `2196 passed, 3 deselected, 25 warnings, 29 subtests passed in 226.48s`。
+  相对前一基线少 47 个测试已由删除 48 个死入口测试与本批新增/改写测试的净差完全解释，非漏收集。
 - 2026-08-14：**M1-D 已关闭，ws03 达到施工停手线**。`prediction.py` 的 planning、
   preflight、ingest、answer、parallel 与 observability 已按单向依赖抽成六个叶模块；原入口只
   定义 `PredictionRunSummary` 与 `run_predictions`，历史 private import 同 identity re-export。
   AST 门锁定叶依赖允许集、façade 所有权和代表性 import identity。施工记录见
   [M1-D note](notes/2026-08-14-prediction-decomposition-m1d.md)。承重定向集
   `441 passed, 12 warnings in 9.50s`；compileall exit 0；无 API 全量门
-  `2228 passed, 3 deselected, 25 warnings, 29 subtests passed in 154.30s`。按原裁决不自动扩
-  M1-E/registry 重构；ws03 只作为 compact hook 可定位的唯一 P0 决策门保留，下一动作等待用户
-  选择后再原子切换 workstream。
+  `2228 passed, 3 deselected, 25 warnings, 29 subtests passed in 154.30s`。该时点“暂不扩
+  M1-E”的停手裁决后来已由用户显式解除，并由本页首条 M1-E 终验 supersede。
 - 2026-08-14：**M1-C 已关闭**。EverOS/Graphiti/LangMem/Letta 的 Popen pipe、请求锁/id、
   JSON-lines response、stderr 尾部、selector timeout 与 terminate/kill fallback 已收敛到
   `methods/worker_transport.py`；四家的 worker schema、env、namespace、DB/Docker 与 cleanup
@@ -95,9 +98,9 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
 - 先前的
   [里程碑收口与架构减重审计](notes/2026-07-23-first-25-cell-consolidation-audit.md)
   中体积盘点、scratch 吸收和 legacy 分类继续有效，只有“立即 MemOS”的顺序被改判。
-  `BaseMemoryRetriever` 是第一项确认 legacy 候选，但
-  `BaseResumableMemorySystem/add_from_turn`、`LegacyProviderBridge`、
-  `ingest_resume.py` 与 `config_track.py` 均仍有生产可达调用，禁止按名字删除。
+  其中 `BaseMemoryRetriever` 与 `LegacyProviderBridge` 已在 M1-E 达到退出门并删除；
+  `BaseResumableMemorySystem/add_from_turn`、`ingest_resume.py` 与 `config_track.py` 仍有真实
+  resume/旧 artifact 消费者，继续受退出预算约束，禁止按名字删除。
 
 ## 设计文档
 
@@ -106,6 +109,7 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
 - [M1-B TOML profile 与新运行身份迁移记录](notes/2026-08-14-toml-profile-migration-m1b.md)
 - [M1-C 四家 isolated worker transport 单源化记录](notes/2026-08-14-isolated-worker-transport-m1c.md)
 - [M1-D prediction 编排按责任拆分记录](notes/2026-08-14-prediction-decomposition-m1d.md)
+- [M1-E legacy 退役、custom v3 与 registry 责任审计](notes/2026-08-21-legacy-retirement-m1e.md)
 - [稳定代码结构判据](../../reference/code-structure-principles.md)
 - [2026-06-21-registry-capability-simplification-design.md](2026-06-21-registry-capability-simplification-design.md)
 - [2026-06-21-llm-provider-config-design.md](2026-06-21-llm-provider-config-design.md)
@@ -123,11 +127,13 @@ legacy 基类、legacy CLI、分散的 LLM 配置。完成判据：新 method �
   产品 worker、环境、Docker/DB 与 cleanup 差异继续显式。
 - [x] **M1-D prediction decomposition**：leaf-first 拆 planning/preflight、ingest、answer、
   parallel；原 import 保留 façade，每批行为守恒。达到停手线后返回用户选择，不自动扩 M1-E。
+- [x] **M1-E legacy retirement**：删除死专用 runner、custom path 迁 v3 后删除 provider bridge、
+  删除零消费者 ABC；给仍活跃的 parity/resume 兼容面锁精确消费者与退出门；完成 registry 责任审计。
 
-- [ ] 弱化 `MethodCapability` 推理，conversation-QA 兼容性收敛到
-  `BaseMemoryProvider` 继承关系；保留轻量 registry（名称 → factory/config/
+- [ ] 后续候选：弱化 `MethodCapability` 推理，conversation-QA 兼容性收敛到
+  provider v3 声明；保留轻量 registry（名称 → factory/config/
   source identity 映射），不回退分散 `if/else`。
-- [ ] 清理或降级 `BaseResumableMemorySystem`、`BaseMemoryRetriever`、
+- [ ] 后续候选：清理或降级 `BaseResumableMemorySystem`、
   `add_from_turn()` 与历史 turn-level resume 文档/测试；`BaseMemorySystem`
   暂保留为后备兼容接口。删除前必须证明四个内置 method、fake/offline 测试和
   artifact-only evaluation 不依赖旧主路径。
@@ -172,15 +178,13 @@ benchmark 全部 frozen 后，行为被全量测试锁死才允许动结构）
   benchmark/author prompt ownership；benchmark 专属 evaluator 暂留原路径，避免同批再做
   第二次 import churn。后续等 policy 接口稳定后再归
   `evaluators/benchmarks/`，不以搬目录冒充抽象完成。
-- [ ] **历史遗留盘点**（先盘点分类再动手，每项以"引用扫描 + 测试通过"
-  为证据，不凭印象）：已确认遗留 = `BaseMemoryRetriever`（本 ws 既有）、
-  `--profile` 残留；**待核** = `runners/ingest_resume.py`（用户 2026-07-11
-  点名疑似遗留，但 CLAUDE.md 载明其为 resume 系统活跃组件
-  ——TurnIngestCheckpointStore——须引用扫描裁定，不得凭印象删）；
-  盘点产出三列清单：活跃/疑似/确认遗留。
+- [x] **历史遗留盘点**（先盘点分类再动手，每项以“引用扫描 + 测试通过”为证据）：
+  `BaseMemoryRetriever`、provider bridge 与 MemoryOS 专用 runner 已在 M1-E 删除；
+  `runners/ingest_resume.py` 已证实仍承载 `TurnIngestCheckpointStore`，`--profile`/`config_track`
+  仍承担旧 artifact/CLI 回读，归为兼容活跃而非确认遗留。
 - [x] **首批 25 格收口盘点**（2026-07-23）：完成工作目录/Git 体积拆分、四份根目录
-  scratch 吸收账、活跃/兼容活跃/确认遗留三分类；确认 `BaseMemoryRetriever`
-  为第一项 removal 候选，其余 resume/bridge/config-track 当前不可直接删。
+  scratch 吸收账、活跃/兼容活跃/确认遗留三分类；当时确认 `BaseMemoryRetriever`
+  为第一项 removal 候选。该候选及 bridge 已由 M1-E 退出，其余 resume/config-track 仍不可直接删。
 - [x] **结构归一 M0**（2026-07-23 关闭）：A 文档热/冷层；B pure metric +
   retrieval evaluator 共壳；C benchmark/author prompt ownership。M0 零 API、零
   公式/prompt/artifact 语义变化；全量守恒门通过，下一家接 MemOS。

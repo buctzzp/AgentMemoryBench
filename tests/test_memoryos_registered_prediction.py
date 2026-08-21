@@ -32,7 +32,13 @@ from memory_benchmark.core import (
     Session,
     Turn,
 )
-from memory_benchmark.core.interfaces import BaseMemoryProvider
+from memory_benchmark.core.provider_protocol import (
+    IngestResult,
+    IngestUnit,
+    MemoryProvider,
+    RetrievalQuery,
+    RetrievalResult,
+)
 from memory_benchmark.methods import memoryos_adapter as memoryos_adapter_module
 from memory_benchmark.methods.memoryos_adapter import MemoryOS as RealMemoryOS
 from memory_benchmark.methods import registry as method_registry_module
@@ -248,10 +254,11 @@ class _FakeAdapter:
         return self.dataset
 
 
-class _FakeMemoryOS(BaseMemoryProvider):
+class _FakeMemoryOS(MemoryProvider):
     """用于验证 registry factory 装配顺序的假 MemoryOS。"""
 
     instances: list["_FakeMemoryOS"] = []
+    consume_granularity = "pair"
 
     def __init__(
         self,
@@ -278,7 +285,7 @@ class _FakeMemoryOS(BaseMemoryProvider):
             Path(diagnostic_log_path) if diagnostic_log_path is not None else None
         )
         self.loaded_conversation_ids: list[str] = []
-        self.add_calls: list[list[Conversation]] = []
+        self.add_calls: list[IngestUnit] = []
         self.answered_question_ids: list[str] = []
         self.retrieved_question_ids: list[str] = []
         _FakeMemoryOS.instances.append(self)
@@ -294,24 +301,20 @@ class _FakeMemoryOS(BaseMemoryProvider):
 
         return RealMemoryOS.estimate_add_workload(conversation, config)
 
-    def add(self, conversations: Conversation | list[Conversation]) -> AddResult:
-        """记录 add 调用，便于测试未被错误触发。"""
+    def ingest(self, unit: IngestUnit) -> IngestResult:
+        """记录 production event-stream ingest 调用。"""
 
-        if isinstance(conversations, Conversation):
-            conversations = [conversations]
-        self.add_calls.append(conversations)
-        return AddResult(
-            conversation_ids=[conversation.conversation_id for conversation in conversations]
-        )
+        self.add_calls.append(unit)
+        return IngestResult()
 
-    def retrieve(self, question: Question) -> AnswerPromptResult:
+    def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """返回固定检索上下文，覆盖 retrieve-first runner 主路径。"""
 
+        question = query.source_question
+        assert question is not None
         self.retrieved_question_ids.append(question.question_id)
-        return AnswerPromptResult(
-            question_id=question.question_id,
-            conversation_id=question.conversation_id,
-            answer_prompt="MemoryOS fake context",
+        return RetrievalResult(
+            formatted_memory="MemoryOS fake context",
             metadata={"method": "fake-memoryos"},
         )
 
@@ -334,10 +337,6 @@ def _patch_memoryos_registration(
 
     registration = replace(
         method_registry_module.get_method_registration("memoryos"),
-        # 本文件的 _FakeMemoryOS 仍是旧协议 BaseMemoryProvider 形态（经桥接运行），
-        # 协议声明必须与 fake 实际形态一致，否则运行时交叉校验会 fail-fast。
-        # fake 升级为原生 v3 形态归入 ws06 tests-restructure。
-        protocol_version="v2-bridged",
         source_identity_factory=lambda path_settings: {"source": "fake-memoryos"},
         efficiency_instrumentation_identity_getter=lambda path_settings, config, source_identity: {
             "collector_schema": 1,

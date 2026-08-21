@@ -1,8 +1,8 @@
-"""method / memory module 抽象接口。
+"""退出预算内的 legacy method 抽象接口。
 
-Phase 1 当前正在从完整 memory system 协议迁移到 retrieve-first memory module
-协议。新 adapter 应优先实现 `BaseMemoryProvider`；旧 `BaseMemorySystem` 暂时保留
-用于迁移期兼容。
+新 adapter 与 ``--method-class`` 统一实现 ``provider_protocol.MemoryProvider``。
+本模块只保留仍有真实消费者的完整 answer/resume 接口，以及四家 adapter 的旧式
+``add/retrieve`` parity 面；generic prediction 不再桥接 ``BaseMemoryProvider``。
 """
 
 from __future__ import annotations
@@ -21,10 +21,10 @@ from .entities import (
 
 
 class BaseMemoryProvider(ABC):
-    """retrieve-first memory module 主接口。
+    """旧式 conversation 写入 + question 检索接口。
 
-    新 method 只需要实现 conversation 写入和 question 检索。最终答案由 framework
-    reader 统一生成。
+    该接口只用于既有 adapter 的 legacy parity 测试与退出迁移；新接入必须实现
+    ``MemoryProvider.ingest/retrieve``。generic prediction 已不接受本类型。
     """
 
     @abstractmethod
@@ -57,8 +57,7 @@ class BaseMemoryProvider(ABC):
 class BaseMemorySystem(ABC):
     """迁移期完整记忆系统接口。
 
-    该接口代表旧的 `add + get_answer` 协议。新 method 应优先实现
-    `BaseMemoryProvider`。
+    该接口代表旧的 ``add + get_answer`` 协议。新 method 应实现 provider v3。
     """
 
     @abstractmethod
@@ -126,26 +125,6 @@ class BaseResumableMemorySystem(BaseMemorySystem):
 
         输出:
             AddResult: 当前 conversation 的写入结果。
-        """
-
-        raise NotImplementedError
-
-
-class BaseMemoryRetriever(ABC):
-    """历史可选记忆检索接口。
-
-    新主协议已经由 `BaseMemoryProvider` 表达；该类保留给旧测试和迁移期引用。
-    """
-
-    @abstractmethod
-    def retrieve(self, question: Question) -> AnswerPromptResult:
-        """根据公开问题返回完整 prompt messages。
-
-        输入:
-            question: method 可见问题。
-
-        输出:
-            AnswerPromptResult: method 构造好的完整 prompt messages。
         """
 
         raise NotImplementedError

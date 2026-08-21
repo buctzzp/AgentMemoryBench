@@ -30,12 +30,7 @@ from .exceptions import (
     MemoryBenchmarkError,
     UnknownBenchmarkError,
 )
-from .interfaces import (
-    BaseMemoryProvider,
-    BaseMemoryRetriever,
-    BaseMemorySystem,
-    BaseResumableMemorySystem,
-)
+from .interfaces import BaseMemorySystem, BaseResumableMemorySystem
 from .results import DryRunSummary
 
 __all__ = [
@@ -43,8 +38,6 @@ __all__ = [
     "AnswerPromptResult",
     "AdapterAlreadyRegisteredError",
     "AnswerResult",
-    "BaseMemoryProvider",
-    "BaseMemoryRetriever",
     "BaseResumableMemorySystem",
     "BaseMemorySystem",
     "ConfigurationError",

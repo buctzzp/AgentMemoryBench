@@ -19,10 +19,7 @@ from memory_benchmark.core import (
     Question,
     AnswerPromptResult,
 )
-from memory_benchmark.core.interfaces import (
-    BaseMemoryProvider,
-    BaseMemorySystem,
-)
+from memory_benchmark.core.interfaces import BaseMemorySystem
 from memory_benchmark.core.provider_protocol import (
     MemoryProvider,
     RetrievalResult,
@@ -100,7 +97,6 @@ from memory_benchmark.runners.prediction_answer import (
     _answer_question_retrieve_first_or_reuse,
     _build_conversation_prompts,
     _count_answer_context_tokens,
-    _count_bridge_empty_memory_sentinel,
     _count_openai_compatible_tokens,
     _persist_answer_prompt_records,
     _record_framework_answer_llm_call,
@@ -123,7 +119,7 @@ from memory_benchmark.runners.prediction_preflight import (
     _manifests_match_for_resume,
     _method_manifest_with_protocol,
     _normalize_manifest_for_resume_compare,
-    _normalize_memory_system,
+    _require_prediction_system,
     _preflight_prediction_run,
     _prepare_clean_failed_ingest_retries,
     _prepare_memory_provider,
@@ -176,7 +172,7 @@ class PredictionRunSummary:
         return self.failed_conversations
 
 
-_PredictionSystem = BaseMemorySystem | BaseMemoryProvider | MemoryProvider
+_PredictionSystem = BaseMemorySystem | MemoryProvider
 
 
 def run_predictions(
@@ -213,7 +209,8 @@ def run_predictions(
 
     输入:
         dataset: benchmark adapter 生成的完整统一数据集。
-        system: 实现旧 `BaseMemorySystem` 或新 `BaseMemoryProvider` 的被测记忆系统。
+        system: 实现 provider v3 ``MemoryProvider``，或仍在退出预算内的完整
+            ``BaseMemorySystem`` 的被测记忆系统。
         run_context: 本次运行的标准目录和公开身份。
         policy: conversation/question 范围、并发和 resume 策略。
         answer_reader: retrieve-first provider 路径使用的 framework answer reader。
@@ -234,7 +231,7 @@ def run_predictions(
         PredictionRunSummary: 回复数量和标准 artifact 路径。
     """
 
-    system = _normalize_memory_system(system)
+    system = _require_prediction_system(system)
     prompt_track = "unified" if unified_prompt_builder is not None else "native"
     declared_provenance_granularity = (
         resolve_registered_factory_provenance_granularity(system_factory)
@@ -550,12 +547,7 @@ def run_predictions(
                 prediction_path=str(paths.method_predictions_path),
                 private_label_path=str(paths.evaluator_private_labels_path),
                 summary_path=str(paths.summary_path),
-                metadata={
-                    "run_control": run_control_metadata,
-                    "bridge_empty_memory_sentinel_count": _count_bridge_empty_memory_sentinel(
-                        paths.answer_prompts_path
-                    ),
-                },
+                metadata={"run_control": run_control_metadata},
                 failed_conversations=sum(
                     1
                     for conversation in selected_conversations

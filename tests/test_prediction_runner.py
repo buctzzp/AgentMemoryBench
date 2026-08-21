@@ -36,13 +36,11 @@ from memory_benchmark.benchmark_adapters.membench import (
     normalize_membench_choice_prediction,
 )
 from memory_benchmark.core.interfaces import (
-    BaseMemoryProvider,
     BaseMemorySystem,
     BaseResumableMemorySystem,
 )
-from memory_benchmark.core.provider_bridge import LegacyProviderBridge
 from memory_benchmark.core.provider_protocol import (
-    BRIDGE_EMPTY_MEMORY_SENTINEL,
+    ConversationBatch,
     EvidenceAssertion,
     IngestResult,
     MemoryProvider,
@@ -248,8 +246,10 @@ class RecordingPredictionSystem(BaseMemorySystem):
         )
 
 
-class RecordingMemoryProvider(BaseMemoryProvider):
-    """记录 add/retrieve 调用的 retrieve-first fake provider。"""
+class RecordingMemoryProvider(MemoryProvider):
+    """记录 conversation ingest/retrieve 调用的 v3 fake provider。"""
+
+    consume_granularity = "conversation"
 
     def __init__(self) -> None:
         """初始化线程安全调用记录。"""
@@ -258,22 +258,24 @@ class RecordingMemoryProvider(BaseMemoryProvider):
         self.retrieved_question_ids: list[str] = []
         self._lock = threading.Lock()
 
-    def add(self, conversation: Conversation) -> AddResult:
-        """记录单个公开 conversation 写入。"""
+    def ingest(self, unit: ConversationBatch) -> IngestResult:
+        """记录单个公开 conversation batch 写入。"""
 
         with self._lock:
-            self.added_conversation_ids.append(conversation.conversation_id)
-        return AddResult(conversation_ids=[conversation.conversation_id])
+            self.added_conversation_ids.append(str(unit.metadata["conversation_id"]))
+        return IngestResult(unit_ref=unit.ref)
 
-    def retrieve(self, question: Question) -> AnswerPromptResult:
-        """记录公开问题检索，并返回可注入 prompt 的上下文。"""
+    def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+        """记录公开 query，并返回可注入 prompt 的上下文。"""
 
+        question = query.source_question
+        assert question is not None
         with self._lock:
             self.retrieved_question_ids.append(question.question_id)
-        return AnswerPromptResult(
-            question_id=question.question_id,
-            conversation_id=question.conversation_id,
-            answer_prompt=f"memory for {question.text}",
+        memory = f"memory for {query.query_text}"
+        return RetrievalResult(
+            formatted_memory=memory,
+            prompt_messages=(PromptMessage(role="user", content=memory),),
             metadata={"provider": "recording"},
         )
 
@@ -562,6 +564,7 @@ def _write_resume_manifest(
     run_context: RunContext,
     policy: PredictionRunPolicy,
     method_manifest: dict[str, object],
+    system: BaseMemorySystem | MemoryProvider,
     benchmark_variant: str = "default",
     run_scope: RunScope = RunScope.FULL,
 ) -> None:
@@ -581,11 +584,16 @@ def _write_resume_manifest(
 
     from memory_benchmark.runners import prediction as prediction_module
 
+    stamped_method_manifest = prediction_module._method_manifest_with_protocol(
+        method_manifest=method_manifest,
+        prompt_track="native",
+        system=system,
+    )
     _, manifest = prediction_module._build_prediction_resume_artifacts(
         dataset=dataset,
         run_context=run_context,
         policy=policy,
-        method_manifest=method_manifest,
+        method_manifest=stamped_method_manifest,
         benchmark_variant=benchmark_variant,
         run_scope=run_scope,
         source_paths=(),
@@ -1261,7 +1269,7 @@ def test_runner_uses_retrieve_first_provider_and_framework_reader(
         "framework answer",
         "framework answer",
     ]
-    assert retrievals[0]["answer_prompt"] == "memory for 问题 1"
+    assert retrievals[0]["answer_prompt"] == "[user]\nmemory for 问题 1"
     assert retrievals[0]["prompt_messages"] == [
         {"role": "user", "content": "memory for 问题 1"}
     ]
@@ -1777,47 +1785,6 @@ def test_v3_session_memory_report_contract_fails_when_declared_but_empty(
         )
 
 
-def test_runner_bridges_legacy_provider_and_counts_empty_memory_sentinel(
-    tmp_path: Path,
-) -> None:
-    """旧 BaseMemoryProvider 应经 v3 桥接运行并统计 sentinel fallback。"""
-
-    dataset = _build_dataset()
-    provider = RecordingMemoryProvider()
-    answer_client = FakeAnswerLLMClient(answer="framework answer")
-    reader = FrameworkAnswerReader(client=answer_client)
-    context = _create_context(tmp_path)
-
-    summary = run_predictions(
-        dataset=dataset,
-        system=provider,
-        run_context=context,
-        policy=PredictionRunPolicy(max_workers=1),
-        answer_reader=reader,
-        method_manifest={"adapter": "recording-provider-v1"},
-        benchmark_variant="test_variant",
-        run_scope=RunScope.FULL,
-    )
-
-    manifest = json.loads((context.run_dir / "manifest.json").read_text())
-    retrievals = read_jsonl(
-        context.artifacts_dir / "answer_prompts.prediction.jsonl"
-    )
-
-    assert manifest["method"]["protocol_version"] == "v2-bridged"
-    assert manifest["method"]["prompt_track"] == "native"
-    assert manifest["method"]["profile"] == {}
-    assert summary.metadata["bridge_empty_memory_sentinel_count"] == 2
-    assert retrievals[0]["formatted_memory"] == BRIDGE_EMPTY_MEMORY_SENTINEL
-    assert retrievals[0]["metadata"]["bridge_warning"] == (
-        "legacy_provider_exposed_no_memory_context"
-    )
-    assert answer_client.calls[0]["messages"] == [
-        {"role": "user", "content": "memory for 问题 1"}
-    ]
-    assert BRIDGE_EMPTY_MEMORY_SENTINEL not in answer_client.calls[0]["prompt"]
-
-
 def test_shared_mock_provider_uses_framework_reader(tmp_path: Path) -> None:
     """共享 mock provider 应走 retrieve-first reader，而不是 method 自己回答。"""
 
@@ -1915,7 +1882,7 @@ def test_isolated_retrieve_first_worker_persists_answer_prompt_artifact(
     reader = FrameworkAnswerReader(client=answer_client)
     context = _create_context(tmp_path)
 
-    def fake_factory(_context: MethodBuildContext) -> BaseMemoryProvider:
+    def fake_factory(_context: MethodBuildContext) -> MemoryProvider:
         """每个 isolated worker 创建独立 provider 实例。"""
 
         return RecordingMemoryProvider()
@@ -2771,11 +2738,13 @@ def test_failed_answer_resume_does_not_reingest(tmp_path: Path) -> None:
         retry_failed_conversations=True,
     )
     method_manifest = {"method_name": "fake"}
+    provider = RecordingMemoryProvider()
     _write_resume_manifest(
         dataset=dataset,
         run_context=run_context,
         policy=policy,
         method_manifest=method_manifest,
+        system=provider,
     )
     run_dir = tmp_path / "failed-answer-resume"
     atomic_write_json(
@@ -2800,8 +2769,6 @@ def test_failed_answer_resume_does_not_reingest(tmp_path: Path) -> None:
             }
         ],
     )
-    provider = RecordingMemoryProvider()
-
     run_predictions(
         dataset=dataset,
         system=provider,
@@ -2844,11 +2811,13 @@ def test_failed_ingest_retry_without_clean_support_fails_closed(
         retry_failed_conversations=True,
     )
     method_manifest = {"method_name": "fake"}
+    provider = RecordingMemoryProvider()
     _write_resume_manifest(
         dataset=dataset,
         run_context=run_context,
         policy=policy,
         method_manifest=method_manifest,
+        system=provider,
     )
     run_dir = tmp_path / "failed-ingest-resume"
     atomic_write_json(
@@ -2865,7 +2834,7 @@ def test_failed_ingest_retry_without_clean_support_fails_closed(
     with pytest.raises(ConfigurationError, match="clean retry"):
         run_predictions(
             dataset=dataset,
-            system=RecordingMemoryProvider(),
+            system=provider,
             run_context=run_context,
             policy=policy,
             method_manifest=method_manifest,
@@ -2906,11 +2875,13 @@ def test_failed_ingest_retry_with_clean_support_reingests_conversation(
         retry_failed_conversations=True,
     )
     method_manifest = {"method_name": "fake"}
+    provider = RecordingMemoryProvider()
     _write_resume_manifest(
         dataset=dataset,
         run_context=run_context,
         policy=policy,
         method_manifest=method_manifest,
+        system=provider,
     )
     run_dir = tmp_path / "failed-ingest-clean-retry"
     atomic_write_json(
@@ -2941,7 +2912,6 @@ def test_failed_ingest_retry_with_clean_support_reingests_conversation(
         if dirty_marker.exists():
             dirty_marker.unlink()
 
-    provider = RecordingMemoryProvider()
     run_predictions(
         dataset=dataset,
         system=provider,
@@ -3115,27 +3085,27 @@ def test_isolated_worker_pipeline_creates_per_worker_instances(
 
     factory_calls: list[MethodBuildContext] = []
 
-    class _FakeSystem:
+    class _FakeSystem(MemoryProvider):
         """独立 worker 测试用的假 method 实例。"""
+
+        consume_granularity = "conversation"
 
         def __init__(self, ctx: MethodBuildContext):
             """记录工厂调用，验证每个 worker 创建了独立实例。"""
 
             factory_calls.append(ctx)
 
-        def add(self, conversations):
-            """空实现，只验证调用路径。"""
+        def ingest(self, unit: ConversationBatch) -> IngestResult:
+            """接收完整 conversation，测试只验证实例隔离。"""
 
-            pass
+            return IngestResult(unit_ref=unit.ref)
 
-        def get_answer(self, question):
-            """返回固定测试答案。"""
+        def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+            """返回 framework reader 可消费的原生消息。"""
 
-            from memory_benchmark.core import AnswerResult
-            return AnswerResult(
-                question_id=question.question_id,
-                conversation_id=question.conversation_id,
-                answer="test",
+            return RetrievalResult(
+                formatted_memory="test memory",
+                prompt_messages=(PromptMessage(role="user", content="test memory"),),
             )
 
     def fake_factory(ctx: MethodBuildContext):
@@ -3203,6 +3173,9 @@ def test_isolated_worker_pipeline_creates_per_worker_instances(
             conversation_status=conversation_status,
             question_status=question_status,
             question_order=question_order,
+            answer_reader=FrameworkAnswerReader(
+                client=FakeAnswerLLMClient("test")
+            ),
         )
 
     assert len(factory_calls) == 4
@@ -4247,10 +4220,10 @@ def test_method_manifest_with_protocol_setdefault_preserves_caller_values() -> N
             "prompt_track": "unified",
             "profile": {"checkpointing": False},
         },
-        protocol_version="v2-bridged",
+        protocol_version="v3",
         prompt_track="native",
     )
-    assert result["protocol_version"] == "v2-bridged"
+    assert result["protocol_version"] == "v3"
     assert result["prompt_track"] == "unified"
     assert result["profile"] == {"checkpointing": False}
 
@@ -4331,18 +4304,6 @@ class _FakeV3Provider(MemoryProvider):
         raise NotImplementedError
 
 
-class _FakeV2Provider(BaseMemoryProvider):
-    """fake BaseMemoryProvider，经 LegacyProviderBridge 后变为 v2-bridged。"""
-
-    def add(self, conversations):
-        """旧协议 add 桩，仅用于类型检查。"""
-        raise NotImplementedError
-
-    def retrieve(self, question):
-        """旧协议 retrieve 桩，仅用于类型检查。"""
-        raise NotImplementedError
-
-
 class _FakeBaseSystem(BaseMemorySystem):
     """直接继承 BaseMemorySystem，不实现任何 provider 协议。"""
 
@@ -4391,25 +4352,10 @@ def test_validate_protocol_version_v3_rejects_base_memory_system() -> None:
         _validate_protocol_version("v3", _FakeBaseSystem())
 
 
-def test_validate_protocol_version_v3_rejects_legacy_bridge() -> None:
-    """声明 v3 但 factory 返回 LegacyProviderBridge（应为 v2-bridged）→ fail-fast。"""
+def test_validate_protocol_version_rejects_retired_v2_bridge_identity() -> None:
+    """新运行不得再接受已退出的 v2-bridged manifest 身份。"""
 
-    bridged = LegacyProviderBridge(_FakeV2Provider())
-    with pytest.raises(ConfigurationError, match="declares protocol_version='v3'"):
-        _validate_protocol_version("v3", bridged)
-
-
-def test_validate_protocol_version_v2_bridged_accepts_legacy_bridge() -> None:
-    """声明 v2-bridged + 实例是 LegacyProviderBridge → 通过。"""
-
-    bridged = LegacyProviderBridge(_FakeV2Provider())
-    _validate_protocol_version("v2-bridged", bridged)
-
-
-def test_validate_protocol_version_v2_bridged_rejects_memory_provider() -> None:
-    """声明 v2-bridged 但 factory 返回直接 MemoryProvider → fail-fast。"""
-
-    with pytest.raises(ConfigurationError, match="declares protocol_version='v2-bridged'"):
+    with pytest.raises(ConfigurationError, match="expected 'v3'"):
         _validate_protocol_version("v2-bridged", _FakeV3Provider())
 
 
@@ -4722,27 +4668,6 @@ def test_legacy_base_system_gets_no_cleanup_call(tmp_path: Path) -> None:
     assert not hasattr(system, "cleanup")
 
 
-def test_legacy_bridged_provider_cleanup_is_a_noop(tmp_path: Path) -> None:
-    """LegacyProviderBridge 只继承默认 no-op cleanup，不向旧 provider 传播。"""
-
-    legacy = RecordingMemoryProvider()
-
-    run_predictions(
-        dataset=_build_dataset(),
-        system=legacy,
-        run_context=_create_context(tmp_path),
-        policy=PredictionRunPolicy(max_workers=1),
-        answer_reader=FrameworkAnswerReader(
-            client=FakeAnswerLLMClient(answer="bridged answer")
-        ),
-        method_manifest={"adapter": "recording-v2"},
-        benchmark_variant="test_variant",
-        run_scope=RunScope.FULL,
-    )
-
-    assert not hasattr(legacy, "cleanup")
-
-
 # --------------------------------------------------------------------------------------
 # M4-R1：生命周期保护区必须覆盖 clean hook / preflight 等前置阶段
 # --------------------------------------------------------------------------------------
@@ -4781,6 +4706,7 @@ def _failed_ingest_run_context(tmp_path: Path, run_id: str, system):
         run_context=run_context,
         policy=policy,
         method_manifest=method_manifest,
+        system=system,
     )
     atomic_write_json(
         tmp_path / run_id / "checkpoints" / "conversation_status.json",

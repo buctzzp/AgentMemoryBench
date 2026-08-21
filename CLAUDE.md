@@ -58,8 +58,9 @@ Compatibility check at runtime: `validate_compatibility(benchmark_task_family, r
   必需非空；`prompt_messages` 可选 native 口径）
 - 钩子 `prepare/end_session/end_conversation/cleanup` 默认 no-op
 
-旧协议 `BaseMemorySystem` / `BaseMemoryProvider(add+retrieve)` 经
-`LegacyProviderBridge` 兼容；`BaseMemoryRetriever` 属待清理负担（见 ws03）。
+新 run（含 `--method-class`）只接受 v3。旧 `BaseMemoryProvider` 仅标记四家 adapter 的
+parity 测试面，`BaseMemorySystem` 只剩明确退出预算内的 fake/resume 消费者；v2 bridge 与
+`BaseMemoryRetriever` 已删除。
 
 ### Private data protection (4-layer)
 1. **Data model**: `Conversation.to_public_dict()` excludes gold_answers
@@ -116,6 +117,6 @@ Compatibility check at runtime: `validate_compatibility(benchmark_task_family, r
 完整硬规则见 `AGENTS.md`（third_party 不改、私有数据边界、API 确认、中文
 docstring、受保护 outputs、不自动 commit、review 范围等）。此处只留代码级速查：
 
-- New method adapter: implement `BaseMemoryProvider` → register in `methods/registry.py`
+- New method adapter: implement v3 `MemoryProvider` → register in `methods/registry.py`
   (用户轻量路径走 `--method-class module:ClassName`，无需 registry)
 - New benchmark adapter: implement BenchmarkAdapter → register in `benchmark_adapters/registry.py`

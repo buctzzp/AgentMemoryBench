@@ -1,101 +1,76 @@
-"""测试 retrieve-first 核心协议。
-
-本文件只验证 core 层数据结构和抽象接口，不调用外部模型。测试目标是确认
-新的 memory-module 接口能够以单个 Conversation 为写入单位，并按 Question
-返回 method 构造好的完整 AnswerPromptResult.answer_prompt。
-"""
+"""测试 provider v3 核心协议，不调用外部模型。"""
 
 from __future__ import annotations
 
-from memory_benchmark.core import (
-    AddResult,
-    AnswerPromptResult,
-    Conversation,
-    MethodCapability,
-    Question,
-    Session,
-    Turn,
+from memory_benchmark.core import MethodCapability
+from memory_benchmark.core.provider_protocol import (
+    IngestResult,
+    MemoryProvider,
+    RetrievalQuery,
+    RetrievalResult,
+    TurnEvent,
 )
-from memory_benchmark.core.interfaces import BaseMemoryProvider
 
 
-class TinyProvider(BaseMemoryProvider):
-    """最小 retrieve-first provider，用于验证抽象接口可实例化。"""
+class TinyProvider(MemoryProvider):
+    """最小 turn 粒度 provider，用于验证 v3 接口可实例化。"""
+
+    consume_granularity = "turn"
 
     def __init__(self) -> None:
-        """初始化测试用状态。
-
-        输入:
-            无。
-
-        输出:
-            None。`added` 记录写入过的 conversation id，便于断言。
-        """
+        """初始化测试用隔离状态。"""
 
         self.added: list[str] = []
 
-    def add(self, conversation: Conversation) -> AddResult:
-        """写入单个 conversation。
+    def ingest(self, unit: TurnEvent) -> IngestResult:
+        """写入单个规范 turn event。"""
 
-        输入:
-            conversation: 框架清洗后的公开 conversation。
+        self.added.append(unit.turn_id)
+        return IngestResult()
 
-        输出:
-            AddResult: 记录本次写入成功的 conversation id。
-        """
+    def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+        """返回 framework answer builder 可消费的格式化记忆。"""
 
-        self.added.append(conversation.conversation_id)
-        return AddResult(conversation_ids=[conversation.conversation_id])
-
-    def retrieve(self, question: Question) -> AnswerPromptResult:
-        """按问题返回 method 构造好的完整 answer prompt。
-
-        输入:
-            question: 框架传给 method 的公开问题。
-
-        输出:
-            AnswerPromptResult: `answer_prompt` 是后续 answer LLM 的完整输入。
-        """
-
-        return AnswerPromptResult(
-            question_id=question.question_id,
-            conversation_id=question.conversation_id,
-            answer_prompt="Question: What does Alice like?\nMemory: Alice likes tea.",
-            metadata={"strategy": "tiny"},
+        return RetrievalResult(
+            formatted_memory="Alice likes tea.",
+            metadata={"strategy": "tiny", "query": query.query_text},
         )
 
 
-def test_base_memory_provider_adds_one_conversation_and_builds_answer_prompt() -> None:
-    """新主接口应只接收单个 conversation，并返回完整 answer_prompt。"""
+def test_memory_provider_ingests_declared_unit_and_returns_retrieval_result() -> None:
+    """v3 主接口应接收声明粒度载荷并返回非空 formatted_memory。"""
 
     provider = TinyProvider()
-    conversation = Conversation(
-        conversation_id="conv-1",
-        sessions=[
-            Session(
-                session_id="s1",
-                turns=[Turn(turn_id="t1", speaker="Alice", content="I like tea.")],
-            )
-        ],
+    event = TurnEvent(
+        role="user",
+        speaker_name="Alice",
+        content="I like tea.",
+        timestamp=None,
+        isolation_key="run_conv-1",
+        session_id="s1",
+        turn_id="t1",
     )
-    question = Question(
-        question_id="q1",
-        conversation_id="conv-1",
-        text="What does Alice like?",
+    query = RetrievalQuery(
+        query_text="What does Alice like?",
+        isolation_key="run_conv-1",
+        question_time=None,
+        top_k=10,
+        purpose="qa",
     )
 
-    add_result = provider.add(conversation)
-    retrieval = provider.retrieve(question)
+    ingest_result = provider.ingest(event)
+    retrieval = provider.retrieve(query)
 
-    assert add_result.conversation_ids == ["conv-1"]
-    assert provider.added == ["conv-1"]
-    assert retrieval.question_id == "q1"
-    assert retrieval.conversation_id == "conv-1"
-    assert retrieval.answer_prompt == "Question: What does Alice like?\nMemory: Alice likes tea."
-    assert retrieval.metadata == {"strategy": "tiny"}
+    assert ingest_result is not None
+    assert provider.added == ["t1"]
+    assert retrieval.formatted_memory == "Alice likes tea."
+    assert retrieval.metadata == {
+        "strategy": "tiny",
+        "query": "What does Alice like?",
+    }
 
 
 def test_memory_retrieval_capability_is_public_contract() -> None:
-    """capability 层应包含 memory_retrieval，供 registry 做兼容性判断。"""
+    """capability 层保留 memory_retrieval，供 registry 做兼容性声明。"""
 
     assert MethodCapability.MEMORY_RETRIEVAL.value == "memory_retrieval"

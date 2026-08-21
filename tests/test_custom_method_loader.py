@@ -11,10 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from memory_benchmark.core import AddResult, AnswerPromptResult, PromptMessage
 from memory_benchmark.core.exceptions import ConfigurationError
-from memory_benchmark.core.interfaces import BaseMemoryProvider
-from memory_benchmark.methods.custom_loader import load_custom_memory_provider
+from memory_benchmark.core.provider_protocol import MemoryProvider
+from memory_benchmark.methods.custom_loader import load_custom_memory_provider_class
 
 
 pytestmark = pytest.mark.unit
@@ -38,41 +37,43 @@ def _write_module(tmp_path: Path, source: str) -> str:
     return "custom_adapter"
 
 
-def test_load_custom_memory_provider_instantiates_no_arg_class(
+def test_load_custom_memory_provider_class_accepts_v3_no_arg_class(
     tmp_path: Path,
 ) -> None:
-    """合法用户 adapter 只需无参构造并继承 BaseMemoryProvider。"""
+    """合法用户 adapter 须无参构造、继承 MemoryProvider 并声明粒度。"""
 
     module_name = _write_module(
         tmp_path,
         '''
-from memory_benchmark.core import AddResult, AnswerPromptResult, PromptMessage
-from memory_benchmark.core.interfaces import BaseMemoryProvider
+from memory_benchmark.core.provider_protocol import (
+    IngestResult,
+    MemoryProvider,
+    RetrievalResult,
+)
 
 
-class MyMemory(BaseMemoryProvider):
-    def add(self, conversation):
-        return AddResult(conversation_ids=[conversation.conversation_id])
+class MyMemory(MemoryProvider):
+    consume_granularity = "turn"
 
-    def retrieve(self, question):
-        return AnswerPromptResult(
-            question_id=question.question_id,
-            conversation_id=question.conversation_id,
-            prompt_messages=[PromptMessage(role="user", content=question.text)],
-        )
+    def ingest(self, unit):
+        return IngestResult()
+
+    def retrieve(self, query):
+        return RetrievalResult(formatted_memory="memory")
 ''',
     )
 
-    provider = load_custom_memory_provider(f"{module_name}:MyMemory")
+    provider_class = load_custom_memory_provider_class(f"{module_name}:MyMemory")
 
-    assert isinstance(provider, BaseMemoryProvider)
+    assert issubclass(provider_class, MemoryProvider)
+    assert provider_class.consume_granularity == "turn"
 
 
 def test_load_custom_memory_provider_rejects_missing_colon() -> None:
     """class path 必须是 module:ClassName，避免用户传入含糊路径。"""
 
     with pytest.raises(ConfigurationError, match="module:ClassName"):
-        load_custom_memory_provider("custom_adapter.MyMemory")
+        load_custom_memory_provider_class("custom_adapter.MyMemory")
 
 
 def test_load_custom_memory_provider_rejects_constructor_args(
@@ -83,29 +84,31 @@ def test_load_custom_memory_provider_rejects_constructor_args(
     module_name = _write_module(
         tmp_path,
         '''
-from memory_benchmark.core.interfaces import BaseMemoryProvider
+from memory_benchmark.core.provider_protocol import MemoryProvider
 
 
-class NeedsArgs(BaseMemoryProvider):
+class NeedsArgs(MemoryProvider):
+    consume_granularity = "turn"
+
     def __init__(self, path):
         self.path = path
 
-    def add(self, conversation):
+    def ingest(self, unit):
         raise NotImplementedError
 
-    def retrieve(self, question):
+    def retrieve(self, query):
         raise NotImplementedError
 ''',
     )
 
     with pytest.raises(ConfigurationError, match="no-argument constructor"):
-        load_custom_memory_provider(f"{module_name}:NeedsArgs")
+        load_custom_memory_provider_class(f"{module_name}:NeedsArgs")
 
 
 def test_load_custom_memory_provider_rejects_wrong_base_class(
     tmp_path: Path,
 ) -> None:
-    """用户传入的类必须实现 BaseMemoryProvider。"""
+    """用户传入的类必须实现 provider v3 MemoryProvider。"""
 
     module_name = _write_module(
         tmp_path,
@@ -115,5 +118,29 @@ class NotMemory:
 ''',
     )
 
-    with pytest.raises(ConfigurationError, match="BaseMemoryProvider"):
-        load_custom_memory_provider(f"{module_name}:NotMemory")
+    with pytest.raises(ConfigurationError, match="MemoryProvider"):
+        load_custom_memory_provider_class(f"{module_name}:NotMemory")
+
+
+def test_load_custom_memory_provider_class_rejects_missing_granularity(
+    tmp_path: Path,
+) -> None:
+    """v3 custom provider 必须显式声明事件流消费粒度。"""
+
+    module_name = _write_module(
+        tmp_path,
+        '''
+from memory_benchmark.core.provider_protocol import MemoryProvider
+
+
+class MissingGranularity(MemoryProvider):
+    def ingest(self, unit):
+        raise NotImplementedError
+
+    def retrieve(self, query):
+        raise NotImplementedError
+''',
+    )
+
+    with pytest.raises(ConfigurationError, match="consume_granularity"):
+        load_custom_memory_provider_class(f"{module_name}:MissingGranularity")

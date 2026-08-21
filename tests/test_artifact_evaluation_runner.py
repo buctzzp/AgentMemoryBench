@@ -17,7 +17,6 @@ from memory_benchmark.config import OpenAISettings
 from memory_benchmark.core import (
     AddResult,
     AnswerResult,
-    BaseMemoryProvider,
     BaseMemorySystem,
     ConfigurationError,
     Conversation,
@@ -31,7 +30,13 @@ from memory_benchmark.core import (
     TaskFamily,
     Turn,
 )
-from memory_benchmark.core.provider_protocol import BRIDGE_EMPTY_MEMORY_SENTINEL
+from memory_benchmark.core.provider_protocol import (
+    ConversationBatch,
+    IngestResult,
+    MemoryProvider,
+    RetrievalQuery,
+    RetrievalResult,
+)
 from memory_benchmark.methods.config_track import (
     BuildIdentityDeclaration,
     EmbeddingIdentity,
@@ -200,29 +205,29 @@ class _FakeOfflineSystem(BaseMemorySystem):
         )
 
 
-class _FakeOfflineProvider(BaseMemoryProvider):
-    """用于离线装配测试的 retrieve-first fake provider。"""
+class _FakeOfflineProvider(MemoryProvider):
+    """用于离线装配测试的 provider v3 fake。"""
+
+    consume_granularity = "conversation"
 
     def __init__(self) -> None:
-        """初始化 add/retrieve 调用记录。"""
+        """初始化 ingest/retrieve 调用记录。"""
 
-        self.added_conversations: list[Conversation] = []
-        self.retrieved_questions: list[Question] = []
+        self.ingested_batches: list[ConversationBatch] = []
+        self.retrieved_queries: list[RetrievalQuery] = []
 
-    def add(self, conversation: Conversation) -> AddResult:
-        """记录写入的完整公开 conversation。"""
+    def ingest(self, unit: ConversationBatch) -> IngestResult:
+        """记录写入的公开 conversation batch。"""
 
-        self.added_conversations.append(conversation)
-        return AddResult(conversation_ids=[conversation.conversation_id])
+        self.ingested_batches.append(unit)
+        return IngestResult(unit_ref=unit.ref)
 
-    def retrieve(self, question: Question) -> AnswerPromptResult:
+    def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """返回离线固定上下文，避免真实 method/API 调用。"""
 
-        self.retrieved_questions.append(question)
-        return AnswerPromptResult(
-            question_id=question.question_id,
-            conversation_id=question.conversation_id,
-            answer_prompt=f"offline context for {question.text}",
+        self.retrieved_queries.append(query)
+        return RetrievalResult(
+            formatted_memory=f"offline context for {query.query_text}",
             metadata={"method": "offline-fake"},
         )
 
@@ -983,7 +988,7 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
 
             return {"profile_name": "smoke"}
 
-    def build_fake_system(context: MethodBuildContext) -> BaseMemoryProvider:
+    def build_fake_system(context: MethodBuildContext) -> MemoryProvider:
         """构造离线 fake provider，并保留 build context 供断言。"""
 
         assert context.config.profile_name == "smoke"
@@ -1005,14 +1010,14 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
         def complete(self, *, prompt: str) -> str:
             """返回固定答案，证明 framework reader 可以离线装配。"""
 
-            assert BRIDGE_EMPTY_MEMORY_SENTINEL in prompt
+            assert "offline context for" in prompt
             assert "History Chats:" in prompt
             return "offline fake answer"
 
     fake_method_registration = SimpleNamespace(
         name="offline-fake",
         build_identity_resolver=_pending_fake_build_identity,
-        resolve_consume_granularity=lambda _benchmark_name: "turn",
+        resolve_consume_granularity=lambda _benchmark_name: "conversation",
         task_families=frozenset({TaskFamily.CONVERSATION_QA}),
         provided_capabilities=frozenset(
             {
@@ -1028,6 +1033,9 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
         model_name_getter=lambda config: "offline-fake-model",
         resolve_profile_section=lambda profile_name: profile_name,
         system_factory=build_fake_system,
+        protocol_version="v3",
+        provenance_granularity="none",
+        retrieval_evidence_contract_version=None,
         workload_estimator=None,
     )
 
@@ -1096,10 +1104,14 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
     assert child.summary.total_conversations == 1
     assert child.summary.total_questions == 1
     assert len(captured_systems) == 1
-    assert len(captured_systems[0].added_conversations) == 1
-    added_conversation = captured_systems[0].added_conversations[0]
-    assert added_conversation.sessions == expected_smoke_first.conversations[0].sessions
-    assert len(captured_systems[0].retrieved_questions) == 1
+    assert len(captured_systems[0].ingested_batches) == 1
+    ingested_batch = captured_systems[0].ingested_batches[0]
+    assert [event.turn_id for event in ingested_batch.events] == [
+        turn.turn_id
+        for session in expected_smoke_first.conversations[0].sessions
+        for turn in session.turns
+    ]
+    assert len(captured_systems[0].retrieved_queries) == 1
 
     run_dir = tmp_path / "outputs" / child.run_id
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))

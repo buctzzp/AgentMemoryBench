@@ -6,6 +6,10 @@ created: 2026-07-06
 ---
 # 核心协议 v3 设计（最终版，已批准）
 
+> **Current implementation（2026-08-21）**：代码中的最终类名是
+> `core.provider_protocol.MemoryProvider`；本文早期草案使用的 `BaseMemoryProvider` 名称不再
+> 代表主协议。内置 registry 与 `--method-class` 均已直接使用 v3，迁移 bridge 已删除。
+
 作者：Claude（架构师）。取代候选方案 A（[spec-protocol-v2.md](spec-protocol-v2.md)，
 其用户决策与 R1-R3 已并入本文）。依据：
 [接口能力双向矩阵](track0-interface-capability-matrix.md)（15 卡交叉）、
@@ -49,7 +53,7 @@ agentic task family（MemoryArena 类）不进本协议，届时另立 task fami
 ## 2. Provider 协议 v3
 
 ```python
-class BaseMemoryProvider(ABC):
+class MemoryProvider(ABC):
     """记忆系统统一接入协议。写入=框架按声明粒度投递；检索=只检索不作答。
 
     必须实现的抽象方法只有两个：ingest() 和 retrieve()。
@@ -234,9 +238,9 @@ formatted_memory 规范：条目式文本，每条尽量带时间前缀（`[time
 
 ## 8. 非目标
 
-resume/并行/兜底/日志/终端等工程优化（未来独立工程专项 workstream）；
-agentic task family；多模态执行；`--method-class` 用户轻量路径迁移（用户接入
-非当前主线，v3 稳定后再迁）；BaseMemorySystem legacy 清理（ws03）。
+本 spec 冻结时的非目标是 resume/并行/兜底/日志/终端工程、agentic task family、
+多模态执行、custom v3 迁移和 legacy 清理。后续工程已由独立 workstream 推进；其中
+`--method-class` v3 迁移与 provider bridge 退役在 ws03 M1-E 关闭，不回写本节为原始范围。
 
 ## 9. 验收标准（整个 v3 落地完成的判据）
 

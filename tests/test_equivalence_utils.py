@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from memory_benchmark.core import AddResult, AnswerPromptResult, PromptMessage, Question
 from memory_benchmark.core.interfaces import BaseMemoryProvider
-from tests.equivalence_utils import run_bridge_sequence
+from tests.equivalence_utils import run_legacy_sequence
 from tests.fake_corpus import build_multimodal_consecutive_speaker_conversation
 
 
@@ -39,21 +39,21 @@ class RecordingSequenceProvider(BaseMemoryProvider):
         )
 
 
-def test_bridge_sequence_self_equivalence() -> None:
-    """等价性工具对桥接路径自比应得到完全一致的调用序列。"""
+def test_legacy_sequence_self_equivalence() -> None:
+    """等价性工具对 legacy parity 面自比应得到完全一致的调用序列。"""
 
     conversation = build_multimodal_consecutive_speaker_conversation()
     question = conversation.questions[0]
     left = RecordingSequenceProvider()
     right = RecordingSequenceProvider()
 
-    left_result = run_bridge_sequence(
+    left_result = run_legacy_sequence(
         provider=left,
         conversation=conversation,
         question=question,
         run_id="equiv-run",
     )
-    right_result = run_bridge_sequence(
+    right_result = run_legacy_sequence(
         provider=right,
         conversation=conversation,
         question=question,

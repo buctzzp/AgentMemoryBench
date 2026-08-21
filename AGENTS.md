@@ -20,7 +20,8 @@
   LLM。主配置使用 benchmark 统一 answer builder；作者校准配置可选择 method 官方
   builder。协议全文：
   `docs/workstreams/ws02-phase1-matrix/spec-protocol-v3.md`。旧
-  `BaseMemorySystem` / `BaseMemoryProvider(add+retrieve)` 仅为兼容桥路径。
+  `BaseMemorySystem` / `BaseMemoryProvider(add+retrieve)` 只保留给明确列账的 legacy
+  parity/resume 消费者；v2 bridge 已退出，新 run 与新 adapter 不得使用。
 - **运行主线（4 步，2026-07-08 与用户对齐）**：① 给 method 注入记忆（ingest）；
   ② 用 query 检索记忆（retrieve → `formatted_memory`）——**每个 method 一律用
   通用产品接口，不用 benchmark 专用评测实现**（公平/可比/代表性，见 ws02.5 审计）；

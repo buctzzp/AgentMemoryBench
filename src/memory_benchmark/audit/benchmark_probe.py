@@ -16,9 +16,8 @@ method 的记忆算法。
 - `retrieve()` 返回的 `formatted_memory`/`items` 只从"已经 ingest 过的公开
   turn"确定性推导，不查看 `query_text`、`source_question` 的内容或
   metadata——这样才能证明探针无法被用来做 benchmark 专用答案注入。
-- 没有 ingest 任何 turn 时，`retrieve()` 返回中性占位符
-  `"No ingested public memory."`，不得借用 framework 的
-  `BRIDGE_EMPTY_MEMORY_SENTINEL`（那是 legacy bridge 的专用哨兵，语义不同）。
+- 没有 ingest 任何 turn 时，`retrieve()` 返回探针自己的中性占位符
+  `"No ingested public memory."`，不得伪装成 method 的真实 zero-hit 文本。
 """
 
 from __future__ import annotations

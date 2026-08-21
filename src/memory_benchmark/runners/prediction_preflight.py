@@ -13,8 +13,7 @@ from typing import Any, Callable
 from memory_benchmark.benchmark_adapters.contracts import RunScope
 from memory_benchmark.core import Conversation, Dataset, Question
 from memory_benchmark.core.exceptions import ConfigurationError
-from memory_benchmark.core.interfaces import BaseMemoryProvider, BaseMemorySystem
-from memory_benchmark.core.provider_bridge import LegacyProviderBridge
+from memory_benchmark.core.interfaces import BaseMemorySystem
 from memory_benchmark.core.provider_protocol import MemoryProvider
 from memory_benchmark.core.validators import validate_dataset, validate_no_private_keys
 from memory_benchmark.observability import RunContext
@@ -44,7 +43,7 @@ from memory_benchmark.storage import (
 from memory_benchmark.utils.run_logger import RunLogger
 
 
-_PredictionSystem = BaseMemorySystem | BaseMemoryProvider | MemoryProvider
+_PredictionSystem = BaseMemorySystem | MemoryProvider
 
 
 def _prepare_clean_failed_ingest_retries(
@@ -516,14 +515,16 @@ def _prepare_memory_provider(
         system.prepare(run_context)
 
 
-def _normalize_memory_system(system: _PredictionSystem) -> BaseMemorySystem | MemoryProvider:
-    """把旧 retrieve-first provider 规范化为 v3 MemoryProvider。"""
+def _require_prediction_system(system: object) -> _PredictionSystem:
+    """拒绝已退出的 v2 provider，并返回合法 prediction system。"""
 
-    if isinstance(system, MemoryProvider):
+    if isinstance(system, MemoryProvider | BaseMemorySystem):
         return system
-    if isinstance(system, BaseMemoryProvider):
-        return LegacyProviderBridge(system)
-    return system
+    raise ConfigurationError(
+        "Prediction system must implement MemoryProvider (provider v3) or "
+        "BaseMemorySystem (legacy full-answer path); BaseMemoryProvider v2 is "
+        "no longer accepted."
+    )
 
 
 def _method_manifest_with_protocol(
@@ -545,17 +546,13 @@ def _method_manifest_with_protocol(
     写入 method manifest 作为 resume 身份，同样不依赖真实 method 实例。
     consume_granularity 优先使用与 factory 同源的注册级 resolver；未注册的真实 v3
     provider 可从实例补出。声明与实例同时存在时必须严格一致。
-    回退路径：当 protocol_version 为空且 system 可用时，沿用旧 isinstance 推断，
-    用于未通过注册表的测试/自定义路径向后兼容。
+    回退路径：当 protocol_version 为空且 system 是 v3 provider 时，推断为 ``v3``；
+    legacy full-answer system 不盖 provider 协议章。
     """
 
     if not protocol_version:
         if system is not None and isinstance(system, MemoryProvider):
-            protocol_version = (
-                "v2-bridged"
-                if isinstance(system, LegacyProviderBridge)
-                else "v3"
-            )
+            protocol_version = "v3"
         else:
             return method_manifest
     normalized = dict(method_manifest)
@@ -587,16 +584,12 @@ def _method_manifest_with_protocol(
     if (
         consume_granularity is None
         and isinstance(system, MemoryProvider)
-        and not isinstance(system, LegacyProviderBridge)
     ):
         consume_granularity = system.consume_granularity
     if consume_granularity is not None:
         _validate_consume_granularity_value(consume_granularity)
         normalized.setdefault("consume_granularity", consume_granularity)
-    if isinstance(system, MemoryProvider) and not isinstance(
-        system,
-        LegacyProviderBridge,
-    ):
+    if isinstance(system, MemoryProvider):
         _validate_consume_granularity(
             _manifest_consume_granularity(normalized),
             system,
@@ -636,8 +629,6 @@ def _validate_consume_granularity(
 
     if declared is None or not isinstance(system, MemoryProvider):
         return
-    if isinstance(system, LegacyProviderBridge):
-        return
     actual = system.consume_granularity
     _validate_consume_granularity_value(actual)
     if actual != declared:
@@ -661,33 +652,17 @@ def _validate_protocol_version(
 
     if not protocol_version:
         return
-    if protocol_version == "v3":
-        if not isinstance(system, MemoryProvider):
-            raise ConfigurationError(
-                f"Method declares protocol_version='v3' but factory produced "
-                f"{type(system).__name__} (expected MemoryProvider). "
-                "Update the method adapter to implement MemoryProvider or fix "
-                "the registration's protocol_version."
-            )
-        if isinstance(system, LegacyProviderBridge):
-            raise ConfigurationError(
-                "Method declares protocol_version='v3' but factory produced a "
-                "LegacyProviderBridge (v2-bridged). If this method uses "
-                "BaseMemoryProvider, set protocol_version='v2-bridged' in its "
-                "registration."
-            )
-    elif protocol_version == "v2-bridged":
-        if not isinstance(system, LegacyProviderBridge):
-            raise ConfigurationError(
-                f"Method declares protocol_version='v2-bridged' but factory "
-                f"produced {type(system).__name__} (expected "
-                "LegacyProviderBridge wrapping a BaseMemoryProvider)."
-            )
-    else:
+    if protocol_version != "v3":
         raise ConfigurationError(
-            f"Unknown protocol_version: {protocol_version!r} (expected 'v3' or "
-            "'v2-bridged'). Fix the method registration to avoid stamping an "
+            f"Unknown protocol_version: {protocol_version!r} (expected 'v3'). "
+            "Fix the method registration to avoid stamping an "
             "unreproducible protocol identity into the manifest."
+        )
+    if not isinstance(system, MemoryProvider):
+        raise ConfigurationError(
+            f"Method declares protocol_version='v3' but factory produced "
+            f"{type(system).__name__} (expected MemoryProvider). Update the "
+            "method adapter to implement MemoryProvider or fix the registration."
         )
 
 
