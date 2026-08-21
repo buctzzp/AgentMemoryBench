@@ -100,6 +100,11 @@
     隔离/完成门、算法身份或 metric 误标红线时，才重开精确 B/GRID 格。文档措辞、作者校准与
     能力 `N/A/pending` 归 `DOC_FIX/BACKLOG`，不能借“全面审计”机械重跑 B1-B11、重扫数据或
     重烧 API，阻塞研究主线。
+24. **metric 资格要对到 runtime stamp，不以“本次没算”代替守门**：稳定文档若裁
+    Recall/NDCG 等 provenance-qrel 指标为 N/A，必须同时抽查 adapter 生成的
+    `RetrievalEvidence`、强反例和一份真实 artifact。若 runtime 仍盖 `valid/turn`，即使当前
+    evaluator 列表没有调用该指标，也属于 capability contract 红点；只重开 evidence/GRID，
+    旧 artifact 按旧 identity 回读，不能靠“没出 score”掩盖错误声明。
 
 完整 33 条历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

@@ -100,14 +100,57 @@ run identity 改动，不重烧 smoke。
 
 | Method | current commit/source | 复用证据 | 新矛盾 | Verdict | 只重开哪一格 |
 | --- | --- | --- | --- | --- | --- |
-| A-Mem | 待核 | integration + frozen note | 待核 | `UNCHANGED / DOC_FIX / BACKLOG / RED` | `none` 或精确 B/GRID |
-| SimpleMem | 待核 | integration + frozen note | 待核 | 同上 | 同上 |
-| MemOS | 待核 | integration + frozen note + OmniMemEval | 待核 | 同上 | 同上 |
-| Letta/MemGPT | 待核 | integration + ledger + dossier + frozen note | 待核 | 同上 | 同上 |
-| LangMem | 待核 | integration + ledger + dossier + frozen note | 待核 | 同上 | 同上 |
-| EverOS | 待核 | integration + ledger + dossier + frozen note | 待核 | 同上 | 同上 |
-| Graphiti | 待核 | integration + ledger + dossier + frozen note | 待核 | 同上 | 同上 |
+| A-Mem | product pin 与 upstream `main` 均为 `ceffb860` | integration + frozen note + adapter/test + 真实 LoCoMo artifact | 文档判 retrieval qrel=N/A，runtime 却盖 `semantic_provenance=valid`、`provenance_granularity=turn` | **`RED`** | **B5 + GRID retrieval eligibility** |
+| SimpleMem | pin `60a48e83`；upstream `main=db80b6a`，稳定 tag 仍为 `v0.3.0` | integration + frozen note + patch reverse-check | 算法判词无反证；MANIFEST 漏记实际恢复 patch；新 main 有未评估产品漂移 | **`DOC_FIX + BACKLOG`** | none |
+| MemOS | pin `v2.0.25@e820406`；upstream `main=be68e2f` | integration + frozen note + patch reverse-check + OmniMemEval `0b1ea8d` | memory-type N/A 理由写错；同团队 Omni 默认 batch=20 与 pinned method harness batch=2 冲突，不能跨版本代裁 | **`DOC_FIX + BACKLOG`** | none |
+| Letta/MemGPT | legacy pin `0.16.8@b76da909`；archive head `87fd37a`，最新稳定 tag 仍为 `0.16.8` | integration + ledger + dossier + frozen note + formatter/source | 外层 SDK `role=user` 未掩盖 wrapper 内原始 role；无 current 反证 | **`UNCHANGED`** | none |
+| LangMem | pin `56d8593`；upstream `main=29cbe41` | integration + ledger + dossier + frozen note + source diff | 四个新 commit 只改 `uv.lock`；产品路径无漂移，依赖刷新留正式实验前 | **`BACKLOG`** | none |
+| EverOS | stable pin `v1.2.3@48fc908`；upstream `main=d07cddc`，无新稳定 tag | integration + ledger + dossier + frozen note + patch reverse-check | assistant-only anchor 仍为 source-less 结构占位；新 main 不静默替换稳定身份 | **`UNCHANGED`** | none |
+| Graphiti | stable pin `v0.29.3@021d3a5`；upstream `main=993e081`，仅有 `v0.30.0pre*` | integration + ledger + dossier + frozen note + current merge/edge lineage source | active edge `episodes` 仍只承载当前事实来源；矛盾 edge 会失效；无 provenance/rank 反例 | **`UNCHANGED`** | none |
 
-停手线：七行都有 verdict 即结束。`UNCHANGED/DOC_FIX/BACKLOG` 不改变 frozen 状态；只有
-`RED` 且有 current-source/运行时反例时，才为精确受影响格建立小修或任务卡。这样保留完整
-审查视野，同时不让复核吞掉 ws05/后续主线。
+### 5.1 一手核对摘要
+
+- **A-Mem**：产品 `add_note()` 每次先创建新 note，evolution 只更新邻居链接、context 与 tags；
+  session report 只取本 session 新建 note id，故 HaluMem extraction 没把旧 note 误报成当前
+  session 新产物。真正的红点只在 retrieve：
+  `amem_adapter.py:663-667` 和 `test_amem_adapter.py:605-607` 把 evolved current memory
+  宣称为 lossless turn evidence；冻结 LoCoMo artifact 也实际落了 `valid/turn/valid`。
+  “没有调用 retrieval evaluator”不能让错误 capability stamp 变安全。
+
+  ```text
+  artifact = outputs/runs/amem/locomo/smoke/unified/
+             amem-locomo-v2p-r3q1-w1-r2/artifacts/answer_prompts.prediction.jsonl
+  retrieval_evidence = {
+    semantic_provenance: {status: valid},
+    provenance_granularity: turn,
+    stable_ranking: {status: valid}
+  }
+  ```
+- **SimpleMem**：主配置仍关闭 build parallel，retrieval multi-query parallelism 不改变 build
+  窗口顺序；session `finalize()` 后只清 `previous_entries` transient context，不清长期记忆。
+  `simplemem-product-compat.patch` 的两项实际作用是 LanceDB 新版 native FTS 兼容和线程池中
+  `ContextVar` 传播，均不改 text product 算法；恢复清单必须如实列出。
+- **MemOS**：pinned method repo 自带 LoCoMo/LongMemEval harness 都是位置 batch=2；
+  OmniMemEval 的通用 MemOS client 使用 `/product/add|search|delete_memory`，但环境默认
+  `MEMOS_BATCH_SIZE=20`。两者都是有价值的一手入口，却没有共同 version contract；当前主轨继续
+  服从已锁定的 `v2.0.25` method repo，Omni 差异只进入作者校准/升级 backlog。
+- **Letta/LangMem/EverOS/Graphiti**：逐家从产品 formatter/manager/lifespan/edge resolution
+  复核最终 payload 与 lifecycle，没有发现 canonical message 损失、namespace 串写、未完成先
+  retrieve 或指标资格的新反例。remote `main` 漂移不等于冻结身份自动漂移。
+
+### 5.2 精确重开裁决
+
+本轮唯一 `RED` 是 **A-Mem B5/GRID retrieval eligibility**。重开范围严格限定为：
+
+1. runtime `RetrievalEvidence` 必须与“evolved current memory 不可作为原 turn qrel”一致；
+2. LoCoMo、LongMemEval、MemBench、BEAM 的 Recall/Precision/F1/NDCG 资格保持 N/A，不因
+   sidecar id 存在自动解锁；
+3. stable product ranking 可以单独判，不能反推 semantic provenance；
+4. 旧 artifact 永久按旧 adapter identity 回读，不改写历史；修复只需零 API 强反例和文档/
+   GRID 对表，**不重烧五格 build smoke，不重开 A-Mem 其余 B 门**。
+
+SimpleMem 与 MemOS 的 `DOC_FIX` 在本轮直接修正稳定文档。全部 `BACKLOG` 都是 source upgrade、
+author calibration 或正式实验前依赖刷新，不改变当前 frozen build。
+
+停手线已达到：七行都有 verdict。六家保持当前 frozen build；A-Mem 只临时重开 B5/GRID，
+待一张小修关闭后恢复完整 frozen。这样保留完整审查视野，同时不让复核吞掉 ws05/后续主线。

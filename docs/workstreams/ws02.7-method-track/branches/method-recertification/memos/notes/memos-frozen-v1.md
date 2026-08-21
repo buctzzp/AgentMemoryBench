@@ -7,6 +7,10 @@
 方法版本：`MemTensor/MemOS v2.0.25@e820406`
 adapter：`memos-v2.0.25-product-v4`
 
+> 2026-08-21 勘误：memory-type 的 N/A 不源于 MemOS taxonomy 名称不同；该 evaluator
+> 按 benchmark gold-side Event/Persona/Relationship 分组，并继承 upstream extraction 的
+> N/A。本页 §3.5/§6 已按 current evaluator contract 订正，不改变 frozen 运行身份或分数。
+
 ## 0. 冻结判词
 
 ```text
@@ -135,7 +139,10 @@ builder，top-k/preference/server env 也未达到 paper-number parity。
 - update evaluator contract=`valid`，但本次 7 个 current-state probe 全 zero-hit，
   聚合为 `N/A/no_nonempty_retrieval`，不是 0 分；
 - completion gate 不公开该 task 新生成的 fine memories，extraction=`N/A`；
-- MemOS memory taxonomy 不等价于 Event/Persona/Relationship，memory-type=`N/A`。
+- `halumem_memory_type` 是消费 extraction/update artifact 后按 gold-side
+  Event/Persona/Relationship 分组的 composite evaluator，不要求 MemOS 使用同名 taxonomy；
+  本格为 `N/A` 的真实原因是 upstream extraction 已因 task-local fine output 不可见而 N/A，
+  composite 按契约传播 `upstream_extraction_n_a`。
 
 ## 4. 真实 smoke 资产
 
@@ -198,7 +205,8 @@ identity，不能为了填 checklist 改写 current product。
 
 1. generated fine memory semantic provenance 与 Recall/NDCG；
 2. MMR/rerank stable ordering；
-3. HaluMem task-local fine output、Event/Persona/Relationship type；
+3. HaluMem task-local fine output；memory-type 资格随 extraction composite 传播，不另设
+   method taxonomy 门；
 4. HaluMem update 的非空 current-state 命中哨兵；
 5. `author_longmemeval` pair/truncation/builder/reference-time 校准；
 6. LoCoMo preference/top-k/server-env 与 paper-number parity；

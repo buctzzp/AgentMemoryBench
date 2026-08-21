@@ -2,11 +2,19 @@
 
 > adapter：`src/memory_benchmark/methods/amem_adapter.py`
 >
-> 状态：**B1-B11 已按 current product 重认证，`method-frozen-v1`。**
+> 状态：current product/source、输入、lifecycle 与既有 smoke 资产仍保持
+> `method-frozen-v1`；2026-08-21 冻结后差量审计发现 runtime evidence stamp 与 B5 的
+> N/A 裁决矛盾，故**仅 B5/GRID retrieval eligibility 临时重开**。
 >
 > 2026-08-21 后的新 smoke 改用 `opencodego/mimo-v2.5`；既有冻结 run 仍按
 > `gpt-4o-mini` 历史身份解释。现行运行身份见
 > [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
+
+> **当前红点**：adapter 与既有测试/LoCoMo artifact 实际声明
+> `semantic_provenance=valid + provenance_granularity=turn + stable_ranking=valid`；但产品检索
+> 对象是 evolution 后的 current memory，sidecar id 不能证明它仍是原 dataset turn。
+> 在小修关闭前，所有 provenance-qrel retrieval metric 仍按 N/A 解释；旧 artifact 只按旧
+> adapter identity 回读，不得据其 `valid` stamp 补算 Recall/Precision/F1/NDCG。
 
 ## 接口调用面
 
@@ -27,11 +35,12 @@
   scoped retriever；clean retry 物理删除。
 - **B4 ✅**：content/role/speaker/caption 无损；typed time 走
   `turn → session → None`；formatted_memory 回带 time/context/keywords/tags。
-- **B5 ✅（retrieval metric=N/A）**：Chroma 检索对象是 evolution 后的当前
+- **B5 🟡（目标裁决仍为 retrieval metric=N/A；runtime stamp 待修）**：Chroma 检索对象是 evolution 后的当前
   `MemoryNote`，其 links/context/tags 已不是原始 dataset turn；即使 content/id/source time
   字段仍稳定，sidecar 也只能证明该 turn 参与过生成，不能把当前记忆重新解释成原始 evidence。
-  因此 Recall@K/Precision@K/NDCG 不运行、不报告；sidecar 只用于审计、HaluMem delta 与隔离
-  验货。
+  因此 Recall@K/Precision@K/F1/NDCG 不运行、不报告；sidecar 只用于审计、HaluMem delta 与
+  隔离验货。当前 adapter 的 `valid/turn` capability stamp 违反本裁决，重开范围仅限 B5/GRID；
+  不推翻 B1-B4/B6-B11，也不要求重烧 build smoke。
 - **B6 ✅**：add_note 同步完成 note 写入与 evolution；无待 flush 的 buffer。
 - **B7 ✅**：build LLM、embedding、retrieval 与 framework answer 真实 observation 可落盘。
 - **B8 ✅**：检索只读；官方 swallow-error 两处在 wrapper fail-fast；endpoint/timeout/retry 注入。

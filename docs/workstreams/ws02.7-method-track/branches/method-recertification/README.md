@@ -101,3 +101,8 @@ Letta/MemGPT、LangMem、EverOS）均已冻结；状态与证据从父级
 integration/frozen/ledger/dossier，只寻找 current source、官方 final payload 或 shared contract
 对冻结判词的实质反证。没有红线即保持 frozen；措辞与待办只作 `DOC_FIX/BACKLOG`，不得阻塞
 研究主线。
+
+2026-08-21 七行已核完：Letta/EverOS/Graphiti 保持 `UNCHANGED`，SimpleMem/MemOS 完成稳定
+文档勘误并把 upstream drift 留作 `BACKLOG`，LangMem 仅保留依赖刷新 backlog；唯一红点是
+**A-Mem B5/GRID**——runtime evidence stamp 错把 evolved current memory 宣称为 lossless turn。
+本支线只为该精确格保留一个小修断点，不重开七家 B1-B11，也不重烧真实 smoke。

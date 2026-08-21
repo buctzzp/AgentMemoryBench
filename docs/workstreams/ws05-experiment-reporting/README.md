@@ -42,6 +42,34 @@ created: 2026-07-05
   故障场景下的行为验证。
 - [ ] 断网/限流韧性测试（timeout/retry 兜底已实现，未做真实故障注入）。
 
+### 5×10 容量与共享资源治理（正式并发前；当前只登记，不开工）
+
+目标不是先造“全局单例容器”，而是先找出实际 RSS、CPU/GPU、I/O 与外部服务瓶颈，再只共享
+被证明 immutable、同 identity 且并发安全的资源。OmniMemEval 等第三方框架可作工程比较样本，
+不能替代本项目的算法身份、隔离与 artifact 判据。
+
+- [ ] **基线剖析**：对单 run、同 benchmark 多 method、跨 benchmark 并发分别记录 process tree、
+  RSS/PSS、page cache、dataset decode 次数、本地 model 实例数、GPU/CPU utilization、DB/HTTP
+  connection 数、queue depth 与吞吐；没有测量前不宣称“重复加载”是主瓶颈。
+- [ ] **dataset 共享边界**：区分 OS page cache、mmap/Arrow 只读页、Python materialized object 与
+  每题 private labels；候选共享仅限不可变 source/index，conversation crop、gold/private view 和
+  iterator cursor 必须 run-local。优先消除重复 decode/copy，而不是为省一份小对象引入跨 run
+  可变状态。
+- [ ] **embedding/model 服务边界**：只有 model/provider/revision/dimension/normalization/
+  instruction/device 完全同 identity，且 tokenizer/model backend 已证明 thread/process safe 时，
+  才允许同进程复用或建立带 batching/backpressure 的本地服务。十家 method 并不天然使用同一
+  embedding；统一模型本身是研究配置裁决，不能由性能层暗改。
+- [ ] **禁止盲目 singleton 的对象**：method memory/state、conversation namespace、mutable vector/
+  graph store、transaction、scheduler/lifecycle、非线程安全 tokenizer/client 均保持隔离；连接池
+  可以共享 transport，不等于共享业务状态。Spring Bean 的复用思想只适用于明确 stateless 或
+  受控生命周期对象，不能照搬成“一类只建一个实例”。
+- [ ] **资源调度器**：按 local embedding、GPU model、Docker/DB、API-only、W1-only 等资源类给
+  run 建 semaphore/配额与 admission control；5×10 是实验矩阵，不代表同时放行 50 个进程。
+  支持 bounded queue、背压、优雅取消、per-run timeout 与失败隔离。
+- [ ] **验收指标**：相同 run identity 下 payload/artifact/score 字节或语义守恒；峰值 RSS、模型
+  副本数、重复 decode、吞吐与故障影响面有前后对照；优化失败可回退，不把缓存命中变成新的
+  correctness 前提。
+
 ### 每周导师汇报支持（常态）
 
 - [ ] 每周从 roadmap/workstream 状态生成进度简报素材（放 `reports/`）。

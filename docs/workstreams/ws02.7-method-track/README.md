@@ -1,7 +1,7 @@
 ---
 id: ws02.7
 parent: ws02
-status: done（10 method frozen；5×10 smoke 矩阵闭合）
+status: in-progress（A-Mem B5/GRID 精确重开；5×10 smoke 矩阵仍闭合）
 created: 2026-07-12
 ---
 # ws02.7 Method Track M0
@@ -27,16 +27,19 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 禁止为恢复全局而全文读取历史账、全部 workstream 或两本经验手册。若本节与 Git
 冲突，以 Git 和最新 ruling 为准。
 
-- **稳定基线（2026-08-14）**：Phase 1 的 5 benchmark × 10 method 真实 smoke 矩阵与
-  B1-B11 已关闭；ws03
+- **稳定基线（2026-08-21）**：Phase 1 的 5 benchmark × 10 method 真实 smoke 矩阵仍
+  闭合；七家冻结后差量复核没有发现输入、隔离、lifecycle 或旧 smoke 失效。唯一新红点是
+  A-Mem runtime `RetrievalEvidence` 与既有 evolved-memory qrel=N/A 裁决矛盾，只重开
+  B5/GRID，不重烧 API。ws03
   [结构归一 M0](../ws03-architecture-slimming/notes/2026-07-23-structural-normalization-m0-ruling.md)
   已通过守恒门；最后关闭的 EverOS v1.2.3 产品轨完成 18 份 fresh v6 run、35 个
   question/conversation、全部适用 W1/W2 与 artifact/效率/隐私/state 门。最新全量为
   `2158 passed, 3 deselected, 13 warnings, 29 subtests passed in 147.45s`；compileall exit 0。
-- **当前动作**：**ws02.7 method track 已完成，不再继续接入或重烧 smoke**。压缩恢复只读
-  [EverOS frozen-v1](branches/method-recertification/everos/notes/everos-frozen-v1.md) 核对最后关闭项；
-  下一阶段由 roadmap 新 workstream 承接成本 pilot、指标扩展、作者校准或 official-full，未获
-  用户预算/范围批准不得自动启动。
+- **当前动作**：读取
+  [七家冻结后差量核对](branches/method-recertification/notes/seven-method-post-freeze-delta-review.md)
+  §5.2，仅关闭 **A-Mem B5/GRID evidence eligibility**：把 runtime capability stamp 与 N/A
+  裁决对齐，补零 API 强反例并对表。禁止重开其他 method、其他 B 门或真实 smoke；关闭后
+  ws02.7 恢复 done，后续容量/成本工程仍由 paused ws05 承接。
 - **冻结后 runtime 更新（2026-08-21）**：新 smoke 已在 run 创建前从 Muse 改判为
   `opencodego/mimo-v2.5`；Muse 真调用出现 HTTP 成功但空 choice，旧 Muse/DeepSeek artifact
   仍按各自模型槽精确回读。该更新不重写既有 frozen run，见
@@ -137,7 +140,7 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 | LightMem | `method-frozen-v3` | [frozen-v3](branches/method-recertification/lightmem/notes/lightmem-frozen-v3.md) | online-soft；pair lineage 资格按 benchmark；forced flush 已修 |
 | Mem0 | `method-frozen-v2` | [frozen-v2](branches/method-recertification/mem0/notes/mem0-frozen-v2.md) | V3 singleton 合法；LoCoMo speaker 映射；turn/session provenance 分格 |
 | MemoryOS | `method-frozen-v1` | [frozen-v1](branches/method-recertification/memoryos/notes/memoryos-frozen-v1.md) | STM + ranked MTM Recall；HaluMem extraction N/A |
-| A-Mem | `method-frozen-v1` | [frozen-v1](branches/method-recertification/amem/notes/amem-frozen-v1.md) | evolution 后 current memory；Recall/Precision/NDCG N/A |
+| A-Mem | `v1 build；B5/GRID reopened` | [frozen-v1 + 2026-08-21 勘误](branches/method-recertification/amem/notes/amem-frozen-v1.md) | evolution 后 current memory；qrel 指标目标=N/A；runtime `valid/turn` stamp 待修 |
 | SimpleMem | `method-frozen-v1` | [frozen-v1](branches/method-recertification/simplemem/notes/simplemem-frozen-v1.md) | 合成 MemoryEntry；provenance N/A；build 串行 |
 | MemOS | `method-frozen-v1` | [frozen-v1](branches/method-recertification/memos/notes/memos-frozen-v1.md) | typed product handlers；LoCoMo 双视角；framework W2 N/A |
 | Letta/MemGPT | `method-frozen-v1` | [frozen-v1](branches/method-recertification/letta/notes/letta-frozen-v1.md) | sleeptime core blocks；W1-only；11 run/17 question；retrieval/extraction N/A |
@@ -145,8 +148,9 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
 | EverOS | `method-frozen-v1` | [frozen-v1](branches/method-recertification/everos/notes/everos-frozen-v1.md) | typed product lifespan；18 run/35 question；Episode provenance N/A；MemBench100k unsupported；croppable W2 |
 | Graphiti | `method-frozen-v1` | [frozen-v1](branches/method-recertification/graphiti/notes/graphiti-frozen-v1.md) | Graphiti OSS 非 Zep；18 run/35 question/88 episode；W1/W2；MemBench 100k N/A |
 
-尚未冻结：**无**。Supermemory 的 source-blocked ledger/note 保留为历史判例，不再占 Phase 1
-格子；Phase 1 第十格由 Graphiti OSS 占据。
+尚未关闭：**仅 A-Mem B5/GRID evidence eligibility**。这不撤销 5×10 smoke 矩阵、A-Mem
+产品 build 或其他九家 frozen；Supermemory 的 source-blocked ledger/note 保留为历史判例，
+不再占 Phase 1 格子，Phase 1 第十格由 Graphiti OSS 占据。
 
 ## 现行长期裁决
 

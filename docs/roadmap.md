@@ -27,7 +27,10 @@ EverOS）均已完成全部可行格的真实 smoke 与 B1-B11；5×10 smoke 矩
 unsupported 留痕，不为填格伪造能力。
 LightMem=`method-frozen-v3`，Mem0=`method-frozen-v2`，MemoryOS/A-Mem/SimpleMem=
 `method-frozen-v1`。A-Mem 与 SimpleMem 各完成 11 个正式真实 run；前者检索 evolution 后
-current memory，后者检索合成 MemoryEntry，turn-evidence retrieval metric 均诚实 N/A。
+current memory，后者检索合成 MemoryEntry，turn-evidence retrieval metric 的研究裁决均为 N/A。
+2026-08-21 冻结后轻量差量审计发现 A-Mem adapter/test/旧 artifact 的 runtime capability
+stamp 实际为 `valid/turn`，与该 N/A 裁决矛盾；只重开 A-Mem B5/GRID 做零 API 小修，
+不撤销其 product build、既有 smoke 或 5×10 矩阵。
 逐题 RetrievalEvidence 与 Gold Evidence Group 已让 LoCoMo/MemBench/LME 的有效 Recall 和
 BEAM/HaluMem 的 N/A、stable ranking 的 pending 进入 artifact，不为填矩阵硬算。
 
@@ -64,7 +67,8 @@ Letta/Graphiti 403 run 只保留作失败阶段证据，不冒充可 resume smok
 [结构归一 M0](workstreams/ws03-architecture-slimming/notes/2026-07-23-structural-normalization-m0-ruling.md)
 已完成 evaluator/prompt/文档的零语义迁移与全量守恒门；MemOS 随后已冻结，
 registry-backed `plan-smoke` preflight 与新 method ledger v1 强制门也已关闭；Graphiti、Letta 与
-LangMem、EverOS 均已完成真实 B11 与冻结对表。ws02.7 method-track 至此关闭。2026-08-14 用户
+LangMem、EverOS 均已完成真实 B11 与冻结对表。ws02.7 原于此关闭；2026-08-21 因 A-Mem
+B5 runtime evidence stamp 的精确反例临时重开，修复范围不含真实 smoke。2026-08-14 用户
 已选择并完成：成本 pilot/ws05 暂缓期间执行 ws03 maintainability M1；live 文档/依赖方向、
 TOML profile、共享 worker transport、prediction 编排与 legacy 退役五批均已关闭；新实验只保留
 provider v3 + 通用 prediction，registry 已完成责任审计。M1 全程零真实 API，ws03 已完成。
@@ -84,7 +88,7 @@ stdout/stderr 与 JSON-lines worker stderr 脱敏落盘；最终无 API 全量 2
 | [ws02.4](workstreams/ws02.4-simplemem/README.md) | simplemem-adapter | accepted | P0 | 历史 T1-T6 已关闭；current text product 的五格重认证与 frozen-v1 见 ws02.7 |
 | [ws02.5](workstreams/ws02.5-method-interface-audit/README.md) | method-interface-audit | done | P0 | 2026-07-09 关闭：5 method 接口审计 + MemoryOS 迁移 + 当时配置归一化；shared embedder 资产保留为 controlled，ws02.7 现审计 product-default 精确身份与迁移/复证面 |
 | [ws02.6](workstreams/ws02.6-first-smoke-hardening/README.md) | first-smoke-hardening | done | P0 | 五 benchmark 全部 frozen-v1 + B6 横向总验收完成（2026-07-12）；method 侧已转 ws02.7 |
-| [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | done | P0 | Phase 1 十家 method 均 frozen；5×10 smoke matrix closed |
+| [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | in-progress | P0 | 5×10 smoke matrix closed；仅 A-Mem B5/GRID runtime evidence eligibility 精确重开 |
 | [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | done | P0 | M1-A→E 已关闭：依赖方向、TOML profile、worker transport、prediction 拆责与 legacy 退役 |
 | [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | done | P0 | isolated heartbeat 与第三方输出治理已关闭；完整诊断进 method.log |
 | [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | paused | P1 | ws03 已完成；用户本轮仍要求暂停成本 pilot，返回后再显式恢复 |

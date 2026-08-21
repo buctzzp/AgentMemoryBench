@@ -248,7 +248,7 @@ metadata 标记 `reference_time_effect="declared_but_unwired_v2.0.25"`；
 | HaluMem QA | `valid`，真实 smoke 已通过 |
 | HaluMem extraction | `N/A`（async `MEM_READ` 未公开 task-scoped fine output） |
 | HaluMem update | evaluator contract `valid`；本次极小 smoke 因 7 个 current-state probe 全部 zero-hit，结果诚实为 `N/A/no_nonempty_retrieval` |
-| HaluMem memory type | `N/A`（MemOS `Working/LongTerm/User/Outer` ≠ Event/Persona/Relationship） |
+| HaluMem memory type | `N/A`（复合 evaluator 继承 upstream extraction 的 N/A；其 Event/Persona/Relationship 是 gold-side 分组，不要求 method 使用同名 taxonomy） |
 
 逐题 `RetrievalEvidence` 一律：
 
@@ -363,7 +363,8 @@ current v4 结果：
 
 - MMR/rerank stable ranking；
 - window-generated memory 的 semantic provenance 与 Recall/NDCG 资格；
-- HaluMem session-local extraction output 与 benchmark Event/Persona/Relationship type；
+- HaluMem session-local extraction output；memory-type 会按 composite contract 继承该 upstream
+  extraction 资格，不另要求 MemOS 暴露 Event/Persona/Relationship taxonomy；
 - HaluMem update 的非空 current-state 命中尚未由极小 smoke 覆盖；这不把 zero-hit
   改写成 0 分，也不影响 QA 已验证；
 - author LoCoMo 的 preference/top-k/server-env/paper-number parity；
