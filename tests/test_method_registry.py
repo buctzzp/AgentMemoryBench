@@ -52,6 +52,23 @@ def test_registry_lists_conversation_qa_methods() -> None:
     ]
 
 
+@pytest.mark.parametrize("method_name", list_methods())
+def test_pilot_profile_reuses_smoke_section_with_distinct_public_identity(
+    method_name: str,
+) -> None:
+    """十家 pilot 只复用 smoke TOML 参数，不伪造第三份算法 section。"""
+
+    resolved = resolve_method_profile(
+        method_name,
+        "pilot",
+        project_root=load_path_settings().project_root,
+    )
+
+    assert resolved.public_name == "pilot"
+    assert resolved.section_name == "smoke"
+    assert resolved.config.profile_name == "smoke"
+
+
 def test_mem0_registration_declares_capabilities_factory_and_api_boundary() -> None:
     """Mem0 registration 应声明通用能力和 factory，不持有运行期 secret。"""
 
@@ -64,7 +81,9 @@ def test_mem0_registration_declares_capabilities_factory_and_api_boundary() -> N
             MethodCapability.MEMORY_RETRIEVAL,
         }
     )
-    assert registration.profile_names == frozenset({"smoke", "official-full"})
+    assert registration.profile_names == frozenset(
+        {"smoke", "pilot", "official-full"}
+    )
     assert registration.requires_api is True
     assert registration.profile_relative_path == Path("configs/methods/mem0.toml")
     assert registration.system_factory is not None
@@ -102,7 +121,9 @@ def test_memoryos_registration_uses_generic_contract() -> None:
     registration = get_method_registration("memoryos")
 
     assert registration.config_type is MemoryOSPaperConfig
-    assert registration.profile_names == frozenset({"smoke", "official-full"})
+    assert registration.profile_names == frozenset(
+        {"smoke", "pilot", "official-full"}
+    )
     assert registration.task_families == frozenset({TaskFamily.CONVERSATION_QA})
     assert registration.provided_capabilities == frozenset(
         {
@@ -120,7 +141,9 @@ def test_simplemem_registration_declares_text_backend_contract() -> None:
     registration = get_method_registration("simplemem")
 
     assert registration.config_type is SimpleMemConfig
-    assert registration.profile_names == frozenset({"smoke", "official-full"})
+    assert registration.profile_names == frozenset(
+        {"smoke", "pilot", "official-full"}
+    )
     assert registration.task_families == frozenset({TaskFamily.CONVERSATION_QA})
     assert registration.provided_capabilities == frozenset(
         {
@@ -299,7 +322,9 @@ def test_graphiti_registration_declares_direct_core_product_contract() -> None:
     )
 
     assert isinstance(config, GraphitiConfig)
-    assert registration.profile_names == frozenset({"smoke", "official-full"})
+    assert registration.profile_names == frozenset(
+        {"smoke", "pilot", "official-full"}
+    )
     assert registration.profile_relative_path == Path("configs/methods/graphiti.toml")
     assert registration.requires_api is True
     assert registration.allow_smoke_worker_override is True
@@ -339,7 +364,9 @@ def test_letta_registration_declares_sleeptime_product_contract() -> None:
     )
 
     assert isinstance(config, LettaConfig)
-    assert registration.profile_names == frozenset({"smoke", "official-full"})
+    assert registration.profile_names == frozenset(
+        {"smoke", "pilot", "official-full"}
+    )
     assert registration.profile_relative_path == Path("configs/methods/letta.toml")
     assert registration.requires_api is True
     assert registration.allow_smoke_worker_override is False
@@ -364,7 +391,9 @@ def test_langmem_registration_declares_background_product_contract() -> None:
     )
 
     assert isinstance(config, LangMemConfig)
-    assert registration.profile_names == frozenset({"smoke", "official-full"})
+    assert registration.profile_names == frozenset(
+        {"smoke", "pilot", "official-full"}
+    )
     assert registration.profile_relative_path == Path("configs/methods/langmem.toml")
     assert registration.requires_api is True
     assert registration.allow_smoke_worker_override is True
@@ -401,7 +430,9 @@ def test_everos_registration_declares_typed_product_session_contract() -> None:
     )
 
     assert isinstance(config, EverOSConfig)
-    assert registration.profile_names == frozenset({"smoke", "official-full"})
+    assert registration.profile_names == frozenset(
+        {"smoke", "pilot", "official-full"}
+    )
     assert registration.profile_relative_path == Path("configs/methods/everos.toml")
     assert registration.requires_api is True
     assert registration.allow_smoke_worker_override is True
@@ -746,7 +777,9 @@ def test_memos_registration_declares_product_typed_handler_contract() -> None:
     registration = get_method_registration("memos")
 
     assert registration.config_type is MemOSConfig
-    assert registration.profile_names == frozenset({"smoke", "official-full"})
+    assert registration.profile_names == frozenset(
+        {"smoke", "pilot", "official-full"}
+    )
     assert registration.protocol_version == "v3"
     assert registration.profile_relative_path == Path("configs/methods/memos.toml")
     assert registration.requires_api is True
@@ -828,7 +861,7 @@ def test_memos_profiles_only_differ_in_budget_model_and_are_both_serial() -> Non
     official_fields = dataclasses.asdict(official)
     assert smoke_fields.pop("profile_name") == "smoke"
     assert official_fields.pop("profile_name") == "official_full"
-    assert smoke_fields.pop("llm_model") == "mimo-v2.5"
+    assert smoke_fields.pop("llm_model") == "ox-alpha-free"
     assert official_fields.pop("llm_model") == "gpt-4o-mini"
     assert smoke_fields == official_fields
     assert smoke.max_workers == 1
@@ -864,8 +897,8 @@ def test_memos_manifest_carries_adapter_version_and_no_absolute_paths() -> None:
     assert manifest["adapter_version"] == "memos-v2.0.25-product-v4"
     assert manifest["implementation_identity"] == "typed-product-handler"
     assert manifest["build_llm_response_contract"] == (
-        "provider-aware-v1:"
-        "opencodego=json_object+thinking_disabled;"
+        "provider-aware-v2:"
+        "opencodego=model_aware_json_reasoning_control;"
         "primary=provider_default"
     )
     assert manifest["reference_time_effect"] == "declared_but_unwired_v2.0.25"

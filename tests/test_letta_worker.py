@@ -121,7 +121,10 @@ def test_letta_worker_opencodego_transport_disables_thinking_without_mutation() 
     """opencodego 只追加 transport override，不原地修改上游请求。"""
 
     engine = _WorkerEngine()
-    engine.config = {"provider": "opencodego"}
+    engine.config = {
+        "provider": "opencodego",
+        "llm_model": "mimo-v2.5",
+    }
     request: dict[str, Any] = {
         "model": "mimo-v2.5",
         "messages": [{"role": "user", "content": "hello"}],
@@ -139,6 +142,26 @@ def test_letta_worker_opencodego_transport_disables_thinking_without_mutation() 
         },
     }
     assert request["extra_body"] == {"existing": "kept"}
+
+
+def test_letta_worker_ox_transport_uses_low_reasoning_without_mutation() -> None:
+    """ox runtime 使用 reasoning_effort=low，并保留上游 request。"""
+
+    engine = _WorkerEngine()
+    engine.config = {
+        "provider": "opencodego",
+        "llm_model": "ox-alpha-free",
+    }
+    request: dict[str, Any] = {
+        "model": "ox-alpha-free",
+        "messages": [],
+    }
+
+    assert engine._transport_request(request) == {
+        **request,
+        "reasoning_effort": "low",
+    }
+    assert "reasoning_effort" not in request
 
 
 def test_letta_worker_primary_transport_is_semantics_preserving() -> None:

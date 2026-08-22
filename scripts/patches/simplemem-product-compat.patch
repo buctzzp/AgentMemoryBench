@@ -61,3 +61,10 @@ index a92e51f..f5eb30b 100644
 +                        i,
 +                        round_num
 +                    )
+diff --git a/simplemem/core/utils/llm_client.py b/simplemem/core/utils/llm_client.py
+index 508885b..5ad7684 100644
+--- a/simplemem/core/utils/llm_client.py
++++ b/simplemem/core/utils/llm_client.py
+@@ -32 +32 @@ class LLMClient:
+-            print(f"Using custom OpenAI base URL: {self.base_url}")
++            print("Using custom OpenAI base URL: [configured]")

@@ -61,7 +61,7 @@ def _write_memoryos_profiles(project_root: Path) -> None:
         """
 [smoke]
 answer_builder = "benchmark"
-llm_model = "mimo-v2.5"
+llm_model = "ox-alpha-free"
 embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
 short_term_capacity = 1
 mid_term_capacity = 2000
@@ -369,7 +369,7 @@ def _openai_settings() -> OpenAISettings:
     return OpenAISettings(
         api_key="sk-test",
         base_url="https://example.invalid/v1",
-        model="mimo-v2.5",
+        model="ox-alpha-free",
         provider="opencodego",
         judge_transport="chat_completions",
     )
@@ -604,7 +604,7 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
     # LoCoMo reader 参数由 benchmark 统一冻结，不能继续沿用 MemoryOS 旧 profile。
     assert captured["method_manifest"] == {
         "answer_reader": {
-            "answer_model": "mimo-v2.5",
+            "answer_model": "ox-alpha-free",
             "answer_parameters": {
                 "message_role": "user",
                 "temperature": 0.0,
@@ -619,10 +619,10 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
             "api_runtime": {
                 "contract_version": "v2",
                 "provider": "opencodego",
-                "model": "mimo-v2.5",
+                "model": "ox-alpha-free",
                 "answer_transport": "chat_completions",
                 "judge_transport": "chat_completions",
-                "thinking_mode": "disabled",
+                "thinking_mode": "reasoning_effort_low",
             },
             "provider_compatibility": "opencodego_locomo_explicit_completion_cap_4096_v3",
         },

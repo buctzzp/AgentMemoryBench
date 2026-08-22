@@ -1,12 +1,12 @@
 # MemoryOS 通用产品（memoryos-pypi）引擎的固定方法参数。
-# 2026-08-21 起 smoke API runtime 为 opencodego/mimo-v2.5；
+# 2026-08-21 起 smoke API runtime 为 opencodego/ox-alpha-free；
 # official_full 仍是 primary/gpt-4o-mini，历史 smoke 身份不改写。
 # 参数取 memoryos-pypi 官方默认（memoryos.py:30-44），与旧 eval/ LoCoMo 调参不同。
 # 迁移背景见 docs/workstreams/ws02.5-method-interface-audit/plan-memoryos-migration.md。
 
 [smoke]
 answer_builder = "benchmark"
-llm_model = "mimo-v2.5"
+llm_model = "ox-alpha-free"
 embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
 short_term_capacity = 10
 mid_term_capacity = 2000

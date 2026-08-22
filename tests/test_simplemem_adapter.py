@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -193,6 +194,9 @@ def test_simplemem_real_text_product_imports_and_native_fts_works(
     )
 
     assert completed.returncode == 0, completed.stderr
+    assert "Using custom OpenAI base URL: [configured]" in (
+        product_root / "simplemem" / "core" / "utils" / "llm_client.py"
+    ).read_text(encoding="utf-8")
 
 
 def test_simplemem_provider_skeleton_declares_protocol_shape(tmp_path: Path) -> None:
@@ -706,6 +710,83 @@ def test_simplemem_llm_client_wrapper_records_usage_in_active_scope(
     assert llm_records[0].token_measurement_source.value == "tokenizer_estimate"
     assert llm_records[0].input_tokens > 0
     assert llm_records[0].output_tokens > 0
+
+
+def test_simplemem_raw_client_observer_prefers_exact_api_usage(
+    tmp_path: Path,
+) -> None:
+    """真实产品 raw response 有 usage 时不得退回 tokenizer 估算。"""
+
+    response = SimpleNamespace(
+        usage=SimpleNamespace(prompt_tokens=17, completion_tokens=5),
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content='{"answer": "ok"}')
+            )
+        ],
+    )
+
+    class FakeCompletions:
+        """返回带 exact usage 的 Chat Completions fake。"""
+
+        def create(self, **_kwargs: object) -> object:
+            """返回稳定 response。"""
+
+            return response
+
+    class FakeRawLLMClient:
+        """模拟 SimpleMem 官方 LLMClient 对 raw client 的消费。"""
+
+        def __init__(self) -> None:
+            """构造带 chat.completions.create 的 raw client。"""
+
+            self.client = SimpleNamespace(
+                chat=SimpleNamespace(completions=FakeCompletions())
+            )
+
+        def chat_completion(
+            self,
+            messages: list[dict[str, str]],
+            **_kwargs: object,
+        ) -> str:
+            """调用 raw client 并返回产品消费的文本。"""
+
+            raw = self.client.chat.completions.create(
+                model="ox-alpha-free",
+                messages=messages,
+            )
+            return str(raw.choices[0].message.content)
+
+    system = FakeSimpleMemSystem(
+        isolation_key="run-1_conv-1",
+        state_dir=tmp_path,
+    )
+    system.llm_client = FakeRawLLMClient()
+    collector = EfficiencyCollector(run_id="simplemem-exact-usage", enabled=True)
+    provider = SimpleMem(
+        config=_config(llm_model="ox-alpha-free"),
+        path_settings=load_path_settings(),
+        storage_root=tmp_path,
+        system_factory=lambda _isolation_key, _state_dir: system,
+        efficiency_collector=collector,
+    )
+
+    with collector.conversation_scope("conv-1") as scope:
+        provider._install_llm_usage_observation(system)
+        assert system.llm_client.chat_completion(
+            [{"role": "user", "content": "extract memory"}]
+        ) == '{"answer": "ok"}'
+        collector.record_memory_build_total_latency(latency_ms=1.0)
+
+    llm_records = [
+        record
+        for record in scope.records
+        if getattr(record, "model_id", None) == SIMPLEMEM_LLM_MODEL_ID
+    ]
+    assert len(llm_records) == 1
+    assert llm_records[0].input_tokens == 17
+    assert llm_records[0].output_tokens == 5
+    assert llm_records[0].token_measurement_source.value == "api_usage"
 
 
 def test_simplemem_embedding_wrapper_records_actual_calls_in_active_scope(

@@ -61,8 +61,8 @@ LANGMEM_REQUIREMENTS_LOGICAL_PATH = "scripts/requirements/langmem-runtime.txt"
 LANGMEM_SOURCE_MODE = "vendored-langmem-plus-isolated-product-wrapper"
 LANGMEM_NAMESPACE_ALGORITHM = "sha256(langmem-background-product-v1|isolation_key)[:32]"
 LANGMEM_BUILD_LLM_RESPONSE_CONTRACT = (
-    "provider-aware-v1:"
-    "opencodego=chat_completions+thinking_disabled;"
+    "provider-aware-v2:"
+    "opencodego=chat_completions+model_aware_reasoning;"
     "primary=chat_completions+provider_default;"
     "exact_usage_required"
 )

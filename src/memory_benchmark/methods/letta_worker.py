@@ -28,6 +28,7 @@ _EXPECTED_TOOLS = frozenset(
     }
 )
 _SUCCESS_STOP_REASONS = frozenset({"end_turn", "tool_rule"})
+_OPENCODEGO_REASONING_EFFORT_LOW_MODELS = frozenset({"ox-alpha-free"})
 
 
 class _RuntimeSecretRedactionFilter(logging.Filter):
@@ -267,9 +268,17 @@ class _WorkerEngine:
 
         copied = dict(request_data)
         if self.config["provider"] == "opencodego":
-            extra_body = dict(copied.get("extra_body") or {})
-            extra_body["thinking"] = {"type": "disabled"}
-            copied["extra_body"] = extra_body
+            if self.config["llm_model"] in _OPENCODEGO_REASONING_EFFORT_LOW_MODELS:
+                existing = copied.get("reasoning_effort")
+                if existing not in {None, "low"}:
+                    raise RuntimeError(
+                        "Letta caller supplied conflicting reasoning_effort"
+                    )
+                copied["reasoning_effort"] = "low"
+            else:
+                extra_body = dict(copied.get("extra_body") or {})
+                extra_body["thinking"] = {"type": "disabled"}
+                copied["extra_body"] = extra_body
         return copied
 
     def _capture_usage(self, response: dict[str, Any]) -> None:

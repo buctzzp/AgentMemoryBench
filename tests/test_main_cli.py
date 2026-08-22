@@ -1422,6 +1422,101 @@ def test_main_maps_predict_smoke_v2_arguments_to_command(
     ]
 
 
+def test_main_maps_predict_pilot_to_complete_isolation_smoke_section(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pilot 应选择公开 pilot identity，不暴露任何 history/question 裁剪轴。"""
+
+    received: list[PredictCommand] = []
+    monkeypatch.setattr(
+        main_cli,
+        "execute_predict",
+        lambda command: received.append(command)
+        or SimpleNamespace(run_id="pilot-run"),
+    )
+
+    exit_code = main_cli.main(
+        [
+            "predict",
+            "pilot",
+            "--root",
+            str(tmp_path),
+            "--method",
+            "mem0",
+            "--benchmark",
+            "longmemeval",
+            "--variant",
+            "m_cleaned",
+            "--run-id",
+            "pilot-run",
+            "--allow-api",
+            "--workers",
+            "2",
+        ]
+    )
+
+    assert exit_code == 0
+    assert received == [
+        PredictCommand(
+            project_root=tmp_path,
+            method="mem0",
+            benchmark="longmemeval",
+            profile="pilot",
+            variant="m_cleaned",
+            run_id="pilot-run",
+            confirm_api=True,
+            confirm_full=True,
+            smoke_turn_limit=1,
+            smoke_round_limit=None,
+            smoke_conversation_limit=1,
+            smoke_max_workers=2,
+            question_limit_per_conversation=None,
+            output_layout="hierarchical",
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [
+        ("--rounds", "1"),
+        ("--conversations", "1"),
+        ("--questions-per-conversation", "1"),
+        ("--conversation-budget", "1"),
+        ("--membench-sources", "first_high"),
+    ],
+)
+def test_predict_pilot_rejects_shape_overrides(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    flag: str,
+    value: str,
+) -> None:
+    """pilot 的完整 isolation 形状不得被 CLI crop 旋钮悄悄改写。"""
+
+    exit_code = main_cli.main(
+        [
+            "predict",
+            "pilot",
+            "--root",
+            str(tmp_path),
+            "--method",
+            "mem0",
+            "--benchmark",
+            "membench",
+            "--allow-api",
+            flag,
+            value,
+        ]
+    )
+
+    assert exit_code == 2
+    assert "predict pilot owns its complete-isolation shape" in (
+        capsys.readouterr().err
+    )
+
+
 def test_main_locomo_smoke_defaults_round_limit_from_registered_policy(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

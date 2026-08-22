@@ -60,6 +60,10 @@ from memory_benchmark.core.provider_protocol import (
     UnitRef,
 )
 from memory_benchmark.methods.image_text import turn_text_with_images
+from memory_benchmark.methods.openai_transport import (
+    merge_chat_completions_request_overrides,
+    with_chat_completions_request_overrides,
+)
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     EfficiencyStage,
@@ -168,11 +172,11 @@ class Mem0Config:
         """
 
         return cls(
-            extraction_model="mimo-v2.5",
+            extraction_model="ox-alpha-free",
             embedding_model="sentence-transformers/all-MiniLM-L6-v2",
             embedding_dimensions=384,
             embedding_provider="huggingface",
-            reader_model="mimo-v2.5",
+            reader_model="ox-alpha-free",
             top_k=20,
             max_workers=1,
             ingestion_chunk_size=1,
@@ -359,10 +363,18 @@ class Mem0(BaseMemoryProvider, BaseResumableMemorySystem, MemoryProvider):
             self.storage_root.mkdir(parents=True, exist_ok=True)
             memory_backend = self._create_memory_backend(settings)
             self._prewarm_entity_store(memory_backend)
+        self._chat_request_overrides = (
+            settings.chat_completions_request_overrides()
+            if settings is not None
+            else {}
+        )
         if reader_client is None:
             if settings is None:
                 raise ConfigurationError("Mem0 reader requires OpenAI settings")
-            reader_client = OpenAI(**settings.to_client_kwargs())
+            reader_client = with_chat_completions_request_overrides(
+                OpenAI(**settings.to_client_kwargs()),
+                self._chat_request_overrides,
+            )
 
         self._memory = memory_backend
         self._reader = reader_client
@@ -424,16 +436,21 @@ class Mem0(BaseMemoryProvider, BaseResumableMemorySystem, MemoryProvider):
         if config.embedding_provider == "openai":
             embedder_config["api_key"] = openai_settings.api_key
             embedder_config["openai_base_url"] = openai_settings.base_url
+        llm_config: dict[str, Any] = {
+            "model": config.extraction_model,
+            "temperature": 0.1,
+            "api_key": openai_settings.api_key,
+            "openai_base_url": openai_settings.base_url,
+        }
+        request_overrides = openai_settings.chat_completions_request_overrides()
+        reasoning_effort = request_overrides.get("reasoning_effort")
+        if isinstance(reasoning_effort, str):
+            llm_config["reasoning_effort"] = reasoning_effort
         return {
             "version": "v1.1",
             "llm": {
                 "provider": "openai",
-                "config": {
-                    "model": config.extraction_model,
-                    "temperature": 0.1,
-                    "api_key": openai_settings.api_key,
-                    "openai_base_url": openai_settings.base_url,
-                },
+                "config": llm_config,
             },
             "embedder": {
                 "provider": config.embedding_provider,
@@ -1147,13 +1164,23 @@ class Mem0(BaseMemoryProvider, BaseResumableMemorySystem, MemoryProvider):
         if collector is not None and collector.enabled:
             with collector.operation_stage(EfficiencyStage.ANSWER):
                 response = self._reader.chat.completions.create(
-                    model=self.config.reader_model,
-                    messages=reader_messages,
+                    **merge_chat_completions_request_overrides(
+                        {
+                            "model": self.config.reader_model,
+                            "messages": reader_messages,
+                        },
+                        self._chat_request_overrides,
+                    )
                 )
         else:
             response = self._reader.chat.completions.create(
-                model=self.config.reader_model,
-                messages=reader_messages,
+                **merge_chat_completions_request_overrides(
+                    {
+                        "model": self.config.reader_model,
+                        "messages": reader_messages,
+                    },
+                    self._chat_request_overrides,
+                )
             )
         answer_latency_ms = _elapsed_ms(answer_started_ns)
         answer = self._extract_reader_answer(response)

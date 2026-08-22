@@ -6,7 +6,7 @@
 > 与 B5 的 N/A 裁决矛盾；现已把 semantic provenance 改为 N/A/none，同时独立保留
 > stable product ranking=valid，B5/GRID 小修关闭且无需重烧 build smoke。
 >
-> 2026-08-21 后的新 smoke 改用 `opencodego/mimo-v2.5`；既有冻结 run 仍按
+> 当前新 smoke/ws05 pilot 使用 `opencodego/ox-alpha-free`；既有冻结 run 仍按
 > `gpt-4o-mini` 历史身份解释。现行运行身份见
 > [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
 
@@ -59,6 +59,10 @@ list batch：框架五格均以 `TurnEvent` 调一次 `ingest()`，每个真实�
   仍独立为 valid，不推翻 B1-B4/B6-B11，也不要求重烧 build smoke。
 - **B6 ✅**：add_note 同步完成 note 写入与 evolution；无待 flush 的 buffer。
 - **B7 ✅**：build LLM、embedding、retrieval 与 framework answer 真实 observation 可落盘。
+  2026-08-21 的 ox 真实 run `ws05-ox-p1-amem-locomo-r2` 已证明 memory-build 与 answer
+  均读取 SDK `response.usage`，而不是把 tokenizer estimate 当 API 真值。ox 对
+  `json_schema` 的“HTTP 成功但不遵守 schema”仅在 A-Mem 发送边界降为 `json_object`；
+  prompt、分析字段与其他 provider 保持不变。
 - **B8 ✅**：检索只读；官方 swallow-error 两处在 wrapper fail-fast；endpoint/timeout/retry 注入。
 - **B9 ✅**：`gpt-4o-mini` + product-default MiniLM-384/Chroma cosine；revision 诚实 unpinned。
 - **B10 ✅**：主 TOML 跨五 benchmark 固定；作者 LoCoMo builder/复现参数不混入主表。

@@ -4,7 +4,7 @@
 >
 > 状态：**B1-B11 已按 current text product 重认证，`method-frozen-v1`。**
 >
-> 2026-08-21 后的新 smoke 改用 `opencodego/mimo-v2.5`；既有冻结 run 仍按
+> 当前新 smoke/ws05 pilot 使用 `opencodego/ox-alpha-free`；既有冻结 run 仍按
 > `gpt-4o-mini` 历史身份解释。现行运行身份见
 > [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
 
@@ -54,6 +54,11 @@ ThirdAgent 与 BEAM orphan 都逐 turn 原样写入，不造 placeholder。
   `previous_entries` 的链式依赖。检索阶段的 multi-query parallelism 属官方 Stage 3，
   与 build 连贯性无关，继续启用。
 - **B7 ✅**：memory LLM、embedding、retrieval 与 framework answer 真实 observation 可落盘。
+  官方 LLM client 使用 streaming；共享 transport 会请求 usage 尾块，并在完整消费后把
+  SDK 精确 usage 记为 `api_usage`。真实 run `ws05-ox-p1-simplemem-locomo-r3` 已观测到
+  9 次 LLM 调用，memory-build、retrieval、answer 均为 exact usage；tokenizer estimate
+  只保留给没有 raw SDK response 的 fake/兼容 client。官方构造器打印 custom base URL 的
+  行为已用可复现 patch 改为 `[configured]`，避免 terminal log 泄露 endpoint。
 - **B8 ✅**：hybrid retrieval 不写 memory；endpoint/timeout/product retry 映射已锁强反例。
 - **B9 ✅（controlled）**：当前主 build 为 MiniLM-384/internal-L2 + LanceDB L2；不是官方
   Qwen3 product-default，manifest 不冒充。

@@ -10,16 +10,23 @@
 
 | run profile | provider | model | answer transport | judge transport | 用途 |
 | --- | --- | --- | --- | --- | --- |
-| `smoke` | `opencodego` | `mimo-v2.5` | Chat Completions | Chat Completions | 最低预算流通与接口验证 |
+| `smoke` | `opencodego` | `ox-alpha-free` | Chat Completions | Chat Completions | 极小裁剪的流通验证 |
+| `pilot` | `opencodego` | `ox-alpha-free` | Chat Completions | Chat Completions | 一个完整 isolation 的调用拓扑与成本 observation |
 | `official_full` | `primary` | `gpt-4o-mini` | Chat Completions | Responses；官方 evaluator 自带 Chat 路径时保持其路径 | 主配置正式实验 |
 
 这是**运行身份差异**，不是暗中 fallback。新 `smoke` 与旧
-历史 `deepseek-v4-flash`/`muse-spark-1.2-contributor` smoke、旧 `gpt-4o-mini` smoke 与
+历史 `deepseek-v4-flash`/`muse-spark-1.2-contributor`/`mimo-v2.5` smoke、旧 `gpt-4o-mini` smoke 与
 `official_full` 的分数均不得
 直接比较；smoke 只证明当前 method、
 benchmark、artifact、resume 和 evaluator 链路在声明的 provider/model 上可运行。
 非 LLM 的 embedding、检索深度、update、summary、storage 等 method 参数不因 provider
 切换而改变。
+
+`pilot` 是公开运行范围，不是第三套 method 算法参数：它复用各 method TOML 的
+`[smoke]` section，但在 manifest 中独立盖 `run_scope=pilot`，输出也进入 `pilot/`
+目录。它保留一个完整 isolation 及其全部问题，不允许再传 rounds/conversations/question
+等裁剪参数；因此不能把 `smoke` 的裁剪 artifact 冒充完整成本样本，也不能为使用便宜模型
+而把 `official_full` 强行映射到 OpenCodeGo。
 
 ## 2. 配置入口与 secret 边界
 
@@ -31,12 +38,13 @@ opencode_base_url     / OPENCODE_BASE_URL
 opencode_model_name   / OPENCODE_MODEL_NAME
 opencode_model_name_2 / OPENCODE_MODEL_NAME_2
 opencode_model_name_3 / OPENCODE_MODEL_NAME_3
+opencode_model_name_4 / OPENCODE_MODEL_NAME_4
 ```
 
-小写键优先。当前新 smoke 使用第三槽 `opencode_model_name_3`，并必须逐字等于 tracked
-identity `mimo-v2.5`；第一槽保留旧 `deepseek-v4-flash`，第二槽保留旧
-`muse-spark-1.2-contributor` artifact 的 evaluate/readback。三个槽都是可审计 identity，
-不是失败后自动轮询的 fallback 列表。
+小写键优先。当前新 smoke 使用第四槽 `opencode_model_name_4`，并必须逐字等于 tracked
+identity `ox-alpha-free`；第一槽保留旧 `deepseek-v4-flash`，第二槽保留旧
+`muse-spark-1.2-contributor`，第三槽保留旧 `mimo-v2.5` artifact 的 evaluate/readback。
+四个槽都是可审计 identity，不是失败后自动轮询的 fallback 列表。
 任何 key 值与 base URL 都不得写入 TOML、manifest、artifact、note 或测试 stdout。
 tracked TOML 只声明公开模型身份。prediction 在 secret load 前用 tracked identity 预检，
 evaluate 则按旧 run manifest 的模型在已配置 slot 中精确匹配；找不到就 fail-fast，不能用
@@ -62,6 +70,24 @@ judge 继续走 Responses，LoCoMo/LongMemEval 等已有官方 Chat Completions 
 `{"ok": true}`、`finish_reason=stop`，usage 为 263 prompt / 6 completion tokens。由此新
 smoke 默认从 Muse 迁到 Mimo。框架不会在某个 run 请求失败后静默换模型：迁移发生在 run
 创建前，旧 Muse run 仍只能按原 manifest 回读或用新 run_id 重跑。
+
+同日稍后，用户新增第四槽限时免费 `ox-alpha-free` 并恢复 ws05。实测该模型始终启用
+reasoning：`thinking={"type":"disabled"}` 与把 low 写进 thinking body 都返回 HTTP 400；
+顶层 `reasoning_effort="low"` 才是兼容请求。普通文本、JSON object judge 与
+LongMemEval 短 yes/no 三种生产形状均 HTTP 200，成功响应都含 prompt/completion/total
+usage；并发阶梯 4 与 8 均全成功。服务未返回 rate-limit header，因此该结果只证明当前
+安全下界 ≥8，不证明最大并发。首批 pilot 仍以全局 API semaphore=4 启动，避免把一次探针
+当成容量承诺。一次双并发响应未严格服从“精确回显”文本，故 ox 只用于工程流通、调用拓扑
+和 observation，不能据此与正式模型比较效果分数。
+
+两类 method 专属 transport 差异也已用真实调用闭合：
+
+- ox 会接受 A-Mem 发出的 `response_format.type=json_schema`，但不遵守其中 schema；A-Mem
+  仅在 ox 的真正发送边界把它降为已验证的 `json_object`，prompt 与产品解析逻辑不改；
+- SimpleMem 的官方调用是 streaming。共享 transport 给 streaming 请求加入
+  `stream_options.include_usage=true`，等调用方完整消费 stream 后读取最终 usage chunk；
+  真实 run 的 memory-build/retrieval observation 因而使用 `api_usage`。只有没有 raw SDK
+  response 的 fake/兼容 client 才允许退回 tokenizer estimate。
 
 历史 `deepseek-v4-flash` 在未成功关闭 thinking 时，reasoning token 与可见回答共享
 completion budget。2026-08-11 用生产代码实际发送的
@@ -91,10 +117,10 @@ benchmark、primary provider，以及已经显式高于 4096 的配置均保持�
 {
   "contract_version": "v2",
   "provider": "opencodego",
-  "model": "mimo-v2.5",
+  "model": "ox-alpha-free",
   "answer_transport": "chat_completions",
   "judge_transport": "chat_completions",
-  "thinking_mode": "disabled"
+  "thinking_mode": "reasoning_effort_low"
 }
 ```
 
@@ -116,16 +142,34 @@ benchmark、primary provider，以及已经显式高于 4096 的配置均保持�
 4. evaluate 对 run identity 的继承与环境漂移反例；
 5. 本页与 `AGENTS.md`。
 
-2026-08-21 的 Muse→Mimo 迁移继续保留两代旧模型 slot，目的不是让同一 run 动态换模型，
+2026-08-21 的 Muse→Mimo→ox 迁移继续保留三代旧模型 slot，目的不是让同一 run 动态换模型，
 而是保证旧 artifact 可回读、新 run 身份唯一。模型拒绝可选参数、返回空 choice 或区域错误时
 必须先停工裁定，不能隐藏 fallback。
 
 ## 6. 成本 pilot 的模型转移边界
 
-未来 ws05 可以用 Mimo 跑较大但受控的成本 pilot，观测调用次数、input/output token、latency
+ws05 可以用 ox 跑较大但受控的成本 pilot，观测调用次数、input/output token、latency
 与 method 产生的记忆规模；再用 `gpt-4o-mini` 价格对**同一份 token 账**计算一个
 `token-price projection`。这个数不是正式 GPT 成本真值：构建记忆的 LLM 输出会改变后续记忆
 数量、检索上下文和调用拓扑。正式预算报告必须同时披露模型转移假设，并至少跑一个极小
-`gpt-4o-mini` calibration cell 校验调用拓扑/倍率；不得只用“Mimo 美元 × 单价比例”换算。
+`gpt-4o-mini` calibration cell 校验调用拓扑/倍率；不得只用“免费模型 token × 目标单价”冒充正式成本真值。
 
 只改 `.env` 然后复用旧 run_id 属身份污染，框架应拒绝。
+
+当前 `predict pilot` 的完整 isolation 口径固定为：LoCoMo 第一条完整 conversation；
+LongMemEval 第一条完整 instance；BEAM 第一条完整 conversation；HaluMem 第一条完整 UUID；
+MemBench 在**同一个 run/process** 中从四条默认 source lane 各取第一条完整 tid。MemBench
+没有为了追求“一 tid 一进程”制造四份低收益物理进程；conversation namespace 与 state 仍按
+每个 tid 隔离。矩阵运行受全局 API 并发上限 4 约束，重型本地 runtime 可进一步串行，不能把
+“端点 8/8 HTTP 成功”误读成应同时启动 50 格。
+
+## 7. 统一 LLM transport 的长期边界
+
+后续可继续把无状态、跨 method 重复的能力收敛到公共 transport：provider/model identity、
+request override、timeout/retry policy、usage extraction、secret redaction、错误分类与效率
+observation。公共层不得改写 method prompt、消息顺序、JSON 解析或产品算法。
+
+“统一调用工具”也不等于一个跨 run 的全局 client singleton。持有 conversation state、内部
+retry、stream 生命周期、scheduler、连接池或产品 callback 的 client/LLM wrapper 仍由各 method
+runtime 按进程和 isolation 管理；它们只复用同一套无状态 transport policy。这样既减少十家
+重复接线，也不会把 namespace、失败域或实验身份意外耦合在一起。

@@ -1238,6 +1238,79 @@ def test_amem_configures_official_openai_client_transport(
     assert runtime_instances[0].llm_controller.llm.client == "patched-client"
 
 
+def test_amem_ox_transport_downgrades_json_schema_at_send_boundary(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """ox 只在发送边界把 A-Mem json_schema 降为 json_object。"""
+
+    sent_requests: list[dict[str, object]] = []
+
+    class FakeCompletions:
+        """记录 A-Mem 最终发给 endpoint 的请求。"""
+
+        def create(self, **kwargs: object) -> object:
+            """保存请求并返回稳定 sentinel。"""
+
+            sent_requests.append(dict(kwargs))
+            return object()
+
+    raw_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=FakeCompletions())
+    )
+    runtime = SimpleNamespace(
+        llm_controller=SimpleNamespace(
+            llm=SimpleNamespace(client="official-default-client")
+        )
+    )
+    monkeypatch.setattr(
+        amem_adapter_module,
+        "_create_openai_compatible_client",
+        lambda **_kwargs: raw_client,
+    )
+    method = AMem(
+        config=AMemConfig(
+            llm_model="ox-alpha-free",
+            embedding_model="all-MiniLM-L6-v2",
+            retrieve_k=2,
+            max_workers=1,
+            profile_name="smoke",
+        ),
+        openai_settings=OpenAISettings(
+            api_key="sk-offline-test",
+            base_url="https://example.invalid/v1",
+            model="ox-alpha-free",
+            provider="opencodego",
+            judge_transport="chat_completions",
+        ),
+        storage_root=tmp_path,
+    )
+
+    method._configure_openai_transport(runtime, "conv-1")
+    original_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "memory",
+            "schema": {"type": "object"},
+        },
+    }
+    runtime.llm_controller.llm.client.chat.completions.create(
+        model="ox-alpha-free",
+        messages=[],
+        response_format=original_format,
+    )
+
+    assert original_format["type"] == "json_schema"
+    assert sent_requests == [
+        {
+            "model": "ox-alpha-free",
+            "messages": [],
+            "response_format": {"type": "json_object"},
+            "reasoning_effort": "low",
+        }
+    ]
+
+
 def test_amem_records_question_efficiency_observations(tmp_path) -> None:
     """启用 collector 后，A-Mem 应记录问题级汇总和两次 LLM 调用 token。"""
 

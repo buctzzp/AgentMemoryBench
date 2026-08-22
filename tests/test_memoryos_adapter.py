@@ -17,7 +17,11 @@ import tempfile
 import numpy as np
 import pytest
 
-from memory_benchmark.config.settings import PathSettings, load_path_settings
+from memory_benchmark.config.settings import (
+    OpenAISettings,
+    PathSettings,
+    load_path_settings,
+)
 from memory_benchmark.core import (
     Conversation,
     GoldAnswerInfo,
@@ -205,6 +209,82 @@ def _drive_native_ingest(
             system.ingest(signal)
         elif isinstance(signal, UnitRef):
             system.end_conversation(signal)
+
+
+def test_memoryos_ox_transport_injects_low_reasoning_without_real_api(
+    tmp_path: Path,
+) -> None:
+    """MemoryOS 产品 chat_completion 应按 ox runtime 发送 reasoning_effort。"""
+
+    calls: list[dict[str, object]] = []
+
+    class _Completions:
+        """返回最小 OpenAI response 的 fake endpoint。"""
+
+        @staticmethod
+        def create(**kwargs: object) -> object:
+            """记录最终请求并返回文本。"""
+
+            calls.append(dict(kwargs))
+            return type(
+                "Response",
+                (),
+                {
+                    "choices": [
+                        type(
+                            "Choice",
+                            (),
+                            {"message": type("Message", (), {"content": "ok"})()},
+                        )()
+                    ],
+                    "usage": None,
+                },
+            )()
+
+    backend = type(
+        "Backend",
+        (),
+        {
+            "client": type(
+                "ProductClient",
+                (),
+                {
+                    "client": type(
+                        "SDKClient",
+                        (),
+                        {
+                            "chat": type(
+                                "Chat",
+                                (),
+                                {"completions": _Completions()},
+                            )()
+                        },
+                    )(),
+                    "chat_completion": lambda *args, **kwargs: "old",
+                },
+            )()
+        },
+    )()
+    system = MemoryOS(
+        openai_settings=OpenAISettings(
+            api_key="sk-test",
+            base_url="https://example.invalid/v1",
+            model="ox-alpha-free",
+            provider="opencodego",
+            judge_transport="chat_completions",
+        ),
+        storage_root=tmp_path,
+        backend_factory=lambda isolation_key: backend,
+    )
+
+    system._inject_api_retry_timeout(backend)
+    assert backend.client.chat_completion(
+        "ox-alpha-free",
+        [{"role": "user", "content": "probe"}],
+        0.0,
+        32,
+    ) == "ok"
+    assert calls[0]["reasoning_effort"] == "low"
 
 
 # ---------------------------------------------------------------------- #

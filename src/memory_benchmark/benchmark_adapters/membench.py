@@ -350,6 +350,13 @@ def prepare_membench_run(
 
     if request.run_scope is RunScope.FULL:
         dataset = MemBenchAdapter(project_root, variant=request.variant).load()
+    elif request.run_scope is RunScope.PILOT:
+        dataset = _build_membench_pilot_dataset(
+            project_root,
+            variant=request.variant,
+            source_relative_paths=source_paths,
+            per_source_limit=request.smoke_conversation_limit,
+        )
     elif request.run_scope is RunScope.SMOKE:
         dataset = _build_membench_smoke_dataset(
             project_root,
@@ -358,7 +365,7 @@ def prepare_membench_run(
             per_source_limit=request.smoke_conversation_limit,
             history_limit=request.smoke_turn_limit,
         )
-    else:  # pragma: no cover - RunScope 只有 smoke / full
+    else:  # pragma: no cover - RunScope 是封闭枚举
         raise ConfigurationError(f"unsupported MemBench run scope: {request.run_scope}")
 
     metadata = dict(dataset.metadata)
@@ -570,6 +577,53 @@ def _build_membench_smoke_dataset(
             "smoke_retained_turn_count": total_retained_turn_count,
             "smoke_original_step_count": total_original_step_count,
             "smoke_retained_step_count": total_retained_step_count,
+        },
+    )
+
+
+def _build_membench_pilot_dataset(
+    project_root: Path,
+    *,
+    variant: str,
+    source_relative_paths: tuple[Path, ...],
+    per_source_limit: int,
+) -> Dataset:
+    """选取每个声明 source 的前 N 个完整 trajectory，不裁任何 message。"""
+
+    if per_source_limit < 1:
+        raise ConfigurationError("MemBench pilot per-source limit must be positive")
+    conversations: list[Conversation] = []
+    source_counts: dict[str, int] = {}
+    for source_relative_path in source_relative_paths:
+        source_dataset = MemBenchAdapter(
+            project_root,
+            variant=variant,
+            source_relative_paths=(source_relative_path,),
+        ).load(limit=per_source_limit)
+        conversations.extend(source_dataset.conversations)
+        source_counts[source_relative_path.as_posix()] = len(
+            source_dataset.conversations
+        )
+
+    return Dataset(
+        dataset_name=MemBenchAdapter.name,
+        conversations=conversations,
+        metadata={
+            "source_paths": [path.as_posix() for path in source_relative_paths],
+            "variant": variant,
+            "source_format": "membench_data2test",
+            "run_scope": RunScope.PILOT.value,
+            "pilot_per_source_conversation_limit": per_source_limit,
+            "pilot_source_counts": source_counts,
+            "pilot_selected_conversation_count": len(conversations),
+            "source_sha256": _combined_source_sha256(
+                project_root,
+                source_relative_paths,
+            ),
+            "source_fully_scanned": False,
+            "official_repo_url": MEMBENCH_OFFICIAL_REPO_URL,
+            "official_paper_url": MEMBENCH_OFFICIAL_PAPER_URL,
+            "license": MEMBENCH_LICENSE,
         },
     )
 

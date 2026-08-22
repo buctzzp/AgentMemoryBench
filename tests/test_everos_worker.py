@@ -420,6 +420,35 @@ def test_observation_wrappers_record_only_successful_exact_usage() -> None:
     assert rerank[0]["latency_ms"] >= 0
 
 
+def test_everos_observed_llm_uses_low_reasoning_for_ox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """EverOS 产品 client 在 ox runtime 上显式注入 low reasoning。"""
+
+    engine = _WorkerEngine()
+    engine.begin_observations()
+    calls: list[dict[str, Any]] = []
+
+    class _LLM:
+        """记录最终 kwargs 的异步 fake。"""
+
+        async def chat(self, *args: Any, **kwargs: Any) -> Any:
+            """返回带 exact usage 的稳定响应。"""
+
+            assert args == ("prompt",)
+            calls.append(dict(kwargs))
+            return SimpleNamespace(
+                usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2)
+            )
+
+    monkeypatch.setenv("EVEROS_LLM__MODEL", "ox-alpha-free")
+    asyncio.run(_ObservedLLMClient(_LLM(), engine).chat("prompt", temperature=0))
+
+    assert calls == [{"temperature": 0, "reasoning_effort": "low"}]
+    llm, _embedding, _rerank = engine.finish_observations()
+    assert llm == [{"input_tokens": 5, "output_tokens": 2}]
+
+
 def test_install_observers_wraps_rerank_capability_before_search_manager_build(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

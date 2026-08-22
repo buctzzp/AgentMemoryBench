@@ -23,7 +23,11 @@ from time import perf_counter_ns
 from types import MethodType
 from typing import Any
 
-from memory_benchmark.config.settings import PathSettings, load_path_settings
+from memory_benchmark.config.settings import (
+    OpenAISettings,
+    PathSettings,
+    load_path_settings,
+)
 from memory_benchmark.core import (
     AddResult,
     AnswerResult,
@@ -52,6 +56,9 @@ from memory_benchmark.core.provider_protocol import (
     UnitRef,
 )
 from memory_benchmark.methods.image_text import turn_text_with_images
+from memory_benchmark.methods.openai_transport import (
+    with_chat_completions_request_overrides,
+)
 from memory_benchmark.observability import capture_method_output
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
@@ -65,6 +72,7 @@ from memory_benchmark.storage import atomic_write_json
 
 AMEM_PRODUCT_DIRECTORY = "A-mem-product"
 AMEM_ADAPTER_VERSION = "conversation-qa-v2-product"
+_AMEM_JSON_SCHEMA_DOWNGRADE_MODELS = frozenset({"ox-alpha-free"})
 AMEM_READER_PROMPT_VERSION = "amem-reader-v1"
 AMEM_LONGMEMEVAL_READER_PROMPT_VERSION = "lightmem_longmemeval_reader_v1"
 AMEM_QUERY_KEYWORD_PROMPT_VERSION = "amem-query-keywords-v1"
@@ -273,6 +281,7 @@ class AMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
         answer_llm: Any | None = None,
         openai_api_key: str | None = None,
         openai_base_url: str | None = None,
+        openai_settings: OpenAISettings | None = None,
         storage_root: str | Path | None = None,
         path_settings: PathSettings | None = None,
         efficiency_collector: EfficiencyCollector | None = None,
@@ -288,6 +297,8 @@ class AMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
             answer_llm: 测试可注入 fake；生产为空时后续任务使用官方 LLM controller。
             openai_api_key: 传给官方 OpenAI-compatible backend 的 API key。
             openai_base_url: 传给官方 OpenAI-compatible backend 的 base URL。
+            openai_settings: 完整 runtime 身份；生产 registry 必须传入，使 provider
+                专属请求参数与 framework answer/judge 保持一致。
             storage_root: 当前 run 的 A-Mem 状态目录；为空时使用隔离的默认输出目录。
             path_settings: 项目路径配置。
             efficiency_collector: runner 管理的可选效率 observation collector。
@@ -297,8 +308,15 @@ class AMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
         self.config = config
         self._runtime_factory = runtime_factory
         self._answer_llm = answer_llm
-        self._openai_api_key = openai_api_key
-        self._openai_base_url = openai_base_url
+        self._openai_settings = openai_settings
+        self._openai_api_key = (
+            openai_settings.api_key if openai_settings is not None else openai_api_key
+        )
+        self._openai_base_url = (
+            openai_settings.base_url
+            if openai_settings is not None
+            else openai_base_url
+        )
         self.path_settings = path_settings or load_path_settings()
         self.storage_root = Path(storage_root) if storage_root is not None else (
             self.path_settings.outputs_root / "amem" / "unscoped-method-state"
@@ -1003,11 +1021,22 @@ class AMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
                 "A-Mem official runtime does not expose a patchable OpenAI "
                 f"client for {conversation_id}"
             )
-        llm.client = _create_openai_compatible_client(
+        client = _create_openai_compatible_client(
             api_key=self._openai_api_key,
             base_url=self._openai_base_url,
             timeout=self.config.api_timeout_seconds,
             max_retries=self.config.api_max_retries,
+        )
+        llm.client = with_chat_completions_request_overrides(
+            client,
+            self._openai_settings.chat_completions_request_overrides()
+            if self._openai_settings is not None
+            else None,
+            json_schema_as_json_object=(
+                self._openai_settings is not None
+                and self._openai_settings.model
+                in _AMEM_JSON_SCHEMA_DOWNGRADE_MODELS
+            ),
         )
 
     def _install_openai_usage_observer(

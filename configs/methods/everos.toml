@@ -7,7 +7,7 @@
 
 [smoke]
 answer_builder = "benchmark"
-llm_model = "mimo-v2.5"
+llm_model = "ox-alpha-free"
 memory_mode = "chat"
 search_method = "hybrid"
 add_batch_size = 25

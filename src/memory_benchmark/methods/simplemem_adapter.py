@@ -6,7 +6,7 @@ retriever 的产品返回顺序，并在 HaluMem session 边界上报官方合�
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime
 import hashlib
@@ -22,6 +22,7 @@ from memory_benchmark.core import ConfigurationError, ImageRef, PromptMessage, T
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     MeasurementSource,
+    extract_api_token_usage,
     resolve_token_usage,
 )
 from memory_benchmark.core.provider_protocol import (
@@ -39,6 +40,9 @@ from memory_benchmark.core.provider_protocol import (
     UnitRef,
 )
 from memory_benchmark.methods.image_text import turn_text_with_images
+from memory_benchmark.methods.openai_transport import (
+    with_chat_completions_request_overrides,
+)
 
 
 SIMPLEMEM_ADAPTER_VERSION = "simplemem-text-v2"
@@ -480,11 +484,14 @@ class SimpleMem(MemoryProvider):
             from openai import OpenAI
         except ImportError as exc:
             raise ConfigurationError("openai package is required for SimpleMem") from exc
-        llm_client.client = OpenAI(
-            api_key=self._openai_settings.api_key,
-            base_url=self._openai_settings.base_url,
-            timeout=self.config.api_timeout_seconds,
-            max_retries=0,
+        llm_client.client = with_chat_completions_request_overrides(
+            OpenAI(
+                api_key=self._openai_settings.api_key,
+                base_url=self._openai_settings.base_url,
+                timeout=self.config.api_timeout_seconds,
+                max_retries=0,
+            ),
+            self._openai_settings.chat_completions_request_overrides(),
         )
         original_chat_completion = llm_client.chat_completion
 
@@ -527,8 +534,65 @@ class SimpleMem(MemoryProvider):
         if original_chat_completion is None:
             return
 
+        client = getattr(llm_client, "client", None)
+        chat = getattr(client, "chat", None)
+        completions = getattr(chat, "completions", None)
+        if completions is not None and hasattr(completions, "create"):
+            def _observe_raw_response(
+                response: Any,
+                request_kwargs: Mapping[str, Any],
+            ) -> None:
+                """优先从官方 raw response 记录 exact API usage。"""
+
+                responses = response if isinstance(response, tuple) else (response,)
+                usage_object = next(
+                    (
+                        getattr(item, "usage", None)
+                        for item in reversed(responses)
+                        if getattr(item, "usage", None) is not None
+                    ),
+                    None,
+                )
+                api_input_tokens, api_output_tokens = extract_api_token_usage(
+                    usage_object
+                )
+                output_parts: list[str] = []
+                for item in responses:
+                    choices = getattr(item, "choices", None)
+                    first_choice = choices[0] if choices else None
+                    message = getattr(first_choice, "message", None)
+                    delta = getattr(first_choice, "delta", None)
+                    content = getattr(message, "content", None)
+                    if content is None:
+                        content = getattr(delta, "content", None)
+                    if content:
+                        output_parts.append(str(content))
+                output_text = "".join(output_parts)
+                usage = resolve_token_usage(
+                    api_input_tokens=api_input_tokens,
+                    api_output_tokens=api_output_tokens,
+                    prompt_text=_messages_to_text(request_kwargs.get("messages")),
+                    output_text=output_text,
+                    tokenizer=_TiktokenCounter(self.config.llm_model),
+                )
+                collector.record_llm_call(
+                    model_id=SIMPLEMEM_LLM_MODEL_ID,
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    token_measurement_source=usage.source,
+                )
+
+            llm_client.client = with_chat_completions_request_overrides(
+                client,
+                None,
+                include_stream_usage=True,
+                response_observer=_observe_raw_response,
+            )
+            llm_client._memory_benchmark_efficiency_wrapped = True
+            return
+
         def _wrapped_chat_completion(*args: Any, **kwargs: Any) -> Any:
-            """调用官方 chat_completion 并把 token usage 写入 collector。"""
+            """无 raw client 的测试/兼容实现退回 tokenizer estimate。"""
 
             messages = kwargs.get("messages")
             if messages is None and args:

@@ -483,8 +483,8 @@ def test_mem0_profiles_separate_smoke_and_official_full_parameters() -> None:
     smoke = Mem0Config.smoke()
     full = Mem0Config.official_full()
 
-    assert smoke.extraction_model == "mimo-v2.5"
-    assert smoke.reader_model == "mimo-v2.5"
+    assert smoke.extraction_model == "ox-alpha-free"
+    assert smoke.reader_model == "ox-alpha-free"
     assert smoke.embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
     assert smoke.embedding_dimensions == 384
     assert smoke.embedding_provider == "huggingface"
@@ -1785,7 +1785,7 @@ def test_get_answer_searches_only_question_conversation_and_calls_reader() -> No
         "method": "mem0",
         "retrieved_memory_count": 1,
         "top_k": 20,
-        "reader_model": "mimo-v2.5",
+        "reader_model": "ox-alpha-free",
     }
     reader_messages = reader.calls[0]["messages"]
     assert len(reader_messages) == 1
@@ -2249,6 +2249,27 @@ def test_production_config_injects_openai_and_local_storage_without_secrets_in_m
     assert backend_config["history_db_path"] == str(tmp_path / "history.db")
     assert "secret-test-key" not in str(manifest)
     assert "api_key" not in str(manifest)
+
+
+def test_mem0_ox_backend_config_injects_low_reasoning_only() -> None:
+    """Mem0 build LLM 应消费 ox 的原生 reasoning_effort 字段。"""
+
+    settings = OpenAISettings(
+        api_key="secret-test-key",
+        base_url="https://example.invalid/v1",
+        model="ox-alpha-free",
+        provider="opencodego",
+        judge_transport="chat_completions",
+    )
+
+    backend_config = Mem0.build_backend_config(
+        config=Mem0Config.smoke(),
+        openai_settings=settings,
+        storage_root="/tmp/mem0-ox-unit",
+    )
+
+    assert backend_config["llm"]["config"]["reasoning_effort"] == "low"
+    assert "extra_body" not in backend_config["llm"]["config"]
 
 
 def test_mem0_configures_vendored_openai_clients_with_timeout_and_retries() -> None:

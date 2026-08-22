@@ -182,8 +182,8 @@ def test_memos_registered_prediction_runs_five_benchmarks_through_generic_runner
     assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"
     assert manifest["method"]["config"]["adapter_version"] == "memos-v2.0.25-product-v4"
     assert manifest["method"]["config"]["build_llm_response_contract"] == (
-        "provider-aware-v1:"
-        "opencodego=json_object+thinking_disabled;"
+        "provider-aware-v2:"
+        "opencodego=model_aware_json_reasoning_control;"
         "primary=provider_default"
     )
     assert manifest["method"]["config"]["locomo_ingest_strategy"] == (
@@ -287,7 +287,7 @@ def _install_offline_registered_stack(
         lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="mimo-v2.5",
+            model="ox-alpha-free",
             provider="opencodego",
             judge_transport="chat_completions",
         ),

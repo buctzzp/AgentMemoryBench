@@ -81,11 +81,16 @@ MEMOS_EMPTY_MEMORY_SENTINEL = "(No relevant memories found)"
 # 公开 metadata 必须显式声明该字段尚未接线，不得宣称时间过滤已生效。
 MEMOS_REFERENCE_TIME_EFFECT = "declared_but_unwired_v2.0.25"
 MEMOS_BUILD_LLM_RESPONSE_CONTRACT = (
-    "provider-aware-v1:"
-    "opencodego=json_object+thinking_disabled;"
+    "provider-aware-v2:"
+    "opencodego=model_aware_json_reasoning_control;"
     "primary=provider_default"
 )
-MEMOS_OPENCODEGO_READER_COMPATIBILITY = "opencodego_json_non_thinking_v1"
+MEMOS_OPENCODEGO_NON_THINKING_READER_COMPATIBILITY = (
+    "opencodego_json_non_thinking_v1"
+)
+MEMOS_OPENCODEGO_REASONING_LOW_READER_COMPATIBILITY = (
+    "opencodego_json_reasoning_effort_low_v1"
+)
 MEMOS_NAMESPACE_ALGORITHM = "sha256(storage_root_relative|isolation_key)[:32]"
 MEMOS_LOCOMO_VIEW_SIDECAR_SCHEMA_VERSION = "v1"
 MEMOS_LOCOMO_OFFICIAL_BATCH_SIZE = 2
@@ -434,7 +439,9 @@ def _memos_environment(
         values["OPENAI_API_BASE"] = openai_settings.base_url
     if openai_settings.provider == OPENCODEGO_API_PROVIDER:
         values["MEMRADER_PROVIDER_COMPATIBILITY"] = (
-            MEMOS_OPENCODEGO_READER_COMPATIBILITY
+            MEMOS_OPENCODEGO_REASONING_LOW_READER_COMPATIBILITY
+            if openai_settings.model == "ox-alpha-free"
+            else MEMOS_OPENCODEGO_NON_THINKING_READER_COMPATIBILITY
         )
     return values
 

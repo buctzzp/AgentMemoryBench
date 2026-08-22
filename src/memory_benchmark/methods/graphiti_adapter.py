@@ -63,8 +63,8 @@ GRAPHITI_WRAPPER_LOGICAL_PATH = "src/memory_benchmark/methods/graphiti_adapter.p
 GRAPHITI_BOOTSTRAP_LOGICAL_PATH = "scripts/bootstrap_graphiti_runtime.sh"
 GRAPHITI_SOURCE_MODE = "vendored-graphiti-plus-isolated-product-wrapper"
 GRAPHITI_BUILD_LLM_RESPONSE_CONTRACT = (
-    "provider-aware-v1:"
-    "opencodego=chat_completions+json_object+thinking_disabled;"
+    "provider-aware-v2:"
+    "opencodego=chat_completions+json_object+model_aware_reasoning;"
     "primary=chat_completions+json_schema;exact_usage_required"
 )
 GRAPHITI_SOURCE_FILES = (

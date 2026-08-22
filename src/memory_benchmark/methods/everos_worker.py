@@ -25,6 +25,7 @@ EVEROS_PRODUCT_SURFACE = "create_app-lifespan+typed-memorize-search-get"
 EVEROS_ROOT_MARKER = ".memory-benchmark-everos-root.json"
 _TERMINAL_FAILURES = frozenset({"dead_letter", "crashed"})
 _CASCADE_SETTLE_POLL_SECONDS = 0.05
+_OPENCODEGO_REASONING_EFFORT_LOW_MODELS = frozenset({"ox-alpha-free"})
 
 
 def _required_text(value: Any, label: str) -> str:
@@ -133,9 +134,18 @@ class _ObservedLLMClient:
         self._engine = engine
 
     async def chat(self, *args: Any, **kwargs: Any) -> Any:
-        """逐字透传调用，成功 response 在手时记录 exact usage。"""
+        """注入模型专属公开参数，成功 response 在手时记录 exact usage。"""
 
-        response = await self._inner.chat(*args, **kwargs)
+        copied = dict(kwargs)
+        model = copied.get("model") or os.environ.get("EVEROS_LLM__MODEL")
+        if model in _OPENCODEGO_REASONING_EFFORT_LOW_MODELS:
+            existing = copied.get("reasoning_effort")
+            if existing not in {None, "low"}:
+                raise ValueError(
+                    "EverOS caller supplied conflicting reasoning_effort"
+                )
+            copied["reasoning_effort"] = "low"
+        response = await self._inner.chat(*args, **copied)
         usage = getattr(response, "usage", None)
         if usage is None:
             raise RuntimeError("EverOS LLM response has no exact usage")

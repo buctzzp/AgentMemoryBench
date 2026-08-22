@@ -18,7 +18,8 @@ from memory_benchmark.core import ConfigurationError
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 PRIMARY_API_PROVIDER = "primary"
 OPENCODEGO_API_PROVIDER = "opencodego"
-OPENCODEGO_SMOKE_MODEL = "mimo-v2.5"
+OPENCODEGO_SMOKE_MODEL = "ox-alpha-free"
+_OPENCODEGO_REASONING_EFFORT_LOW_MODELS = frozenset({"ox-alpha-free"})
 SUPPORTED_API_PROVIDERS = frozenset(
     {PRIMARY_API_PROVIDER, OPENCODEGO_API_PROVIDER}
 )
@@ -196,6 +197,8 @@ class OpenAISettings:
         """返回 provider 专属、且必须进入实验身份的 Chat Completions 参数。"""
 
         if self.provider == OPENCODEGO_API_PROVIDER:
+            if self.model in _OPENCODEGO_REASONING_EFFORT_LOW_MODELS:
+                return {"reasoning_effort": "low"}
             return {"extra_body": {"thinking": {"type": "disabled"}}}
         return {}
 
@@ -234,12 +237,21 @@ def build_api_runtime_manifest(
         "model": normalized_model,
         "answer_transport": CHAT_COMPLETIONS_JUDGE_TRANSPORT,
         "judge_transport": judge_transport,
-        "thinking_mode": (
-            "disabled"
-            if normalized_provider == OPENCODEGO_API_PROVIDER
-            else "provider_default"
+        "thinking_mode": _runtime_thinking_mode(
+            provider=normalized_provider,
+            model=normalized_model,
         ),
     }
+
+
+def _runtime_thinking_mode(*, provider: str, model: str) -> str:
+    """返回参与 manifest/resume 的公开推理控制身份。"""
+
+    if provider != OPENCODEGO_API_PROVIDER:
+        return "provider_default"
+    if model in _OPENCODEGO_REASONING_EFFORT_LOW_MODELS:
+        return "reasoning_effort_low"
+    return "disabled"
 
 
 @dataclass(frozen=True)
@@ -471,7 +483,7 @@ def load_openai_settings(
         env_file: `.env` 文件路径；为空时默认读取 `project_root/.env`。
         api_provider: `primary` 或 `opencodego`。
         expected_model: manifest/profile 已声明的公开模型。OpenCodeGo 会在已配置
-            model slot 中精确匹配它；为空时选择当前第三槽 smoke 模型。
+            model slot 中精确匹配它；为空时选择当前第四槽 smoke 模型。
 
     输出:
         OpenAISettings: 只包含 API 连接所需字段的结构化配置。
@@ -520,9 +532,13 @@ def load_openai_settings(
             "opencode_model_name_2",
             "OPENCODE_MODEL_NAME_2",
         )
-        smoke_model = _first_non_empty_env(
+        previous_smoke_model_2 = _first_non_empty_env(
             "opencode_model_name_3",
             "OPENCODE_MODEL_NAME_3",
+        )
+        smoke_model = _first_non_empty_env(
+            "opencode_model_name_4",
+            "OPENCODE_MODEL_NAME_4",
         )
         missing = [
             field_name
@@ -533,14 +549,19 @@ def load_openai_settings(
             if value is None
         ]
         if expected_model is None and smoke_model is None:
-            missing.append("opencode_model_name_3")
+            missing.append("opencode_model_name_4")
         if missing:
             raise ConfigurationError(
                 "Missing opencodego setting(s): " + ", ".join(missing)
             )
         configured_models = tuple(
             candidate
-            for candidate in (smoke_model, previous_smoke_model, legacy_model)
+            for candidate in (
+                smoke_model,
+                previous_smoke_model_2,
+                previous_smoke_model,
+                legacy_model,
+            )
             if candidate is not None
         )
         if expected_model is None:
@@ -580,7 +601,7 @@ def resolve_api_provider_for_profile(profile_name: str) -> str:
     """把运行 profile 映射到显式 API provider，不读取 secret。"""
 
     normalized = profile_name.strip().lower()
-    if normalized == "smoke":
+    if normalized in {"smoke", "pilot"}:
         return OPENCODEGO_API_PROVIDER
     if (
         normalized in {"official-full", "official_full"}

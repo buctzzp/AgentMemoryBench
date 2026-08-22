@@ -11,7 +11,7 @@
 [smoke]
 answer_builder = "benchmark"
 # budget-only connectivity profile；不与 official_full 结果比较。
-llm_model = "mimo-v2.5"
+llm_model = "ox-alpha-free"
 embedding_model_path = "models/all-MiniLM-L6-v2"
 embedding_dimension = 384
 window_size = 40

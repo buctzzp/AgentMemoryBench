@@ -253,8 +253,8 @@ def test_letta_registered_prediction_runs_five_benchmarks_through_generic_runner
     assert config["product_contract"] == "ai-memory-sdk-v0.2.0"
     assert config["embedding_provider"] is None
     assert config["build_llm_response_contract"] == (
-        "provider-aware-v1:"
-        "opencodego=chat_completions+thinking_disabled;"
+        "provider-aware-v2:"
+        "opencodego=chat_completions+model_aware_reasoning;"
         "primary=chat_completions+provider_default"
     )
     assert config["readout"] == "all-attached-core-blocks-query-independent"
@@ -282,7 +282,7 @@ def test_letta_halumem_operation_runner_keeps_update_and_qa_but_extraction_na(
         run_id="letta-halumem-operation-fake",
         benchmark_name="halumem",
         method_name="Letta/MemGPT",
-        model_name="mimo-v2.5",
+        model_name="ox-alpha-free",
         output_root=tmp_path,
     )
     provider = _RegisteredLetta(
@@ -292,7 +292,7 @@ def test_letta_halumem_operation_runner_keeps_update_and_qa_but_extraction_na(
         openai_settings=OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="mimo-v2.5",
+            model="ox-alpha-free",
             provider="opencodego",
             judge_transport="chat_completions",
         ),
@@ -405,7 +405,7 @@ def _install_offline_stack(
         lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="mimo-v2.5",
+            model="ox-alpha-free",
             provider="opencodego",
             judge_transport="chat_completions",
         ),

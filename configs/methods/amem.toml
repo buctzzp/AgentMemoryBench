@@ -1,11 +1,11 @@
 # A-Mem 官方通用产品 AgenticMemorySystem profile。
 # smoke 只缩小 benchmark 数据规模；method 检索深度保持产品建议 k=10。
-# 2026-08-21 起 smoke API runtime 显式走 opencodego/mimo-v2.5；
+# 2026-08-21 起 smoke API runtime 显式走 opencodego/ox-alpha-free；
 # official_full 仍保持已冻结的 primary/gpt-4o-mini，二者不得混作效果对比。
 
 [smoke]
 answer_builder = "benchmark"
-llm_model = "mimo-v2.5"
+llm_model = "ox-alpha-free"
 embedding_model = "all-MiniLM-L6-v2"
 retrieve_k = 10
 api_timeout_seconds = 60.0

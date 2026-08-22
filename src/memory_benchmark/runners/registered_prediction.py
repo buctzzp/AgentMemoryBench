@@ -1324,6 +1324,8 @@ def _resolve_profile_run_scope(profile_name: str) -> RunScope:
 
     if profile_name == "smoke":
         return RunScope.SMOKE
+    if profile_name == "pilot":
+        return RunScope.PILOT
     return RunScope.FULL
 
 
@@ -1495,7 +1497,12 @@ def _resolve_child_output_root(
         raise ConfigurationError(
             f"Unknown prediction output_layout '{output_layout}'"
         )
-    mode_directory = "smoke" if profile_name == "smoke" else "formal"
+    if profile_name == "smoke":
+        mode_directory = "smoke"
+    elif profile_name == "pilot":
+        mode_directory = "pilot"
+    else:
+        mode_directory = "formal"
     profile_token = normalize_variant_run_id_token(profile_name)
     path_parts = [
         canonical_outputs_root,

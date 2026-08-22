@@ -35,6 +35,7 @@ GRAPHITI_CLEANUP_SCHEMA_VERSION = "graphiti-worker-cleanup-v1"
 GRAPHITI_CONVERSATION_MARKER = "conversation_id.txt"
 GRAPHITI_DATABASE = "graphiti"
 _SESSION_NONE_KEY = "__none__"
+_OPENCODEGO_REASONING_EFFORT_LOW_MODELS = frozenset({"ox-alpha-free"})
 
 
 def _required_text(value: Any, label: str) -> str:
@@ -285,11 +286,23 @@ class _ObservedCompletions:
         """保持请求参数，仅追加已锁 provider compatibility body。"""
 
         if self._engine.config["api_provider"] == "opencodego":
-            extra_body = dict(kwargs.get("extra_body") or {})
-            if "thinking" in extra_body:
-                raise RuntimeError("Graphiti caller already supplied thinking control")
-            extra_body["thinking"] = {"type": "disabled"}
-            kwargs["extra_body"] = extra_body
+            if (
+                self._engine.config["llm_model"]
+                in _OPENCODEGO_REASONING_EFFORT_LOW_MODELS
+            ):
+                if "reasoning_effort" in kwargs:
+                    raise RuntimeError(
+                        "Graphiti caller already supplied reasoning_effort"
+                    )
+                kwargs["reasoning_effort"] = "low"
+            else:
+                extra_body = dict(kwargs.get("extra_body") or {})
+                if "thinking" in extra_body:
+                    raise RuntimeError(
+                        "Graphiti caller already supplied thinking control"
+                    )
+                extra_body["thinking"] = {"type": "disabled"}
+                kwargs["extra_body"] = extra_body
         response = await self._real.create(**kwargs)
         usage = getattr(response, "usage", None)
         input_tokens = getattr(usage, "prompt_tokens", None)

@@ -245,6 +245,8 @@ def prepare_beam_run(
     adapter = BeamAdapter(project_root, variant=request.variant)
     if request.run_scope is RunScope.FULL:
         dataset = adapter.load()
+    elif request.run_scope is RunScope.PILOT:
+        dataset = adapter.load(limit=request.smoke_conversation_limit)
     elif request.run_scope is RunScope.SMOKE:
         dataset = _build_beam_smoke_dataset(
             adapter.load(limit=request.smoke_conversation_limit),

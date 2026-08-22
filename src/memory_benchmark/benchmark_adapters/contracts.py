@@ -52,6 +52,7 @@ class RunScope(StrEnum):
     """一次 benchmark 运行的范围。"""
 
     SMOKE = "smoke"
+    PILOT = "pilot"
     FULL = "full"
 
 

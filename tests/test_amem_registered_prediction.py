@@ -259,7 +259,7 @@ def test_amem_registered_prediction_runs_generic_runner_offline(
         lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="mimo-v2.5",
+            model="ox-alpha-free",
             provider="opencodego",
             judge_transport="chat_completions",
         ),
@@ -317,8 +317,12 @@ def test_amem_registered_prediction_runs_generic_runner_offline(
     assert result.runs[0].run_id == "amem-offline-smoke"
     assert len(FakeAMemForRegisteredPrediction.instances) == 1
     fake_method = FakeAMemForRegisteredPrediction.instances[0]
-    assert fake_method.kwargs["openai_api_key"] == "sk-test"
-    assert fake_method.kwargs["openai_base_url"] == "https://example.invalid/v1"
+    method_settings = fake_method.kwargs["openai_settings"]
+    assert method_settings.api_key == "sk-test"
+    assert method_settings.base_url == "https://example.invalid/v1"
+    assert method_settings.chat_completions_request_overrides() == {
+        "reasoning_effort": "low"
+    }
     assert fake_method.kwargs["config"].profile_name == "smoke"
     assert [turn.turn_id for turn in fake_method.ingested_turns] == [
         "turn-1",
@@ -372,7 +376,7 @@ def test_amem_factory_loads_completed_conversations_for_resume(
         openai_settings=OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="mimo-v2.5",
+            model="ox-alpha-free",
             provider="opencodego",
             judge_transport="chat_completions",
         ),

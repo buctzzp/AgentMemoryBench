@@ -59,8 +59,8 @@ LETTA_IMPLEMENTATION_IDENTITY = "sleeptime-core-block-product"
 LETTA_SOURCE_MODE = "vendored-letta-plus-official-sdk-contract-plus-wrapper"
 LETTA_LLM_MODEL_ID = "letta-build-llm"
 LETTA_BUILD_LLM_RESPONSE_CONTRACT = (
-    "provider-aware-v1:"
-    "opencodego=chat_completions+thinking_disabled;"
+    "provider-aware-v2:"
+    "opencodego=chat_completions+model_aware_reasoning;"
     "primary=chat_completions+provider_default"
 )
 LETTA_EMPTY_MEMORY_SENTINEL = "(No Letta core memory available)"

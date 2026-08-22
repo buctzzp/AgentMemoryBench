@@ -210,6 +210,8 @@ def prepare_halumem_run(
     adapter = HaluMemAdapter(project_root, variant=request.variant)
     if request.run_scope is RunScope.FULL:
         dataset = adapter.load()
+    elif request.run_scope is RunScope.PILOT:
+        dataset = adapter.load(limit=request.smoke_conversation_limit)
     elif request.run_scope is RunScope.SMOKE:
         if (
             request.smoke_turn_limit != HALUMEM_SMOKE_POLICY.default_history_limit
@@ -221,7 +223,7 @@ def prepare_halumem_run(
                 "halumem smoke has a fixed shape and does not accept cropping parameters"
             )
         dataset = _build_halumem_smoke_dataset(adapter.load(limit=1))
-    else:  # pragma: no cover - RunScope 只有 smoke / full
+    else:  # pragma: no cover - RunScope 是封闭枚举
         raise ConfigurationError(f"unsupported HaluMem run scope: {request.run_scope}")
 
     metadata = copy.deepcopy(dataset.metadata)

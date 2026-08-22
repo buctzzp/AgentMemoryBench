@@ -7,7 +7,7 @@
 
 [smoke]
 answer_builder = "benchmark"
-llm_model = "mimo-v2.5"
+llm_model = "ox-alpha-free"
 structured_output_mode = "json_object"
 llm_temperature = 1.0
 llm_max_tokens = 16384

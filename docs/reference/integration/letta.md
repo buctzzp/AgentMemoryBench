@@ -165,8 +165,8 @@ resume。named volume 是本机外部状态：跨机器只复制 outputs 不足�
 
 ## 6. API runtime 与观测
 
-- smoke：`opencodego/mimo-v2.5`，Chat Completions，显式
-  `thinking={type: disabled}`；
+- smoke：`opencodego/ox-alpha-free`，Chat Completions，显式
+  `reasoning_effort=low`；
 - official_full：`primary/gpt-4o-mini`，provider default Chat Completions 行为；
 - build LLM 每次真实 response usage 逐调用记录；缺 usage fail-fast；
 - retrieval 记录 wall-clock latency，LLM/embedding 调用应为零；

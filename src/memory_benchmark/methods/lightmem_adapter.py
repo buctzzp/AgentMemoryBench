@@ -59,6 +59,9 @@ from memory_benchmark.core.provider_protocol import (
     UnitRef,
 )
 from memory_benchmark.methods.image_text import turn_text_with_images
+from memory_benchmark.methods.openai_transport import (
+    with_chat_completions_request_overrides,
+)
 from memory_benchmark.observability import capture_method_output
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
@@ -443,7 +446,10 @@ class LightMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
         ).expanduser().resolve()
         if answer_client is None and openai_settings is not None:
             answer_client = _OpenAIAnswerClient(
-                client=OpenAI(**openai_settings.to_client_kwargs()),
+                client=with_chat_completions_request_overrides(
+                    OpenAI(**openai_settings.to_client_kwargs()),
+                    openai_settings.chat_completions_request_overrides(),
+                ),
                 model=config.llm_model,
             )
         self._answer_client = answer_client
@@ -1460,9 +1466,14 @@ class LightMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
             return
         timeout = self.config.api_timeout_seconds
         max_retries = self.config.api_max_retries
-        manager.client = with_options(
-            timeout=timeout,
-            max_retries=max_retries,
+        manager.client = with_chat_completions_request_overrides(
+            with_options(
+                timeout=timeout,
+                max_retries=max_retries,
+            ),
+            self._openai_settings.chat_completions_request_overrides()
+            if self._openai_settings is not None
+            else None,
         )
 
     def _install_memory_manager_usage_observer(

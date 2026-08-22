@@ -28,6 +28,7 @@ LANGMEM_WORKER_STATE_SCHEMA_VERSION = "langmem-worker-state-v1"
 _NAMESPACE_PREFIX = "memories"
 _MAX_NAMESPACE_ITEMS = 1_000_000
 _ALLOWED_ROLES = frozenset({"user", "assistant"})
+_OPENCODEGO_REASONING_EFFORT_LOW_MODELS = frozenset({"ox-alpha-free"})
 
 
 def _required_text(value: Any, label: str) -> str:
@@ -468,7 +469,10 @@ class _WorkerEngine:
         if self.config["api_base_url"] is not None:
             chat_kwargs["base_url"] = self.config["api_base_url"]
         if self.config["api_provider"] == "opencodego":
-            chat_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+            if self.config["llm_model"] in _OPENCODEGO_REASONING_EFFORT_LOW_MODELS:
+                chat_kwargs["reasoning_effort"] = "low"
+            else:
+                chat_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         chat_model = ChatOpenAI(**chat_kwargs)
         self.embedding_model = _ObservedEmbeddings()
         self.usage_callback = _ObservedUsageCallback()

@@ -285,6 +285,8 @@ def prepare_locomo_run(
     adapter = LoCoMoAdapter(project_root)
     if request.run_scope is RunScope.FULL:
         dataset = adapter.load()
+    elif request.run_scope is RunScope.PILOT:
+        dataset = adapter.load(limit=request.smoke_conversation_limit)
     elif request.run_scope is RunScope.SMOKE:
         source_dataset = adapter.load(limit=request.smoke_conversation_limit)
         dataset = build_locomo_smoke_dataset(
@@ -292,7 +294,7 @@ def prepare_locomo_run(
             turn_limit=request.smoke_turn_limit,
             conversation_limit=request.smoke_conversation_limit,
         )
-    else:  # pragma: no cover - RunScope 只有 smoke / full
+    else:  # pragma: no cover - RunScope 是封闭枚举
         raise ConfigurationError(f"unsupported LoCoMo run scope: {request.run_scope}")
 
     metadata = copy.deepcopy(dataset.metadata)

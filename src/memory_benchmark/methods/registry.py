@@ -111,6 +111,24 @@ from .simplemem_adapter import (
 )
 
 
+_OPENAI_TRANSPORT_SUPPORT_PATH = Path(
+    "src/memory_benchmark/methods/openai_transport.py"
+)
+
+
+def _openai_transport_support_identity(
+    path_settings: PathSettings,
+) -> dict[str, object]:
+    """返回共享 OpenAI-compatible 请求覆写层的公开身份。"""
+
+    return {
+        "transport_support_path": _OPENAI_TRANSPORT_SUPPORT_PATH.as_posix(),
+        "transport_support_sha256": _sha256_file(
+            path_settings.project_root / _OPENAI_TRANSPORT_SUPPORT_PATH
+        ),
+    }
+
+
 @dataclass(frozen=True)
 class MethodBuildContext:
     """构造一次运行所需 method 实例的依赖集合。
@@ -1147,6 +1165,7 @@ def _simplemem_efficiency_instrumentation_identity(
     wrapper_relative_path = Path("src/memory_benchmark/methods/simplemem_adapter.py")
     return {
         "collector_schema": 1,
+        **_openai_transport_support_identity(path_settings),
         "wrapper_path": wrapper_relative_path.as_posix(),
         "wrapper_sha256": _sha256_file(path_settings.project_root / wrapper_relative_path),
         "llm_tokenizer": config.llm_model,
@@ -1164,8 +1183,7 @@ def _build_amem_system(context: MethodBuildContext) -> MemoryProvider:
         raise ConfigurationError("A-Mem factory requires OpenAI settings")
     system = AMem(
         config=context.config,
-        openai_api_key=context.openai_settings.api_key,
-        openai_base_url=context.openai_settings.base_url,
+        openai_settings=context.openai_settings,
         storage_root=context.storage_root,
         path_settings=context.path_settings,
         efficiency_collector=context.efficiency_collector,
@@ -1235,6 +1253,7 @@ def _amem_efficiency_instrumentation_identity(
     wrapper_relative_path = Path("src/memory_benchmark/methods/amem_adapter.py")
     return {
         "collector_schema": 1,
+        **_openai_transport_support_identity(path_settings),
         "wrapper_path": wrapper_relative_path.as_posix(),
         "wrapper_sha256": _sha256_file(path_settings.project_root / wrapper_relative_path),
         "llm_tokenizer": config.llm_model,
@@ -1339,6 +1358,7 @@ def _lightmem_efficiency_instrumentation_identity(
     wrapper_relative_path = Path("src/memory_benchmark/methods/lightmem_adapter.py")
     return {
         "collector_schema": 1,
+        **_openai_transport_support_identity(path_settings),
         "wrapper_path": wrapper_relative_path.as_posix(),
         "wrapper_sha256": _sha256_file(path_settings.project_root / wrapper_relative_path),
         "llm_tokenizer": config.llm_model,
@@ -1399,6 +1419,7 @@ def _mem0_efficiency_instrumentation_identity(
     wrapper_relative_path = Path("src/memory_benchmark/methods/mem0_adapter.py")
     return {
         "collector_schema": 1,
+        **_openai_transport_support_identity(path_settings),
         "wrapper_path": wrapper_relative_path.as_posix(),
         "wrapper_sha256": _sha256_file(path_settings.project_root / wrapper_relative_path),
         "extraction_llm_hook": "mem0-openai-response-callback",
@@ -1590,6 +1611,7 @@ def _memoryos_efficiency_instrumentation_identity(
     wrapper_relative_path = Path("src/memory_benchmark/methods/memoryos_adapter.py")
     return {
         "collector_schema": 1,
+        **_openai_transport_support_identity(path_settings),
         "wrapper_path": wrapper_relative_path.as_posix(),
         "wrapper_sha256": _sha256_file(path_settings.project_root / wrapper_relative_path),
         "llm_tokenizer": config.llm_model,
@@ -1894,6 +1916,13 @@ def _simplemem_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityD
     )
 
 
+_MAIN_PROFILE_SECTIONS = (
+    ("smoke", "smoke"),
+    ("pilot", "smoke"),
+    ("official-full", "official_full"),
+)
+
+
 _REGISTRATIONS = {
     "amem": MethodRegistration(
         name="amem",
@@ -1904,10 +1933,7 @@ _REGISTRATIONS = {
                 MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
-        profile_sections=(
-            ("smoke", "smoke"),
-            ("official-full", "official_full"),
-        ),
+        profile_sections=_MAIN_PROFILE_SECTIONS,
         profile_relative_path=Path("configs/methods/amem.toml"),
         config_type=AMemConfig,
         requires_api=True,
@@ -1938,10 +1964,7 @@ _REGISTRATIONS = {
                 MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
-        profile_sections=(
-            ("smoke", "smoke"),
-            ("official-full", "official_full"),
-        ),
+        profile_sections=_MAIN_PROFILE_SECTIONS,
         profile_relative_path=Path("configs/methods/everos.toml"),
         config_type=EverOSConfig,
         requires_api=True,
@@ -1974,10 +1997,7 @@ _REGISTRATIONS = {
                 MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
-        profile_sections=(
-            ("smoke", "smoke"),
-            ("official-full", "official_full"),
-        ),
+        profile_sections=_MAIN_PROFILE_SECTIONS,
         profile_relative_path=Path("configs/methods/graphiti.toml"),
         config_type=GraphitiConfig,
         requires_api=True,
@@ -2010,10 +2030,7 @@ _REGISTRATIONS = {
                 MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
-        profile_sections=(
-            ("smoke", "smoke"),
-            ("official-full", "official_full"),
-        ),
+        profile_sections=_MAIN_PROFILE_SECTIONS,
         profile_relative_path=Path("configs/methods/mem0.toml"),
         config_type=Mem0Config,
         requires_api=True,
@@ -2045,10 +2062,7 @@ _REGISTRATIONS = {
                 MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
-        profile_sections=(
-            ("smoke", "smoke"),
-            ("official-full", "official_full"),
-        ),
+        profile_sections=_MAIN_PROFILE_SECTIONS,
         profile_relative_path=Path("configs/methods/lightmem.toml"),
         config_type=LightMemConfig,
         requires_api=True,
@@ -2079,10 +2093,7 @@ _REGISTRATIONS = {
                 MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
-        profile_sections=(
-            ("smoke", "smoke"),
-            ("official-full", "official_full"),
-        ),
+        profile_sections=_MAIN_PROFILE_SECTIONS,
         profile_relative_path=Path("configs/methods/memoryos.toml"),
         config_type=MemoryOSPaperConfig,
         requires_api=True,
@@ -2114,10 +2125,7 @@ _REGISTRATIONS = {
                 MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
-        profile_sections=(
-            ("smoke", "smoke"),
-            ("official-full", "official_full"),
-        ),
+        profile_sections=_MAIN_PROFILE_SECTIONS,
         profile_relative_path=Path("configs/methods/letta.toml"),
         config_type=LettaConfig,
         requires_api=True,
@@ -2149,10 +2157,7 @@ _REGISTRATIONS = {
                 MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
-        profile_sections=(
-            ("smoke", "smoke"),
-            ("official-full", "official_full"),
-        ),
+        profile_sections=_MAIN_PROFILE_SECTIONS,
         profile_relative_path=Path("configs/methods/langmem.toml"),
         config_type=LangMemConfig,
         requires_api=True,
@@ -2184,10 +2189,7 @@ _REGISTRATIONS = {
                 MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
-        profile_sections=(
-            ("smoke", "smoke"),
-            ("official-full", "official_full"),
-        ),
+        profile_sections=_MAIN_PROFILE_SECTIONS,
         profile_relative_path=Path("configs/methods/memos.toml"),
         config_type=MemOSConfig,
         requires_api=True,
@@ -2222,10 +2224,7 @@ _REGISTRATIONS = {
                 MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
-        profile_sections=(
-            ("smoke", "smoke"),
-            ("official-full", "official_full"),
-        ),
+        profile_sections=_MAIN_PROFILE_SECTIONS,
         profile_relative_path=Path("configs/methods/simplemem.toml"),
         config_type=SimpleMemConfig,
         requires_api=True,

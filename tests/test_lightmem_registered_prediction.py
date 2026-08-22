@@ -251,7 +251,7 @@ def test_lightmem_registered_prediction_runs_generic_runner_offline(
         lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="mimo-v2.5",
+            model="ox-alpha-free",
             provider="opencodego",
             judge_transport="chat_completions",
         ),

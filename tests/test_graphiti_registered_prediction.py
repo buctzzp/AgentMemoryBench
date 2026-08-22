@@ -311,7 +311,7 @@ def test_graphiti_halumem_operation_runner_keeps_extraction_update_and_qa(
         run_id="graphiti-halumem-operation-fake",
         benchmark_name="halumem",
         method_name="Graphiti OSS",
-        model_name="mimo-v2.5",
+        model_name="ox-alpha-free",
         output_root=tmp_path,
     )
     provider = _RegisteredGraphiti(
@@ -321,7 +321,7 @@ def test_graphiti_halumem_operation_runner_keeps_extraction_update_and_qa(
         openai_settings=OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="mimo-v2.5",
+            model="ox-alpha-free",
             provider="opencodego",
             judge_transport="chat_completions",
         ),
@@ -481,7 +481,7 @@ def _install_offline_stack(
         lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
-            model="mimo-v2.5",
+            model="ox-alpha-free",
             provider="opencodego",
             judge_transport="chat_completions",
         ),

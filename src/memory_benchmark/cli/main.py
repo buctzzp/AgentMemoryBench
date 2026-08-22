@@ -164,9 +164,10 @@ def _add_prediction_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "prediction_mode",
         nargs="?",
-        choices=["smoke", "formal"],
+        choices=["smoke", "pilot", "formal"],
         help=(
-            "CLI v2 mode: smoke for tiny connectivity tests, formal for "
+            "CLI v2 mode: smoke for tiny connectivity tests, pilot for one "
+            "complete isolation with the smoke TOML section, formal for "
             "official-profile runs."
         ),
     )
@@ -506,13 +507,15 @@ def _normalize_prediction_args(args: argparse.Namespace) -> dict[str, Any]:
 
     if args.prediction_mode is None:
         return _normalize_legacy_prediction_args(args)
-    if args.prediction_mode == "smoke" and args.profile is not None:
+    if args.prediction_mode in {"smoke", "pilot"} and args.profile is not None:
         raise MemoryBenchmarkError(
-            "Do not pass --profile with 'predict smoke'; smoke always selects "
-            "the registered smoke TOML section."
+            f"Do not pass --profile with 'predict {args.prediction_mode}'; "
+            "this mode selects its registered TOML section automatically."
         )
     if args.prediction_mode == "smoke":
         return _normalize_smoke_prediction_args(args)
+    if args.prediction_mode == "pilot":
+        return _normalize_pilot_prediction_args(args)
     return _normalize_formal_prediction_args(args)
 
 
@@ -678,6 +681,42 @@ def _normalize_smoke_prediction_args(args: argparse.Namespace) -> dict[str, Any]
         "membench_sources": _validate_membench_sources(
             args.membench_sources, is_membench=(args.benchmark == "membench")
         ),
+    }
+
+
+def _normalize_pilot_prediction_args(args: argparse.Namespace) -> dict[str, Any]:
+    """构造完整首 isolation、smoke method 配置的成本 pilot。"""
+
+    if args.retry_failed_conversations and not args.resume:
+        raise MemoryBenchmarkError("--retry-failed requires --resume")
+    forbidden = {
+        "rounds": args.rounds,
+        "turns": args.turns,
+        "sessions": args.sessions,
+        "sources": args.sources,
+        "membench sources": args.membench_sources,
+        "conversations": args.conversations,
+        "conversation budget": args.conversation_budget,
+        "questions per conversation": args.questions_per_conversation,
+    }
+    supplied = tuple(name for name, value in forbidden.items() if value is not None)
+    if supplied:
+        raise MemoryBenchmarkError(
+            "predict pilot owns its complete-isolation shape; do not pass: "
+            + ", ".join(supplied)
+        )
+    return {
+        "profile": "pilot",
+        "confirm_full": True,
+        "smoke_turn_limit": 1,
+        "smoke_round_limit": None,
+        "smoke_conversation_limit": 1,
+        "smoke_session_limit": None,
+        "workers": _positive_or_none(args.workers, field_name="workers"),
+        "max_new_conversations": None,
+        "question_limit_per_conversation": None,
+        "output_layout": "hierarchical",
+        "membench_sources": (),
     }
 
 

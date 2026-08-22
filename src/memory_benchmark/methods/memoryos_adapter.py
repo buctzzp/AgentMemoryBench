@@ -85,6 +85,9 @@ from memory_benchmark.observability.efficiency import (
 )
 from memory_benchmark.observability import capture_method_output
 from memory_benchmark.methods.image_text import turn_text_with_images
+from memory_benchmark.methods.openai_transport import (
+    merge_chat_completions_request_overrides,
+)
 from memory_benchmark.utils.logger import get_logger
 
 
@@ -517,9 +520,13 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
             self.consume_granularity = consume_granularity
 
         settings = None
+        self._chat_request_overrides: dict[str, object] = {}
         if openai_settings is not None:
             self.openai_api_key = openai_settings.api_key
             self.openai_base_url = openai_settings.base_url
+            self._chat_request_overrides = (
+                openai_settings.chat_completions_request_overrides()
+            )
         else:
             if openai_api_key is None or openai_base_url is None:
                 try:
@@ -536,6 +543,10 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
                 openai_base_url = settings.openai.base_url
             self.openai_api_key = openai_api_key
             self.openai_base_url = openai_base_url
+            if settings is not None:
+                self._chat_request_overrides = (
+                    settings.openai.chat_completions_request_overrides()
+                )
 
         path_settings = settings.paths if settings is not None else self.path_settings
         if storage_root is None:
@@ -1228,11 +1239,16 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
             for attempt in range(1, total_attempts + 1):
                 try:
                     response = backend.client.client.chat.completions.create(
-                        model=model or config.llm_model,
-                        messages=messages,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        timeout=config.api_timeout_seconds,
+                        **merge_chat_completions_request_overrides(
+                            {
+                                "model": model or config.llm_model,
+                                "messages": messages,
+                                "temperature": temperature,
+                                "max_tokens": max_tokens,
+                                "timeout": config.api_timeout_seconds,
+                            },
+                            self._chat_request_overrides,
+                        )
                     )
                     content = response.choices[0].message.content or ""
                     _record_memoryos_llm_call(

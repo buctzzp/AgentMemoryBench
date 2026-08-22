@@ -117,7 +117,7 @@ def _install_offline_probe_runtime(
         "load_openai_settings",
         lambda project_root, api_provider=None: OpenAISettings(
             api_key="sk-test",
-            model="mimo-v2.5",
+            model="ox-alpha-free",
             provider="opencodego",
             judge_transport="chat_completions",
         ),

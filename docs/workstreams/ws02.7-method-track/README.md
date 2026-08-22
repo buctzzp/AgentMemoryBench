@@ -40,10 +40,11 @@ B1-B11 逐家接入 10 个 method。活跃支线统一从
   [七家冻结后差量核对](branches/method-recertification/notes/seven-method-post-freeze-delta-review.md)
   §5.3；十家产品接口、framework granularity 与产品 list/batch 语义见
   [Method 产品接口与注入粒度总账](../../reference/method-interface-inventory.md)。下一方向由
-  roadmap 与用户裁决；paused ws05 不自动恢复。
-- **冻结后 runtime 更新（2026-08-21）**：新 smoke 已在 run 创建前从 Muse 改判为
-  `opencodego/mimo-v2.5`；Muse 真调用出现 HTTP 成功但空 choice，旧 Muse/DeepSeek artifact
-  仍按各自模型槽精确回读。该更新不重写既有 frozen run，见
+  roadmap 与用户裁决；当前 ws05 已由用户显式恢复，ws02.7 本身仍无在途施工。
+- **冻结后 runtime 更新（2026-08-21）**：新 smoke 先在 run 创建前从 Muse 改判为
+  `opencodego/mimo-v2.5`，随后 ws05 按用户授权迁到限时免费 `opencodego/ox-alpha-free`；
+  旧 Mimo/Muse/DeepSeek artifact 仍按各自模型槽精确回读。该更新不重写既有 frozen run，早期
+  Muse→Mimo 证据见
   [runtime ruling](branches/api-runtime-smoke/notes/2026-08-21-muse-to-mimo-runtime-ruling.md)。
 - **声明缺口**：EverOS MemBench 100k 因缺 source time 且产品会把 timestamp 写进 Episode，
   诚实 unsupported；各家 metric N/A/author/full/resume 缺口仍按 frozen note 保留。Supermemory

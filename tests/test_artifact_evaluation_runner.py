@@ -85,7 +85,7 @@ def _smoke_openai_settings() -> OpenAISettings:
     return OpenAISettings(
         api_key="sk-test",
         base_url="https://opencode.example/v1",
-        model="mimo-v2.5",
+        model="ox-alpha-free",
         provider="opencodego",
         judge_transport="chat_completions",
     )

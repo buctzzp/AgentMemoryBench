@@ -105,6 +105,23 @@
     `RetrievalEvidence`、强反例和一份真实 artifact。若 runtime 仍盖 `valid/turn`，即使当前
     evaluator 列表没有调用该指标，也属于 capability contract 红点；只重开 evidence/GRID，
     旧 artifact 按旧 identity 回读，不能靠“没出 score”掩盖错误声明。
+25. **模型兼容探针必须复刻生产请求形状，并把容量下界与上限分开**：单次 `PONG` 只证明
+    SDK/endpoint 最小可达；还要分别探 answer、JSON judge、短预算 judge 与 method build
+    调用实际携带的 provider 参数，并核成功 response 的 usage。语义未精确服从但 HTTP 200
+    不能误报 transport failure，也不能当效果模型合格。并发阶梯全绿且没有 rate-limit header
+    只证明“至少可承受 N”，不证明最大并发；第一批真实矩阵应在该下界内留余量，用显式全局
+    semaphore 分批推进，禁止一次放飞全部格子。
+26. **HTTP 200 不是结构化输出契约通过**：provider 可能接受 `json_schema` 却忽略 schema，
+    或在并发下返回语义偏离但传输成功的文本。先分别验 transport、usage、结构解析和语义服从；
+    兼容修复只能放在命中的 method/provider 发送边界，不能全局降级所有请求。
+27. **完整低价 pilot 必须有诚实身份**：`smoke` 会裁 history，`official_full` 又绑定正式模型，
+    两者都不能冒充“便宜模型上的一个完整 isolation”。用独立 `RunScope.PILOT`，复用主 smoke
+    算法 section 但保留完整 isolation/全部问题、独立 manifest 和输出目录；CLI 已拥有的 shape
+    不能再靠手写 crop 参数覆盖。`predict smoke` 也不接受 `--profile`，先看当前命令帮助/测试，
+    不复制旧命令靠报错纠偏。
+28. **统一 LLM 是 policy 复用，不是业务状态 singleton**：公共层统一 identity、请求覆写、
+    timeout/retry、usage、redaction 与 observation；prompt、解析、产品内部重试和有状态 client
+    仍留在 method runtime。secret 负空间同时扫描 key 与 base URL 的精确值，不能只防 key。
 
 完整 33 条历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

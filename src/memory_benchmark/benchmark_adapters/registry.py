@@ -213,12 +213,14 @@ def _prepare_longmemeval_run(
     adapter = LongMemEvalAdapter(project_root, variant=request.variant)
     if request.run_scope is RunScope.FULL:
         dataset = adapter.load()
+    elif request.run_scope is RunScope.PILOT:
+        dataset = adapter.load(limit=request.smoke_conversation_limit)
     elif request.run_scope is RunScope.SMOKE:
         dataset = _build_longmemeval_smoke_dataset(
             adapter.load(limit=request.smoke_conversation_limit),
             round_limit=request.smoke_turn_limit,
         )
-    else:  # pragma: no cover - RunScope 只有 smoke / full
+    else:  # pragma: no cover - RunScope 是封闭枚举
         raise ConfigurationError(f"unsupported LongMemEval run scope: {request.run_scope}")
 
     variant_spec = next(

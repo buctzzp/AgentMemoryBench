@@ -414,6 +414,24 @@ def test_memreader_opencodego_compatibility_is_exact(
     }
 
 
+def test_memreader_opencodego_reasoning_low_compatibility_is_exact(
+    memos_product_models, monkeypatch
+):
+    """ox smoke 必须把 low reasoning 与 JSON object 一起送入请求 body。"""
+
+    monkeypatch.setenv(
+        "MEMRADER_PROVIDER_COMPATIBILITY",
+        "opencodego_json_reasoning_effort_low_v1",
+    )
+
+    config = memos_product_models.api_config.get_memreader_config()["config"]
+
+    assert config["extra_body"] == {
+        "reasoning_effort": "low",
+        "response_format": {"type": "json_object"},
+    }
+
+
 def test_memreader_unknown_provider_compatibility_fails_fast(
     memos_product_models, monkeypatch
 ):
@@ -2155,8 +2173,8 @@ def test_manifest_never_leaks_secrets_or_absolute_paths():
 
     assert manifest["adapter_version"] == "memos-v2.0.25-product-v4"
     assert manifest["build_llm_response_contract"] == (
-        "provider-aware-v1:"
-        "opencodego=json_object+thinking_disabled;"
+        "provider-aware-v2:"
+        "opencodego=model_aware_json_reasoning_control;"
         "primary=provider_default"
     )
     assert manifest["graph_db_credential_env"] == "MEMOS_NEO4J_PASSWORD"
@@ -2543,8 +2561,15 @@ def test_memos_environment_reads_secrets_only_from_declared_env_names(tmp_path):
             os.environ[config.graph_db_credential_env] = saved
 
 
+@pytest.mark.parametrize(
+    ("model", "expected_compatibility"),
+    [
+        ("mimo-v2.5", "opencodego_json_non_thinking_v1"),
+        ("ox-alpha-free", "opencodego_json_reasoning_effort_low_v1"),
+    ],
+)
 def test_memos_environment_selects_opencodego_reader_contract(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, model, expected_compatibility
 ):
     """smoke provider 只在初始化作用域内选择对应 reader 请求契约。"""
 
@@ -2556,17 +2581,14 @@ def test_memos_environment_selects_opencodego_reader_contract(
     openai = OpenAISettings(
         api_key="sk-opencodego-unit-test",
         base_url="https://example.invalid/v1",
-        model="mimo-v2.5",
+        model=model,
         provider="opencodego",
         judge_transport="chat_completions",
     )
 
     values = _memos_environment(config, openai, load_path_settings())
 
-    assert (
-        values["MEMRADER_PROVIDER_COMPATIBILITY"]
-        == "opencodego_json_non_thinking_v1"
-    )
+    assert values["MEMRADER_PROVIDER_COMPATIBILITY"] == expected_compatibility
     assert "sk-opencodego-unit-test" not in repr(
         {
             "compatibility": values["MEMRADER_PROVIDER_COMPATIBILITY"],

@@ -85,7 +85,10 @@ def test_observed_completions_preserves_request_and_adds_opencodego_control() ->
     """endpoint wrapper 只追加 thinking disabled，并记录精确成功 usage。"""
 
     engine = _WorkerEngine()
-    engine.config = {"api_provider": "opencodego"}
+    engine.config = {
+        "api_provider": "opencodego",
+        "llm_model": "mimo-v2.5",
+    }
     real = _FakeCompletions(_response(11, 3))
     wrapper = _ObservedCompletions(engine, real)
 
@@ -101,6 +104,32 @@ def test_observed_completions_preserves_request_and_adds_opencodego_control() ->
     assert real.calls[0]["extra_body"] == {"thinking": {"type": "disabled"}}
     assert engine.llm_observations == [
         {"input_tokens": 11, "output_tokens": 3}
+    ]
+
+
+def test_observed_completions_uses_reasoning_effort_for_ox() -> None:
+    """ox runtime 必须用公开 reasoning_effort，不能发送禁用 thinking。"""
+
+    engine = _WorkerEngine()
+    engine.config = {
+        "api_provider": "opencodego",
+        "llm_model": "ox-alpha-free",
+    }
+    real = _FakeCompletions(_response(7, 2))
+
+    asyncio.run(
+        _ObservedCompletions(engine, real).create(
+            model="ox-alpha-free",
+            messages=[{"role": "user", "content": "x"}],
+        )
+    )
+
+    assert real.calls == [
+        {
+            "model": "ox-alpha-free",
+            "messages": [{"role": "user", "content": "x"}],
+            "reasoning_effort": "low",
+        }
     ]
 
 

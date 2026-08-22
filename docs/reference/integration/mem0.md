@@ -2,7 +2,7 @@
 
 > 判据模板：`../method-integration-checklist.md` §B；勾选总表：`../integration-status.md`。
 > 状态：**method-frozen-v2（2026-07-20 current-v3 五格重认证完成）**。
-> 2026-08-21 后的新 smoke 改用 `opencodego/mimo-v2.5`；冻结 B11 仍是当时
+> 当前新 smoke/ws05 pilot 使用 `opencodego/ox-alpha-free`；冻结 B11 仍是当时
 > `gpt-4o-mini` 历史证据，不跨模型比较。现行运行身份见
 > [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
 > 2026-08-14 M1-B 后，新 run 由 `mem0.toml` profile 与 `answer_builder` 选择，并写

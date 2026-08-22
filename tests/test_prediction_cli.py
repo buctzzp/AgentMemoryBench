@@ -68,7 +68,7 @@ def _smoke_openai_settings() -> OpenAISettings:
     return OpenAISettings(
         api_key="sk-test",
         base_url="https://opencode.example/v1",
-        model="mimo-v2.5",
+        model="ox-alpha-free",
         provider="opencodego",
         judge_transport="chat_completions",
     )
@@ -1874,7 +1874,7 @@ def test_registered_prediction_builds_framework_answer_reader(
         "answer_prompt_file_sha256": hashlib.sha256(
             prompt_path.read_bytes()
         ).hexdigest(),
-        "answer_model": "mimo-v2.5",
+        "answer_model": "ox-alpha-free",
         "answer_parameters": {
             "message_role": "user",
             "temperature": 0.0,
@@ -1888,10 +1888,10 @@ def test_registered_prediction_builds_framework_answer_reader(
         "api_runtime": {
             "contract_version": "v2",
             "provider": "opencodego",
-            "model": "mimo-v2.5",
+            "model": "ox-alpha-free",
             "answer_transport": "chat_completions",
             "judge_transport": "chat_completions",
-            "thinking_mode": "disabled",
+            "thinking_mode": "reasoning_effort_low",
         },
         "provider_compatibility": "opencodego_locomo_explicit_completion_cap_4096_v3",
     }
@@ -1899,12 +1899,12 @@ def test_registered_prediction_builds_framework_answer_reader(
         descriptor.model_id for descriptor in runner_calls[0]["model_inventory"]
     } == {
         "mem0-answer-llm",
-        "mimo-v2.5",
+        "ox-alpha-free",
     }
     assert captured_settings == [_smoke_openai_settings()]
     assert captured_answer_settings == [
         AnswerLLMSettings(
-            model="mimo-v2.5",
+            model="ox-alpha-free",
             message_role="user",
             temperature=0.0,
             max_tokens=4096,
