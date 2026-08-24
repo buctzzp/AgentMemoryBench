@@ -31,8 +31,12 @@ LangMem、EverOS、Graphiti OSS。每家同时审查两条轴：
 
 1. `third_party/methods/MANIFEST.md` 锁定的官方产品/论文/评测仓库；
 2. method integration 页与已验收 evidence note，用于避免重复调查；
-3. 与 source lock 对应的论文正文、附录、消融、README、examples、eval/benchmark scripts；
-4. current source 的 config schema、constructor/factory、调用点和最终 payload。
+3. 与 source lock 对应的论文正文、附录、伪代码和消融；先画出可引用的**算法阶段图**，注明每个
+   阶段的输入、输出、状态改变、是否可选及论文身份，不能先从 config 字段名猜算法；
+4. current README、examples 与 eval/benchmark scripts，用来核对论文阶段在公开实现和作者实验中
+   是否实际启用；
+5. current source 的 config schema、constructor/factory、调用点和最终 payload，用来证明字段不是
+   dead/overridden config，并分清算法参数、产品能力开关与纯 runtime 参数。
 
 已有 note 是检索入口，不替代 current source 复核。测试只作行为证据，不可单独覆盖论文、源码或
 官方 harness。
@@ -98,6 +102,10 @@ tier 与用户裁决。
 关键值做零 API mutation；若翻转后生产调用/state/identity 都不变，先调查 dead/overridden config，
 不能继续把它当有效算法旋钮。数值默认只有在没有更强官方覆盖、不是 demo/成本保护默认、且不关闭
 完整算法阶段时才可直接采用。
+
+每家 method 的 note 必须先给出“论文/技术报告阶段 → current source 阶段 → 参数控制点”的三栏映射。
+没有正式论文时，按官方 technical report、design doc、README architecture 与 current source 逐级补证，
+并明确证据等级；找不到正式机制说明不等于可以只抄构造器默认值。
 
 ## 6. 配置与实现边界
 

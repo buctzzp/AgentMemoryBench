@@ -94,6 +94,28 @@ LightMem `pre_compress` 是现行判例：通用 schema 默认 `False`，但论�
 十家逐项取证与进度入口见
 [`ws05.1 method profile provenance`](../workstreams/ws05.1-method-profile-provenance/README.md)。
 
+### 1.2 配置格式不是公平性合同
+
+YAML、TOML、`.env` 或 Python 常量都只是声明载体；真正决定实验身份的是配置经过 merge、环境变量、
+CLI、adapter fallback 和 product factory 后形成的 **effective config**。审计配置时必须追完：
+
+```text
+声明值 → merge/override → typed config → adapter/factory → 最终 product object/payload
+```
+
+2026-08-24 对 OmniMemEval、MemoryData、EverCore evaluation、MemEval、
+agent-memory-benchmark 与 memorybench 的源码对照显示：YAML 常被选择是因为它便于表达嵌套
+dict/list、多行 prompt、环境变量占位和深合并；但深合并也很容易让 benchmark 在运行时静默修改
+method 参数。单一 YAML 或 `.env` 被多条命令复用，同样不能证明跨 benchmark 的 effective config
+固定。完整证据见
+[`third-party-framework-config-strategy-audit.md`](../workstreams/ws05.1-method-profile-provenance/notes/third-party-framework-config-strategy-audit.md)。
+
+本项目当前继续使用 TOML：十家 method 的主算法配置是浅层、静态、有限的强类型字段，
+`[method]` 与稀疏 `[author_<benchmark>]` 已能清楚表达；迁移文件格式只会增加兼容成本，不会自动
+获得类型校验、职责分层、provenance 或公平性。若未来出现大规模矩阵、继承树或深层 backend
+组合的真实需求，可以重新评估 YAML 或独立 planner DSL，但仍须先展开为同一强类型 effective
+config，拒绝 unknown/duplicate key，并把最终身份写入 manifest/resume。
+
 ## 2. 运行选择
 
 - 超参数值只写在 TOML；CLI 不提供几十个逐项覆盖参数。

@@ -7,22 +7,24 @@
 
 - [x] 把参数语义、证据来源、主配置/作者配置边界写入长期政策。
 - [x] 建立独立 workstream、恢复胶囊、spec 与串行计划。
-- [ ] 建立 `notes/method-profile-provenance-matrix.md`，预填十家已有 repo/论文/官方 benchmark
+- [x] 建立 `notes/method-profile-provenance-matrix.md`，预填十家已有 repo/论文/官方 benchmark
   覆盖与 `src/memory_benchmark/prompts/author/` 现状。
-- [ ] 给每家 note 固定同一字段模板，并加文档标准门，防止十份记录逐渐漂移。
+- [x] 给每家 note 固定同一字段模板，并加文档标准门，防止十份记录逐渐漂移。
+- [x] 模板首屏固定包含论文/技术报告 identity、算法阶段图、current source 对应调用链；没有论文时
+  记录官方替代材料与证据等级，禁止跳过机制理解直接填写参数表。
 
 ## M0.5 第三方框架配置策略对照
 
-- [ ] 盘点 `第三方框架参考/` 根目录，筛出真正覆盖多 method × 多 benchmark 且具有可追配置链的
+- [x] 盘点 `第三方框架参考/` 根目录，筛出真正覆盖多 method × 多 benchmark 且具有可追配置链的
   框架；至少包括 OmniMemEval、MemoryData、EverOS/EverCore evaluation，并判断 MemEval、
   agent-memory-benchmark、memorybench 是否达到深读门槛。
-- [ ] 对每个入选框架追踪“声明配置 → merge/override → adapter/product 最终参数”，不能只读
+- [x] 对每个入选框架追踪“声明配置 → merge/override → adapter/product 最终参数”，不能只读
   `env_examples`、YAML 文件名或 README。
-- [ ] 逐 method 判断其策略属于跨 benchmark 真统一、repo default、per-benchmark 调参、混合/
+- [x] 逐 method 判断其策略属于跨 benchmark 真统一、repo default、per-benchmark 调参、混合/
   隐式覆盖或证据不足；同时记录 embedding、LLM、prompt/judge 与 runtime 参数是否被混在一起。
-- [ ] 产出 `notes/third-party-framework-config-strategy-audit.md`，提炼可借鉴机制与不可照搬风险；
+- [x] 产出 `notes/third-party-framework-config-strategy-audit.md`，提炼可借鉴机制与不可照搬风险；
   第三方选择不得直接生成本项目 author profile。
-- [ ] 根据对照结果只修订本 spec/长期配置政策的判据，不直接修改十家 TOML；参数改动仍须等
+- [x] 根据对照结果只修订本 spec/长期配置政策的判据，不直接修改十家 TOML；参数改动仍须等
   对应 method 的官方一手证据批次。
 
 ## M1-M10 单 method 顺序

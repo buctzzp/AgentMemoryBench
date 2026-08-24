@@ -23,8 +23,9 @@ created: 2026-07-05
   `2259 passed, 3 deselected, 25 warnings, 29 subtests passed`，扩大 pilot 尚未恢复。
 - **禁止事项**：本支线 M5 完成且用户重新批准规模/run_id 前，不恢复真实 pilot；不得改写旧
   artifact、把旧 embedding build 重标为新 controlled identity，或用 lineage 伪造 metric 资格。
-- **当前动作**：先完成 ws05.1 M0 十家资产模板与 M0.5 第三方框架配置策略对照，再进入 M1
-  LightMem；用户重新批准前不创建任何真实 API run。
+- **当前动作**：ws05.1 M0/M0.5 已完成，当前进入 M1 LightMem：按 paper 阶段图核 current source、
+  LoCoMo/LongMemEval official harness、完整 answer builder 与最终 effective 参数；用户重新批准前
+  不创建任何真实 API run。
 
 ## 目标
 
