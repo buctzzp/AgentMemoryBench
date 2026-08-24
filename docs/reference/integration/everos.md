@@ -1,8 +1,9 @@
 # EverOS 接入实例（B1-B11 逐项）
 
 > 判据模板：`../method-integration-checklist.md` §B；勾选总表：`../integration-status.md`。
-> 当前状态：**`method-frozen-v1`**；18 份 current v6 真实 smoke、W1/W2、artifact、效率、
-> 隐私与产品状态门均已关闭。冻结证书见
+> 当前状态：历史 **`method-frozen-v1`** 证据仍有效；18 份 v6 真实 smoke、W1/W2、artifact、
+> 隐私与产品状态门均已关闭。2026-08-24 主 build identity 已升级到 controlled MiniLM v7，
+> 零 API 产品门通过，但 v7 真实 smoke 尚待 ws05 M5 后以新 run-id 重建。冻结证书见
 > [`everos-frozen-v1.md`](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-frozen-v1.md)。
 
 - 主 source：官方稳定版 `EverOS v1.2.3@48fc9084888bc17100053227284f939a5aca5e91`，
@@ -13,7 +14,7 @@
 - 产品调用面：在隔离 worker 内进入官方 `create_app()` lifespan，直接调用与
   `/api/v2/memory/add|flush|search|get` 相同的 typed DTO/service。它仅省去 HTTP transport，
   不绕过 boundary、Episode、Cascade、OME、SQLite、LanceDB 或产品搜索算法。
-- adapter：`everos-product-chat-v6`；provider v3、worker protocol v2、sidecar v2、
+- adapter：`everos-product-chat-v7`；provider v3、worker protocol v3、sidecar v2、
   `consume_granularity=session`。每个
   provider 独占 Python 3.12 worker，每个 conversation 使用独立 product root；worker 进入
   official lifespan 后直接调用 typed `memorize/search/get`。
@@ -115,14 +116,15 @@ anchor：它没有 source identity，只满足 EverOS Episode 边界；其他 si
   resume/clean retry，清理和 shutdown 失败可见。
 - **B4/B5 readout**：public HYBRID search 保留 Episode/atomic facts、score 与稳定 rank；主轨
   多 owner 以 score→owner→product rank 合并。zero hit 与 backend failure 分开。
-- **B7 observability**：product response exact LLM/embedding usage 由透传 wrapper 收集，只有
-  operation 成功才回放。reranker capability 同样在 lazy SearchManager 前被纯透传包装；current
-  chat/Episode HYBRID 预期零调用，任一非空 rerank 观测均 fail-fast；answer/judge 沿框架公共观测。
-- **B7 smoke transport**：OpenCodeGo 只承担 build/answer/judge Chat Completions；smoke 的
-  `Qwen/Qwen3-Embedding-4B`/1024 由 OpenRouter OpenAI-compatible embeddings 承载，模型、维度、
-  LanceDB L2 与产品 pipeline 不变。provider 与 credential 变量名进入 manifest；key/base URL 不落
-  artifact。official-full 仍使用产品默认 DeepInfra transport。HYBRID Episode 主轨允许未配置
-  reranker 启动，但若未来路径实际触发 rerank，会因 capability 缺失或非空观测立即失败。
+- **B7 observability**：product response exact LLM usage 由透传 wrapper 收集；本地 MiniLM 记录
+  真实 tokenizer 输入量与 wall-clock latency，失败尝试进入 append-only attempt ledger。reranker
+  capability 固定为 `None`；若 ambient 配置意外启用，worker 在 lazy SearchManager 构造前
+  fail-fast。answer/judge 沿框架公共观测。
+- **B7 controlled embedding**：OpenCodeGo/primary 只承担 build/answer/judge LLM。v7 经 upstream
+  `EmbeddingProvider`/`EmbeddingCapability` seam 注入本地 `all-MiniLM-L6-v2`/384；项目 patch 只让
+  provider 与六张 LanceDB schema 共读公开 dimension，默认仍为 upstream 1024。模型内 L2
+  normalize + LanceDB L2 进入 manifest，rerank 保持 disabled-zero-call。旧 v6 Qwen/1024 状态必须
+  全量重建，不能 resume 或重标。
 - **B9 artifact 边界**：v6 不再把 upstream `default.toml` 复制成 run-local `everos.toml`；产品
   继续从 vendored package 读取默认值并接受受限环境覆盖，root 只保留运行时实际 watch 的
   `ome.toml`。18 个 run 对 `.env` key/base URL 与 upstream endpoint 的精确值扫描均为零命中。
@@ -154,7 +156,8 @@ anchor：它没有 source identity，只满足 EverOS Episode 边界；其他 si
 - [机器 smoke plans](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-smoke-plans-v1.json)
 - [method-frozen-v1 证书](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-frozen-v1.md)
 - [EverOS 接入支线](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/README.md)
+- [ws05 M1 controlled embedding 实现](../../workstreams/ws05-experiment-reporting/branches/runtime-config-and-observability/notes/2026-08-24-m1-implementation.md)
 
-当前判词：`EVEROS_METHOD_FROZEN_V1`。smoke 证明产品链、产物与资格边界可达，不把极小样本
-分数解释成效果排名；official-full、作者 LoCoMo calibration、真实 resume 与 full 成本 pilot
-仍是冻结后声明缺口。
+当前判词：`EVEROS_V7_ZERO_API_READY_FOR_M5`。v6 smoke 继续证明既有产品链、输入、产物与资格
+边界，不把极小样本分数解释成效果排名；v7 controlled build 已通过 patch 重放、本地模型、schema
+维度与 official lifespan 零 API 门，但尚不能借旧 v6 run 宣称新 embedding 实跑完成。

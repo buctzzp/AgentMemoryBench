@@ -53,8 +53,11 @@ MemoryStoreManager.ainvoke(
 `("memories", "{langgraph_user_id}")`。产品返回 list 中每个 changed item 必须是 dict 且有
 `key: str`；它表示本次 insert/update 后发生变化的 current memory，不是逐 source-turn 回声。
 worker 随后读取 exact store snapshot，并向 adapter 返回
-`changed_memory_keys: list[str]`、`memory_count: int`、`reused_operation: bool`、LLM/embedding
-observation list 与 rehydration counts；adapter 映射为 `IngestResult.metadata`。
+`changed_memory_keys: list[str]`、与这些 key 同序的
+`changed_memories: list[{key: str, value: dict}]`、`memory_count: int`、
+`reused_operation: bool`、LLM/embedding observation list 与 rehydration counts；adapter
+映射为 `IngestResult.metadata`。`changed_memories` 是事务提交后的真实 current product value，
+不是 source turn 回显，也是 HaluMem session report 的唯一输入。
 
 ### 检索
 
@@ -106,7 +109,10 @@ source semantic mapping，因此 stable ranking=valid 与 provenance=N/A 必须�
   caption 统一使用 `[Sharing image that shows: ...]`，path/query/locator 不可达算法。
 - LongMemEval 的 assistant-first、连续同 role、singleton/odd tail，BEAM 10M orphan/mismatch，
   MemBench ThirdAgent user-only 都按 canonical 原序传入；不为“看起来像标准对话”制造假回复。
-- HaluMem 每 session 一次 `ainvoke()`；当前 evolved state 可立即供 update probe 与 QA 检索。
+- HaluMem 每 session 一次 `ainvoke()`；成功事务返回的 changed keys 必须在同一次完整 store
+  snapshot 中逐一存在，adapter 才在 session 边界报告对应 current values。结果丢失重放读取
+  completed operation journal 中同一份快照，不重新运行算法。当前 evolved state 同时供 update
+  probe 与 QA 检索。
 
 ## Metric 边界
 
@@ -117,8 +123,10 @@ source semantic mapping，因此 stable ranking=valid 与 provenance=N/A 必须�
   assertion 为 `valid`，但 semantic provenance 仍为 `N/A`，不能据此计算 source-qrel 指标。
 - 五格 Recall/Precision/F1@k 与 LongMemEval NDCG 均 N/A；这是 evolved memory 的语义映射
   不可证，不是 LangMem 没有检索接口。
-- HaluMem update/QA 为 valid；extraction 与 memory-type 因 changed put 可能融合旧 memory、
-  不代表严格本 session memory point 而 N/A。
+- HaluMem extraction 为 valid：报告单元是本次 `ainvoke()` 实际 insert/update 后发生变化的
+  current product memory；融合旧 memory 是 LangMem 的更新语义，并不等于跨 session 多报未变化
+  单元。update/QA 与依赖 extraction 的 memory-type 也具备 evaluator 资格。该资格不外推为
+  source-turn Recall：changed memory 仍不具备 lossless source semantic lineage。
 
 ## 配置与 answer/judge
 
@@ -131,9 +139,13 @@ source semantic mapping，因此 stable ranking=valid 与 provenance=N/A 必须�
 
 ## 当前冻结边界
 
-M1/M2 与 B11 已全部闭合，冻结证书见
+原 product-v1 的 M1/M2 与 B11 已全部闭合，冻结证书见
 [LangMem method-frozen-v1](../../workstreams/ws02.7-method-track/branches/method-recertification/langmem/notes/langmem-frozen-v1.md)：
 20 份 current run、47 个 conversation/question、9 个 croppable variant 的真实 W1/W2、2 个
 HaluMem fixed W1 以及 artifact/效率/隐私/state 机器门均通过。任何 current source/`uv.lock`、
 manager factory、store/ranking、message/time policy、wrapper identity 或 benchmark stable contract
 的实质漂移，都必须重开 ledger 对应门；lock-only upstream drift 先做影响审计，不机械重烧。
+
+2026-08-24 的 `langmem-background-product-v2` 只增加 completed-operation current-value 快照、
+HaluMem session report 与 retrieval callback 守门；零 API 强反例已闭合，但旧 v1 真实 artifact
+不能重标为 v2。下一次真实 pilot/smoke 必须使用新 run id 全量重建该 run 的 method state。

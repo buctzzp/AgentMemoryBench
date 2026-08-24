@@ -329,6 +329,11 @@ LangMem/Supermemory）逐个核：
 
 ## 超参数政策（架构师裁定，2026-07-09 用户提问后固化）
 
+> 本节保留 2026-07-09 历史裁决。其中“一律用 product default embedding”已被
+> 2026-08-24 controlled MiniLM 主比较政策取代；当前入口见
+> [`method-toml-and-answer-builder-policy.md`](../../reference/method-toml-and-answer-builder-policy.md)
+> 与 [ws05 M0 裁决](../ws05-experiment-reporting/branches/runtime-config-and-observability/notes/2026-08-24-m0-ruling.md)。
+
 - **一律用 method 官方【仓库/产品默认】超参数**（通用产品的默认配置，**不是**
   benchmark 专用配置如 eval/ 的调参），跨全部 benchmark 同一套、不 per-benchmark
   调优（调优 = 主场优势，同 ws02.5 接口原则）。实验声明"超参数 = method 官方默认

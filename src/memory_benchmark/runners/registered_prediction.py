@@ -27,13 +27,11 @@ from memory_benchmark.benchmark_adapters.contracts import (
 from memory_benchmark.config.settings import (
     AnswerLLMSettings,
     OPENCODEGO_API_PROVIDER,
-    build_api_runtime_manifest,
     load_openai_settings,
     load_path_settings,
-    resolve_api_model_for_provider,
-    resolve_api_provider_for_profile,
     resolve_answer_llm_settings,
 )
+from memory_benchmark.config.run_profiles import load_run_composition
 from memory_benchmark.core import (
     AddResult,
     AnswerPromptResult,
@@ -400,15 +398,17 @@ def run_registered_conversation_qa_prediction(
         MethodCapability.MEMORY_RETRIEVAL
         in method_registration.provided_capabilities
     )
-    api_provider = resolve_api_provider_for_profile(profile_name)
-    api_model = resolve_api_model_for_provider(api_provider)
-    api_runtime_manifest = build_api_runtime_manifest(
-        provider=api_provider,
-        model=api_model,
-    )
+    composition = resolved_profile.composition
+    api_provider = composition.runtime.provider
+    api_model = composition.runtime.model
+    api_runtime_manifest = composition.runtime.to_manifest_dict()
     # 注册表是 build identity 的单一事实源：从当前强类型 config manifest 解析，
     # 不由 config_track 再维护一份 method 静态矩阵。
-    config_manifest = config.to_manifest()
+    config_manifest = (
+        resolved_profile.method_config_manifest
+        if resolved_profile.method_config_manifest is not None
+        else config.to_manifest()
+    )
     build_identity_resolver = getattr(
         method_registration,
         "build_identity_resolver",
@@ -483,7 +483,14 @@ def run_registered_conversation_qa_prediction(
                 "of silently overriding method semantics"
             )
     source_identity = method_registration.source_identity_factory(path_settings)
-    max_workers = method_registration.max_workers_getter(config)
+    legacy_configured_max_workers = method_registration.max_workers_getter(config)
+    max_workers = composition.resolved_max_workers
+    if legacy_configured_max_workers != max_workers:
+        raise ConfigurationError(
+            f"{method_registration.display_name} legacy method max_workers "
+            f"{legacy_configured_max_workers} disagrees with execution composition "
+            f"{max_workers}; finish the profile migration instead of silently choosing one"
+        )
     max_workers = _resolve_smoke_max_workers(
         method_display_name=method_registration.display_name,
         profile_name=resolved_profile.public_name,
@@ -556,6 +563,7 @@ def run_registered_conversation_qa_prediction(
             config_manifest=config_manifest,
             source_identity=source_identity,
             workload_estimate=workload_estimate,
+            composition_manifest=composition.to_manifest_dict(),
             answer_reader_manifest=answer_reader_manifest,
             prompt_track=(
                 prompt_track
@@ -585,7 +593,7 @@ def run_registered_conversation_qa_prediction(
             run_id=selected_run_id,
             benchmark_name=benchmark_name,
             method_name=method_registration.display_name,
-            model_name=method_registration.model_name_getter(config),
+            model_name=api_model,
             output_root=selected_output_root,
             resume=resume,
             ensure_directories=False,
@@ -660,10 +668,17 @@ def run_registered_conversation_qa_prediction(
         load_openai_settings(
             project_root=path_settings.project_root,
             api_provider=api_provider,
+            expected_model=api_model,
         )
         if requires_openai_settings
         else None
     )
+    if openai_settings is not None:
+        openai_settings = replace(
+            openai_settings,
+            timeout_seconds=composition.runtime.timeout_seconds,
+            max_retries=composition.runtime.max_retries,
+        )
     if (
         openai_settings is not None
         and openai_settings.to_runtime_manifest_dict() != api_runtime_manifest
@@ -874,12 +889,14 @@ def _run_custom_conversation_qa_prediction(
             "custom method resume requires an explicit existing run_id"
         )
 
-    api_provider = resolve_api_provider_for_profile(profile_name)
-    api_model = resolve_api_model_for_provider(api_provider)
-    api_runtime_manifest = build_api_runtime_manifest(
-        provider=api_provider,
-        model=api_model,
+    composition = load_run_composition(
+        project_root=project_root,
+        profile_name=profile_name,
+        method_max_workers_cap=MAX_SMOKE_WORKERS,
     )
+    api_provider = composition.runtime.provider
+    api_model = composition.runtime.model
+    api_runtime_manifest = composition.runtime.to_manifest_dict()
     run_scope = _resolve_profile_run_scope(profile_name)
     selector = variant or benchmark_registration.default_variant
     selected_variants = resolve_variant_selector(benchmark_registration, variant)
@@ -980,6 +997,7 @@ def _run_custom_conversation_qa_prediction(
             provenance_granularity=custom_provider_class.provenance_granularity,
             session_memory_report=custom_provider_class.session_memory_report,
             answer_reader_manifest=answer_reader_manifest,
+            composition_manifest=composition.to_manifest_dict(),
             allow_unsafe_custom_parallel=allow_unsafe_custom_parallel,
             prompt_track=prompt_track,
         )
@@ -1054,6 +1072,12 @@ def _run_custom_conversation_qa_prediction(
     openai_settings = load_openai_settings(
         project_root=path_settings.project_root,
         api_provider=api_provider,
+        expected_model=api_model,
+    )
+    openai_settings = replace(
+        openai_settings,
+        timeout_seconds=composition.runtime.timeout_seconds,
+        max_retries=composition.runtime.max_retries,
     )
     if openai_settings.to_runtime_manifest_dict() != api_runtime_manifest:
         raise ConfigurationError(
@@ -1181,6 +1205,7 @@ def _build_custom_method_manifest(
     provenance_granularity: str,
     session_memory_report: bool,
     answer_reader_manifest: dict[str, object],
+    composition_manifest: dict[str, object],
     allow_unsafe_custom_parallel: bool,
     prompt_track: str | None = None,
 ) -> dict[str, object]:
@@ -1202,6 +1227,7 @@ def _build_custom_method_manifest(
             "allow_unsafe_custom_parallel": allow_unsafe_custom_parallel,
         },
         "answer_reader": answer_reader_manifest,
+        "composition": composition_manifest,
     }
     if prompt_track is not None:
         manifest["prompt_track"] = prompt_track
@@ -1777,6 +1803,7 @@ def _build_method_manifest(
     config_manifest: dict[str, object],
     source_identity: dict[str, object],
     workload_estimate: dict[str, object] | None,
+    composition_manifest: dict[str, object] | None = None,
     answer_reader_manifest: dict[str, object] | None = None,
     prompt_track: str | None = None,
     retrieval_evidence_contract_version: str | None = None,
@@ -1789,6 +1816,10 @@ def _build_method_manifest(
         "config": config_manifest,
         "source": source_identity,
     }
+    if composition_manifest is not None:
+        if not isinstance(composition_manifest, dict):
+            raise ConfigurationError("composition_manifest must be a dict or None")
+        manifest["composition"] = composition_manifest
     if answer_reader_manifest is not None:
         manifest["answer_reader"] = answer_reader_manifest
     if prompt_track is not None:

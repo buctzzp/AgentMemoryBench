@@ -32,21 +32,24 @@ from memory_benchmark.core.provider_protocol import (
     RetrievalQuery,
     RetrievalResult,
     SessionBatch,
+    SessionMemoryReport,
     SessionRef,
 )
 from memory_benchmark.methods.image_text import turn_text_with_images
 from memory_benchmark.methods.worker_transport import (
     JsonLinesWorkerTransport,
     WORKER_TRANSPORT_LOGICAL_PATH,
+    WorkerCommandError,
 )
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
+    EfficiencyStage,
     MeasurementSource,
 )
 from memory_benchmark.storage import atomic_write_json
 
 
-LETTA_ADAPTER_VERSION = "letta-sleeptime-product-v2"
+LETTA_ADAPTER_VERSION = "letta-sleeptime-product-v3"
 LETTA_METHOD_DIRECTORY = "letta"
 LETTA_UPSTREAM_URL = "https://github.com/letta-ai/letta.git"
 LETTA_RELEASE_TAG = "0.16.8"
@@ -67,7 +70,7 @@ LETTA_EMPTY_MEMORY_SENTINEL = "(No Letta core memory available)"
 LETTA_WRAPPER_LOGICAL_PATH = "src/memory_benchmark/methods/letta_adapter.py"
 LETTA_WORKER_LOGICAL_PATH = "src/memory_benchmark/methods/letta_worker.py"
 LETTA_BOOTSTRAP_LOGICAL_PATH = "scripts/bootstrap_letta_runtime.sh"
-LETTA_SIDECAR_SCHEMA_VERSION = "v1"
+LETTA_SIDECAR_SCHEMA_VERSION = "v2"
 LETTA_NAMESPACE_ALGORITHM = "sha256(storage_root_relative|isolation_key)[:32]"
 LETTA_POSTGRES_USER = "letta"
 LETTA_POSTGRES_DATABASE = "letta"
@@ -728,6 +731,7 @@ class Letta(MemoryProvider):
         storage_root: Path,
         openai_settings: OpenAISettings,
         efficiency_collector: EfficiencyCollector | None = None,
+        session_memory_report: bool = False,
         benchmark_name: str | None = None,
         diagnostic_log_path: Path | None = None,
         runtime_factory: RuntimeFactory | None = None,
@@ -743,10 +747,14 @@ class Letta(MemoryProvider):
         self.storage_root = storage_root
         self.openai_settings = openai_settings
         self.efficiency_collector = efficiency_collector
+        if not isinstance(session_memory_report, bool):
+            raise ConfigurationError("Letta session_memory_report must be bool")
+        self.session_memory_report = session_memory_report
         self.benchmark_name = benchmark_name
         self.diagnostic_log_path = diagnostic_log_path
         self._runtime_factory = runtime_factory or LettaRuntime
         self._runtime: LettaRuntimeProtocol | None = None
+        self._session_report_memories: dict[tuple[str, str | None], list[str]] = {}
         self._cleaned = False
 
     def prepare(self, run_context: Any) -> None:
@@ -761,6 +769,10 @@ class Letta(MemoryProvider):
         if not isinstance(unit, SessionBatch):
             raise ConfigurationError("Letta provider only accepts SessionBatch")
         if not unit.events:
+            if self.session_memory_report:
+                self._session_report_memories[
+                    (unit.isolation_key, unit.session_id)
+                ] = []
             return IngestResult(
                 unit_ref=unit.ref,
                 metadata={"method": "letta", "source_message_count": 0, "build_call_count": 0},
@@ -770,6 +782,14 @@ class Letta(MemoryProvider):
         state = runtime.ensure_subject(subject_id)
         self._persist_subject_state(unit.isolation_key, subject_id, state)
         messages = self._build_messages(unit)
+        report_record = None
+        if self.session_memory_report:
+            report_record = self._prepare_session_report(
+                unit=unit,
+                subject_id=subject_id,
+                messages=messages,
+                runtime=runtime,
+            )
         batches = _message_chunks(messages, self.config.max_messages_per_batch)
         step_count = 0
         llm_call_count = 0
@@ -793,11 +813,15 @@ class Letta(MemoryProvider):
             if not self._begin_operation(unit.isolation_key, operation_id):
                 reused_build_call_count += 1
                 continue
-            result = runtime.ingest(
-                subject_id=subject_id,
-                operation_id=operation_id,
-                content=wrapper,
-            )
+            try:
+                result = runtime.ingest(
+                    subject_id=subject_id,
+                    operation_id=operation_id,
+                    content=wrapper,
+                )
+            except WorkerCommandError as exc:
+                self._record_failed_worker_usage(exc.details)
+                raise
             persisted_state = self._load_subject_state(
                 unit.isolation_key,
                 required=True,
@@ -822,6 +846,16 @@ class Letta(MemoryProvider):
             step_count += current_steps
             llm_call_count += len(usage)
             self._complete_operation(unit.isolation_key, operation_id)
+        if report_record is not None:
+            memories = self._complete_session_report(
+                unit=unit,
+                subject_id=subject_id,
+                runtime=runtime,
+                report_record=report_record,
+            )
+            self._session_report_memories[
+                (unit.isolation_key, unit.session_id)
+            ] = memories
         return IngestResult(
             unit_ref=SessionRef(
                 isolation_key=unit.isolation_key,
@@ -840,6 +874,126 @@ class Letta(MemoryProvider):
             },
         )
 
+    def end_session(self, ref: SessionRef) -> SessionMemoryReport | None:
+        """报告该 session 对 attached core blocks 造成的稳定 ID before/after delta。"""
+
+        if not self.session_memory_report:
+            return None
+        memories = self._session_report_memories.pop(
+            (ref.isolation_key, ref.session_id),
+            [],
+        )
+        return SessionMemoryReport(
+            session_ref=ref,
+            memories=memories,
+            metadata={
+                "method": "letta",
+                "memory_unit": "changed_attached_core_block",
+                "changed_block_count": len(memories),
+            },
+        )
+
+    def _prepare_session_report(
+        self,
+        *,
+        unit: SessionBatch,
+        subject_id: str,
+        messages: list[dict[str, str]],
+        runtime: LettaRuntimeProtocol,
+    ) -> dict[str, Any]:
+        """在任何 session build 前持久化 core-block baseline，保证 crash 后可重放。"""
+
+        session_key = _required_session_report_key(unit.session_id)
+        digest = _session_input_digest(messages)
+        state = self._load_subject_state(unit.isolation_key, required=True)
+        assert state is not None
+        existing = state["session_reports"].get(session_key)
+        if existing is not None:
+            if existing["input_digest"] != digest:
+                raise ConfigurationError(
+                    "Letta session report key was reused with different input"
+                )
+            return existing
+        before_blocks = self._read_core_blocks(
+            runtime=runtime,
+            subject_id=subject_id,
+            state=state,
+        )
+        record = {
+            "input_digest": digest,
+            "before_blocks": before_blocks,
+            "memories": None,
+        }
+        atomic_write_json(
+            self._sidecar_path(unit.isolation_key),
+            {
+                **state,
+                "session_reports": {**state["session_reports"], session_key: record},
+            },
+        )
+        return record
+
+    def _complete_session_report(
+        self,
+        *,
+        unit: SessionBatch,
+        subject_id: str,
+        runtime: LettaRuntimeProtocol,
+        report_record: dict[str, Any],
+    ) -> list[str]:
+        """完成或重放 session block delta，并把结果与 operation journal 一起持久化。"""
+
+        persisted_memories = report_record.get("memories")
+        if persisted_memories is not None:
+            return list(persisted_memories)
+        state = self._load_subject_state(unit.isolation_key, required=True)
+        assert state is not None
+        after_blocks = self._read_core_blocks(
+            runtime=runtime,
+            subject_id=subject_id,
+            state=state,
+        )
+        memories = _changed_block_values(
+            before=report_record["before_blocks"],
+            after=after_blocks,
+        )
+        session_key = _required_session_report_key(unit.session_id)
+        completed_record = {**report_record, "memories": memories}
+        atomic_write_json(
+            self._sidecar_path(unit.isolation_key),
+            {
+                **state,
+                "session_reports": {
+                    **state["session_reports"],
+                    session_key: completed_record,
+                },
+            },
+        )
+        return memories
+
+    @staticmethod
+    def _read_core_blocks(
+        *,
+        runtime: LettaRuntimeProtocol,
+        subject_id: str,
+        state: dict[str, Any],
+    ) -> list[dict[str, str | None]]:
+        """读取、验明身份并规范化全部 attached core blocks。"""
+
+        result = runtime.read_blocks(
+            subject_id=subject_id,
+            agent_id=state["agent_id"],
+        )
+        blocks = result.get("blocks")
+        if not isinstance(blocks, list):
+            raise ConfigurationError("Letta worker read_blocks result is malformed")
+        if result.get("agent_id") != state["agent_id"]:
+            raise ConfigurationError(
+                "Letta worker read_blocks returned a different agent identity"
+            )
+        _validate_readout_block_identity(blocks, state=state)
+        return _normalize_blocks(blocks)
+
     def _record_llm_usage(self, call: dict[str, Any]) -> None:
         """把 worker 的真实逐调用 usage 写入当前 conversation scope。"""
 
@@ -857,6 +1011,33 @@ class Letta(MemoryProvider):
             output_tokens=output_tokens,
             token_measurement_source=MeasurementSource.API_USAGE,
         )
+
+    def _record_failed_worker_usage(
+        self,
+        details: dict[str, Any] | None,
+    ) -> None:
+        """把失败 Letta step 前已完成的 exact usage 写入当前失败 scope。"""
+
+        if details is None or self.efficiency_collector is None:
+            return
+        if set(details) != {"llm_observations"}:
+            raise ConfigurationError(
+                "Letta worker failure observation fields are malformed"
+            )
+        usage = details.get("llm_observations")
+        if not isinstance(usage, list):
+            raise ConfigurationError(
+                "Letta worker failure llm_observations must be a list"
+            )
+        with self.efficiency_collector.operation_stage(
+            EfficiencyStage.MEMORY_BUILD
+        ):
+            for call in usage:
+                if not isinstance(call, dict):
+                    raise ConfigurationError(
+                        "Letta worker failure usage entry must be an object"
+                    )
+                self._record_llm_usage(call)
 
     def _build_messages(self, unit: SessionBatch) -> list[dict[str, str]]:
         """无损构造 official formatter 的 role/content 输入，不补 placeholder。"""
@@ -1056,6 +1237,7 @@ class Letta(MemoryProvider):
             "cleanup_phase": "active",
             "pending_operation_id": None,
             "completed_operation_ids": [],
+            "session_reports": {},
         }
         _validate_sidecar(payload)
         path = self._sidecar_path(isolation_key)
@@ -1352,6 +1534,20 @@ def _images_from_event(event: Any) -> list[ImageRef]:
 def _format_blocks(blocks: list[Any]) -> str:
     """按 ``(label,id)`` 稳定排序并生成可直接注入 answer builder 的文本。"""
 
+    normalized = _normalize_blocks(blocks)
+    return "\n\n".join(
+        (
+            f'<memory_block label="{html.escape(str(block["label"]), quote=True)}" '
+            f'description="{html.escape(str(block["description"] or ""), quote=True)}">'
+            f'{block["value"]}</memory_block>'
+        )
+        for block in normalized
+    )
+
+
+def _normalize_blocks(blocks: list[Any]) -> list[dict[str, str | None]]:
+    """强校验并稳定排序 Letta core-block product units。"""
+
     normalized: list[dict[str, str | None]] = []
     for block in blocks:
         if not isinstance(block, dict):
@@ -1379,14 +1575,47 @@ def _format_blocks(blocks: list[Any]) -> str:
             }
         )
     normalized.sort(key=lambda block: (str(block["label"]), str(block["id"])))
-    return "\n\n".join(
-        (
-            f'<memory_block label="{html.escape(str(block["label"]), quote=True)}" '
-            f'description="{html.escape(str(block["description"] or ""), quote=True)}">'
-            f'{block["value"]}</memory_block>'
+    return normalized
+
+
+def _required_session_report_key(session_id: str | None) -> str:
+    """返回可持久化的真实 session id；HaluMem extraction 不允许匿名 session。"""
+
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise ConfigurationError(
+            "Letta session memory reporting requires a non-blank session_id"
         )
-        for block in normalized
-    )
+    return session_id
+
+
+def _session_input_digest(messages: list[dict[str, str]]) -> str:
+    """计算 session report journal 的稳定公开输入摘要。"""
+
+    payload = json.dumps(
+        messages,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _changed_block_values(
+    *,
+    before: list[dict[str, str | None]],
+    after: list[dict[str, str | None]],
+) -> list[str]:
+    """按稳定 block ID 返回 session 后新建或变化的非空 product values。"""
+
+    before_by_id = {str(block["id"]): block for block in before}
+    changed: list[str] = []
+    for block in after:
+        value = block["value"]
+        if before_by_id.get(str(block["id"])) == block:
+            continue
+        if isinstance(value, str) and value.strip():
+            changed.append(value)
+    return changed
 
 
 def _validate_sidecar(payload: Any) -> None:
@@ -1405,6 +1634,7 @@ def _validate_sidecar(payload: Any) -> None:
         "cleanup_phase",
         "pending_operation_id",
         "completed_operation_ids",
+        "session_reports",
     }
     if set(payload) != expected_keys:
         raise ConfigurationError("Letta subject sidecar keys mismatch")
@@ -1449,6 +1679,46 @@ def _validate_sidecar(payload: Any) -> None:
         raise ConfigurationError(
             "Letta pending operation cannot already be completed"
         )
+    _validate_session_reports(payload.get("session_reports"))
+
+
+def _validate_session_reports(value: Any) -> None:
+    """校验 crash-safe session baseline/result journal。"""
+
+    if not isinstance(value, dict):
+        raise ConfigurationError("Letta session_reports must be an object")
+    for session_id, record in value.items():
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ConfigurationError("Letta session_reports key is invalid")
+        if not isinstance(record, dict) or set(record) != {
+            "input_digest",
+            "before_blocks",
+            "memories",
+        }:
+            raise ConfigurationError("Letta session report record keys mismatch")
+        digest = record.get("input_digest")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise ConfigurationError("Letta session report input_digest is invalid")
+        before_blocks = record.get("before_blocks")
+        if not isinstance(before_blocks, list):
+            raise ConfigurationError("Letta session report before_blocks must be a list")
+        normalized = _normalize_blocks(before_blocks)
+        if normalized != before_blocks:
+            raise ConfigurationError(
+                "Letta session report before_blocks must be normalized"
+            )
+        memories = record.get("memories")
+        if memories is not None and (
+            not isinstance(memories, list)
+            or not all(isinstance(item, str) and item.strip() for item in memories)
+        ):
+            raise ConfigurationError(
+                "Letta session report memories must be null or non-blank text list"
+            )
 
 
 def _letta_retrieval_evidence() -> RetrievalEvidence:

@@ -25,6 +25,23 @@ WORKER_TRANSPORT_LOGICAL_PATH = (
 )
 
 
+class WorkerCommandError(ConfigurationError):
+    """worker 返回业务失败时携带经过协议校验的公开错误细节。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_type: str | None,
+        details: dict[str, Any] | None,
+    ) -> None:
+        """保存脱敏错误摘要与可选结构化观测，不接受任意对象。"""
+
+        super().__init__(message)
+        self.error_type = error_type
+        self.details = dict(details) if details is not None else None
+
+
 class JsonLinesWorkerTransport:
     """管理一个可重启 worker 的严格串行 JSON-lines 通道。"""
 
@@ -205,9 +222,25 @@ class JsonLinesWorkerTransport:
                     f"{self.product_label} worker response identity mismatch"
                 )
             if response.get("ok") is not True:
-                raise ConfigurationError(
+                error_type = response.get("error_type")
+                if error_type is not None and not isinstance(error_type, str):
+                    if self.terminate_on_protocol_error:
+                        self.terminate()
+                    raise ConfigurationError(
+                        f"{self.product_label} worker error_type is malformed"
+                    )
+                details = response.get("error_details")
+                if details is not None and not isinstance(details, dict):
+                    if self.terminate_on_protocol_error:
+                        self.terminate()
+                    raise ConfigurationError(
+                        f"{self.product_label} worker error_details is malformed"
+                    )
+                raise WorkerCommandError(
                     f"{self.product_label} worker {command} failed "
-                    f"[{response.get('error_type')}]: {response.get('error')}"
+                    f"[{error_type}]: {response.get('error')}",
+                    error_type=error_type,
+                    details=details,
                 )
             result = response.get("result")
             if not isinstance(result, dict):

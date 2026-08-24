@@ -10,5 +10,8 @@ test -f "$EVEROS_ROOT/uv.lock"
 test -f "$EVEROS_ROOT/pyproject.toml"
 
 uv sync --project "$EVEROS_ROOT" --frozen --python 3.12
+uv pip install \
+  --python "$EVEROS_ROOT/.venv/bin/python" \
+  --requirement "$ROOT/scripts/requirements/everos-controlled-embedding.txt"
 "$EVEROS_ROOT/.venv/bin/python" -c \
-  'import everos; assert everos.__version__ == "1.2.3"; print("EverOS runtime ready")'
+  'from importlib.metadata import version; import everos, sentence_transformers; assert everos.__version__ == "1.2.3"; assert sentence_transformers.__version__ == "5.5.1"; assert version("click") == "8.4.2"; print("EverOS runtime ready")'

@@ -376,6 +376,9 @@ def _build_efficiency_observability_manifest(
         )
     return {
         "enabled": True,
+        "failed_attempt_ledger_contract": (
+            "append-only-caught-scope-completed-calls-v1"
+        ),
         "model_inventory": [
             descriptor.to_dict()
             for descriptor in sorted(

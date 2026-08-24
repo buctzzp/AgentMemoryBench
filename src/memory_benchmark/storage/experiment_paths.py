@@ -160,6 +160,12 @@ class ExperimentPaths:
         return self.artifacts_dir / "efficiency_observations.prediction.jsonl"
 
     @property
+    def prediction_failed_efficiency_attempts_path(self) -> Path:
+        """返回 prediction 阶段失败尝试成本账 JSONL 路径。"""
+
+        return self.artifacts_dir / "efficiency_attempts.prediction.jsonl"
+
+    @property
     def prediction_efficiency_overall_summary_path(self) -> Path:
         """返回 prediction 阶段 overall 效率摘要路径。"""
 
@@ -189,6 +195,14 @@ class ExperimentPaths:
         safe_metric_name = _safe_evaluator_efficiency_path_component(metric_name)
         return self.artifacts_dir / (
             f"efficiency_observations.{safe_metric_name}.jsonl"
+        )
+
+    def evaluator_failed_efficiency_attempts_path(self, metric_name: str) -> Path:
+        """返回指定 evaluator 的失败尝试成本账 JSONL 路径。"""
+
+        safe_metric_name = _safe_evaluator_efficiency_path_component(metric_name)
+        return self.artifacts_dir / (
+            f"efficiency_attempts.{safe_metric_name}.jsonl"
         )
 
     @property

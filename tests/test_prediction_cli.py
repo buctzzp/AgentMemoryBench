@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,7 +22,13 @@ from memory_benchmark.benchmark_adapters import (
     RunScope,
 )
 from memory_benchmark.benchmark_adapters.locomo import build_locomo_smoke_dataset
-from memory_benchmark.config import AnswerLLMSettings, OpenAISettings
+from memory_benchmark.config import (
+    AnswerLLMSettings,
+    ApiRuntimeProfile,
+    ExecutionProfile,
+    OpenAISettings,
+    RunComposition,
+)
 from memory_benchmark.core import (
     AddResult,
     AnswerPromptResult,
@@ -74,6 +81,23 @@ def _smoke_openai_settings() -> OpenAISettings:
     )
 
 
+def _smoke_run_composition(*, max_workers: int = 1) -> RunComposition:
+    """返回不读取项目 TOML 的当前 smoke 组合 fixture。"""
+
+    return RunComposition(
+        runtime=ApiRuntimeProfile(
+            profile_name="smoke",
+            provider="opencodego",
+            model="ox-alpha-free",
+        ),
+        execution=ExecutionProfile(
+            profile_name="smoke",
+            default_max_workers=max_workers,
+        ),
+        resolved_max_workers=max_workers,
+    )
+
+
 def _pending_fake_build_identity(
     config_manifest: dict[str, object],
 ) -> BuildIdentityDeclaration:
@@ -104,11 +128,26 @@ def _resolved_profile(
 ) -> ResolvedMethodProfile:
     """把强类型测试配置包装为新运行所需的 TOML profile envelope。"""
 
+    runtime_section = "official_full" if profile_name == "official-full" else profile_name
+    runtime = ApiRuntimeProfile(
+        profile_name=runtime_section,
+        provider="primary" if profile_name == "official-full" else "opencodego",
+        model="gpt-4o-mini" if profile_name == "official-full" else "ox-alpha-free",
+    )
+    execution = ExecutionProfile(
+        profile_name=runtime_section,
+        default_max_workers=config.max_workers,
+    )
     return ResolvedMethodProfile(
         public_name=profile_name,
         section_name=config.profile_name,
         answer_builder="benchmark",
         config=config,
+        composition=RunComposition(
+            runtime=runtime,
+            execution=execution,
+            resolved_max_workers=config.max_workers,
+        ),
     )
 
 
@@ -721,7 +760,7 @@ def test_registered_prediction_builds_system_from_registry_context(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -924,7 +963,7 @@ def test_registered_operation_level_prediction_passes_clean_failed_ingest_hook(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1026,6 +1065,51 @@ def test_lightmem_beam_pair_manifest_breaks_resume_against_legacy_turn() -> None
     )
     assert not _manifests_match_for_resume(
         {"method": new_pair}, {"method": legacy_turn}
+    )
+
+
+def test_runtime_execution_composition_is_a_strict_resume_identity() -> None:
+    """provider/model 或 execution profile 改变时不得续跑旧 method manifest。"""
+
+    from memory_benchmark.runners.prediction import _manifests_match_for_resume
+
+    smoke = _smoke_run_composition(max_workers=1).to_manifest_dict()
+    changed_runtime = json.loads(json.dumps(smoke))
+    changed_runtime["runtime"]["model"] = "another-model"
+    changed_execution = json.loads(json.dumps(smoke))
+    changed_execution["execution"]["resolved_max_workers"] = 2
+
+    current = prediction_cli._build_method_manifest(
+        config_manifest={"profile_name": "smoke"},
+        source_identity={"source_sha256": "fake"},
+        workload_estimate=None,
+        composition_manifest=smoke,
+    )
+    same = prediction_cli._build_method_manifest(
+        config_manifest={"profile_name": "smoke"},
+        source_identity={"source_sha256": "fake"},
+        workload_estimate=None,
+        composition_manifest=json.loads(json.dumps(smoke)),
+    )
+    runtime_drift = prediction_cli._build_method_manifest(
+        config_manifest={"profile_name": "smoke"},
+        source_identity={"source_sha256": "fake"},
+        workload_estimate=None,
+        composition_manifest=changed_runtime,
+    )
+    execution_drift = prediction_cli._build_method_manifest(
+        config_manifest={"profile_name": "smoke"},
+        source_identity={"source_sha256": "fake"},
+        workload_estimate=None,
+        composition_manifest=changed_execution,
+    )
+
+    assert _manifests_match_for_resume({"method": current}, {"method": same})
+    assert not _manifests_match_for_resume(
+        {"method": current}, {"method": runtime_drift}
+    )
+    assert not _manifests_match_for_resume(
+        {"method": current}, {"method": execution_drift}
     )
 
 
@@ -1140,7 +1224,7 @@ def test_registered_prediction_passes_benchmark_policy_separately_from_method_ma
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1277,7 +1361,7 @@ def test_registered_prediction_omits_benchmark_policy_when_unregistered(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1406,7 +1490,7 @@ def test_registered_prediction_rejects_v1_registration_with_unversioned_labels(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1546,7 +1630,13 @@ def test_custom_method_class_runs_without_builtin_registry(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        prediction_cli,
+        "load_run_composition",
+        lambda **kwargs: _smoke_run_composition(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1657,7 +1747,13 @@ def test_custom_method_class_writes_prediction_artifacts(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        prediction_cli,
+        "load_run_composition",
+        lambda **kwargs: _smoke_run_composition(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1830,7 +1926,7 @@ def test_registered_prediction_builds_framework_answer_reader(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -2119,7 +2215,7 @@ def test_registered_prediction_allows_mem0_smoke_worker_override(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -2256,7 +2352,7 @@ def test_registered_prediction_wires_efficiency_observability_when_enabled(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -2405,7 +2501,7 @@ def test_all_expands_in_registration_order_and_uses_explicit_variant_suffixes(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -2521,7 +2617,7 @@ def test_longmemeval_single_variant_run_id_uses_explicit_suffix(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(prediction_cli, "_preflight_prediction_run", lambda **kwargs: None)
@@ -2615,7 +2711,7 @@ def test_locomo_run_id_does_not_add_single_variant_suffix(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(prediction_cli, "_preflight_prediction_run", lambda **kwargs: None)
@@ -2796,7 +2892,7 @@ def test_hierarchical_output_layout_groups_run_by_method_benchmark_and_mode(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(prediction_cli, "_preflight_prediction_run", lambda **kwargs: None)
@@ -3129,7 +3225,7 @@ def test_second_child_preflight_failure_creates_no_output_or_method(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: openai_loaded.append("loaded"),
+        lambda project_root, api_provider=None, expected_model=None: openai_loaded.append("loaded"),
         raising=False,
     )
 
@@ -3248,7 +3344,7 @@ def test_openai_settings_load_only_after_all_preflights(
     monkeypatch.setattr(
         prediction_cli,
         "load_openai_settings",
-        lambda project_root, api_provider=None: (
+        lambda project_root, api_provider=None, expected_model=None: (
             events.append("openai") or _smoke_openai_settings()
         ),
         raising=False,

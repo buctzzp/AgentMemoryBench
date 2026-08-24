@@ -122,8 +122,12 @@
 28. **统一 LLM 是 policy 复用，不是业务状态 singleton**：公共层统一 identity、请求覆写、
     timeout/retry、usage、redaction 与 observation；prompt、解析、产品内部重试和有状态 client
     仍留在 method runtime。secret 负空间同时扫描 key 与 base URL 的精确值，不能只防 key。
+29. **省略配置不等于显式 None**：审计第三方 SDK 时，调用端没有传某字段，可能由服务端默认、
+    provider registry 或环境补齐。必须沿到最终 product object/请求 payload 才能写“未使用”。
+    controlled 统一也只覆盖算法实际消费且公开 seam 兼容的组件；给 N/A 方法填一个同名模型只会
+    制造虚假公平。Letta `skip_vector_storage=True` 与显式 `embedding_config=None` 是本条判例。
 
-完整 33 条历史原则与实例见
+完整历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。
 
 ## 4. 审查手艺

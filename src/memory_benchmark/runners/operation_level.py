@@ -165,6 +165,9 @@ def run_operation_level_predictions(
                 )
             efficiency_store = EfficiencyArtifactStore.for_prediction(paths)
             efficiency_store.write_model_inventory(model_inventory)
+            efficiency_collector.bind_failed_attempt_sink(
+                efficiency_store.append_failed_attempt
+            )
 
         conversation_status = _read_json_object(paths.conversation_status_path)
         prediction_records = {
@@ -220,7 +223,7 @@ def run_operation_level_predictions(
                 provider.cleanup()
                 raise
 
-        supports_extraction = type(provider).end_session is not MemoryProvider.end_session
+        supports_extraction = provider.session_memory_report
         for conversation in selected_conversations:
             state = conversation_status.get(conversation.conversation_id, {})
             status = _conversation_state_status(state)
@@ -361,7 +364,6 @@ def _run_operation_conversation(
                 conversation.conversation_id,
                 scope_discriminator=session.session_id,
             ) as memory_scope:
-                started_ns = perf_counter_ns()
                 generated = _ingest_and_probe_session(
                     session=session,
                     conversation=conversation,
@@ -372,9 +374,7 @@ def _run_operation_conversation(
                     session_report_records=session_report_records,
                     update_probe_records=update_probe_records,
                     failure_context=failure_context,
-                )
-                efficiency_collector.record_memory_build_total_latency(
-                    latency_ms=_elapsed_ms(started_ns)
+                    efficiency_collector=efficiency_collector,
                 )
             observations.extend(memory_scope.records)
         else:
@@ -388,6 +388,7 @@ def _run_operation_conversation(
                 session_report_records=session_report_records,
                 update_probe_records=update_probe_records,
                 failure_context=failure_context,
+                efficiency_collector=None,
             )
         if generated:
             continue
@@ -465,14 +466,17 @@ def _ingest_and_probe_session(
     session_report_records: list[dict[str, Any]],
     update_probe_records: list[dict[str, Any]],
     failure_context: dict[str, str],
+    efficiency_collector: EfficiencyCollector | None,
 ) -> bool:
     """ingest 单个 session + extraction + update probe，返回是否为 generated QA session。
 
     generated session 只 ingest + end_session（不记 session report、不跑 update
     probe、不 QA），与官方 eval 一致。全部 provider 调用发生在调用方开启的
-    conversation scope 内，默认归 memory_build 阶段。
+    conversation scope 内；ingest/end_session 归 memory_build，update probe retrieve
+    显式切到 retrieval，避免 SimpleMem planning/reflection 被误记为构建调用。
     """
 
+    build_started_ns = perf_counter_ns()
     events = [
         event
         for event in build_turn_events(conversation, isolation_key)
@@ -502,6 +506,10 @@ def _ingest_and_probe_session(
             session_id=session.session_id,
         )
         report = provider.end_session(session_ref)
+    if efficiency_collector is not None and efficiency_collector.enabled:
+        efficiency_collector.record_memory_build_total_latency(
+            latency_ms=_elapsed_ms(build_started_ns)
+        )
     generated = bool(session.private_metadata.get("is_generated_qa_session"))
     if generated:
         return True
@@ -519,15 +527,18 @@ def _ingest_and_probe_session(
             session_id=session.session_id,
         )
         started = perf_counter()
-        retrieval = provider.retrieve(
-            RetrievalQuery(
-                query_text=str(memory_point["memory_content"]),
-                isolation_key=isolation_key,
-                question_time=None,
-                top_k=10,
-                purpose="memory_update_probe",
-            )
+        query = RetrievalQuery(
+            query_text=str(memory_point["memory_content"]),
+            isolation_key=isolation_key,
+            question_time=None,
+            top_k=10,
+            purpose="memory_update_probe",
         )
+        if efficiency_collector is not None and efficiency_collector.enabled:
+            with efficiency_collector.operation_stage(EfficiencyStage.RETRIEVAL):
+                retrieval = provider.retrieve(query)
+        else:
+            retrieval = provider.retrieve(query)
         update_probe_records.append(
             _update_probe_record(
                 session_ref=session_ref,

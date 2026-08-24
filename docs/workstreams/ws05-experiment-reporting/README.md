@@ -6,24 +6,25 @@ created: 2026-07-05
 ---
 # ws05 全量实验申请材料与前置工程
 
-## Codex 恢复胶囊（2026-08-21）
+## Codex 恢复胶囊（2026-08-24）
 
-- **当前目标**：用限时免费的 `opencodego/ox-alpha-free` 完成 ws05 transport、效率
-  observation 与受控矩阵 pilot；它不进入正式效果主表。
-- **当前批次**：先压绿十家 model-aware transport、manifest/resume 与无 API 回归；随后按
-  全局 API 并发上限 4 分批运行一 isolation pilot，不同时放飞 50 格。
-- **当前判据**：[API runtime profile](../../reference/api-runtime-profiles.md)；顶层
-  `reasoning_effort="low"` 是 ox 的唯一已验证请求形状，旧模型 slot 只供历史 artifact 精确回读。
-- **现场证据**：直接 SDK 普通 answer、JSON judge、LongMemEval yes/no 与 streaming usage
-  均通过；4/4 与 8/8 并发传输成功只证明安全下界 ≥8。Mem0、A-Mem、SimpleMem 的极小
-  真实 run 已分别闭合 build/answer/judge 或 streaming exact-usage；无 API 全量门为
-  `2238 passed, 3 deselected, 25 warnings, 29 subtests passed`。
-- **禁止事项**：不得把 ox 分数与 `official_full` 比较；不得复用旧 smoke run_id 或对 smoke
-  做 resume；不得把 key/base URL 写入 artifact；未过回归门前不得扩大矩阵。
-- **当前动作**：公开 `predict pilot` 已实现并锁定五家完整 isolation 形状；EverOS × BEAM
-  资格格的 prediction、两项 evaluator、exact usage 与 secret/base-URL 负空间门已全部通过。
-  当前以 Mem0 + MemoryOS 两格并行进入第一扩大波；全局 API 并发上限仍为 4，重型 runtime
-  进一步降并发。
+- **当前目标**：真实 pilot 暂停；先关闭 method 配置所有权、controlled embedding、模型调用
+  观测与 HaluMem session extraction 的共同前置门。
+- **当前批次**：
+  [runtime 配置与观测 M0-M5](branches/runtime-config-and-observability/plan.md) 已完成无 API验收；
+  真实 pilot 继续暂停，等待用户审读重建矩阵并重新批准规模/run-id。
+- **当前判据**：[M0 裁决](branches/runtime-config-and-observability/notes/2026-08-24-m0-ruling.md)；
+  method/API runtime/benchmark/execution 四层所有权不得混写；MiniLM-384 只统一实际消费
+  embedding 且公开接口兼容的方法，Letta current core-block profile 为 N/A。
+- **现场证据**：十家 method 主 TOML 已单源化，runtime/execution composition 进入严格 resume
+  identity；Letta embedding=N/A，EverOS v7 controlled MiniLM 的 patch 重放、本地模型、六表
+  schema 与 official lifespan 零 API门均通过。M2/M3/M4/M5 证据见支线 notes；最终全量为
+  `2259 passed, 3 deselected, 25 warnings, 29 subtests passed`，扩大 pilot 尚未恢复。
+- **禁止事项**：本支线 M5 完成且用户重新批准规模/run_id 前，不恢复真实 pilot；不得改写旧
+  artifact、把旧 embedding build 重标为新 controlled identity，或用 lineage 伪造 metric 资格。
+- **当前动作**：交用户审读
+  [M5 重建矩阵](branches/runtime-config-and-observability/notes/2026-08-24-m5-no-api-acceptance.md)；
+  用户重新批准前不创建任何真实 API run。
 
 ## 目标
 
@@ -45,6 +46,10 @@ created: 2026-07-05
   semaphore=4 留余量；先完成十家真实调用面的 model-aware transport 与一条 framework
   efficiency artifact 门，再分批运行，不同时放飞 50 格。该模型只用于流通/调用拓扑/成本
   observation，不与正式分数对比；`official_full` 仍为 `primary/gpt-4o-mini`。
+- 2026-08-24：用户在扩大 pilot 前重开配置与观测审计，真实 pilot 再次暂停。当前支线为
+  [runtime config/observability](branches/runtime-config-and-observability/README.md)：主比较统一
+  MiniLM-384 仅覆盖真实消费 embedding 的兼容方法；Letta official SDK 的“省略 embedding”与
+  framework 显式 `None` 已拆开记账；效率失败成本与四家 HaluMem extraction 候选进入 M2/M3。
 - 2026-08-21：新增 `RunScope.PILOT`。它复用 TOML `[smoke]` 的 method 参数与 ox runtime，
   但保留一个完整 isolation 及全部问题、写独立 `pilot/` 目录并进入 manifest identity。
   LoCoMo/LME/BEAM/HaluMem 各取第一完整 conversation/instance/conversation/UUID；MemBench

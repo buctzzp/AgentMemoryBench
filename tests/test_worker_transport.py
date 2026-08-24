@@ -14,7 +14,10 @@ from time import monotonic, sleep
 import pytest
 
 from memory_benchmark.core import ConfigurationError
-from memory_benchmark.methods.worker_transport import JsonLinesWorkerTransport
+from memory_benchmark.methods.worker_transport import (
+    JsonLinesWorkerTransport,
+    WorkerCommandError,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -56,6 +59,16 @@ for raw in sys.stdin:
             "ok": False,
             "error_type": "Boom",
             "error": "bad input",
+        }
+        print(json.dumps(response), flush=True)
+        continue
+    if mode == "failure_details":
+        response = {
+            "request_id": request_id,
+            "ok": False,
+            "error_type": "Boom",
+            "error": "bad input",
+            "error_details": {"llm_observations": [{"input_tokens": 3, "output_tokens": 1}]},
         }
         print(json.dumps(response), flush=True)
         continue
@@ -199,6 +212,22 @@ def test_worker_transport_rejects_worker_failure_and_invalid_result(
     try:
         with pytest.raises(ConfigurationError, match=message.replace("[", r"\[")):
             transport.request("ingest", {})
+        assert transport.is_running
+    finally:
+        transport.terminate()
+
+
+def test_worker_transport_exposes_validated_failure_details(tmp_path: Path) -> None:
+    """worker 可把脱敏结构化 usage 随业务异常交给 adapter，不能伪装 result。"""
+
+    transport = _start_transport(tmp_path, mode="failure_details")
+    try:
+        with pytest.raises(WorkerCommandError) as raised:
+            transport.request("ingest", {})
+        assert raised.value.error_type == "Boom"
+        assert raised.value.details == {
+            "llm_observations": [{"input_tokens": 3, "output_tokens": 1}]
+        }
         assert transport.is_running
     finally:
         transport.terminate()

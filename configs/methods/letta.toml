@@ -1,12 +1,11 @@
 # Letta legacy V1 0.16.8 + ai-memory-sdk v0.2.0 sleeptime-memory 产品配置。
 #
-# 两个主 section 只切换 API runtime/model；agent type、core blocks、batch、
-# PostgreSQL image 与 lifecycle 完全相同。raw message 不写 archival vector store，
+# API runtime/model、service/worker timeout 与 conversation workers 由独立组合根注入。
+# agent type、core blocks、batch、PostgreSQL image 与 lifecycle 保持单一 method 配置。
+# raw message 不写 archival vector store，
 # readout 始终为 query-independent attached core blocks。
 
-[smoke]
-answer_builder = "benchmark"
-llm_model = "ox-alpha-free"
+[method]
 context_window = 128000
 max_tokens = 4096
 temperature = 0.0
@@ -15,21 +14,3 @@ max_messages_per_batch = 10
 human_block_limit = 10000
 summary_block_limit = 1000
 postgres_image = "ankane/pgvector:v0.5.1"
-postgres_startup_timeout_seconds = 60.0
-worker_request_timeout_seconds = 600.0
-max_workers = 1
-
-[official_full]
-answer_builder = "benchmark"
-llm_model = "gpt-4o-mini"
-context_window = 128000
-max_tokens = 4096
-temperature = 0.0
-max_steps = 50
-max_messages_per_batch = 10
-human_block_limit = 10000
-summary_block_limit = 1000
-postgres_image = "ankane/pgvector:v0.5.1"
-postgres_startup_timeout_seconds = 60.0
-worker_request_timeout_seconds = 600.0
-max_workers = 1

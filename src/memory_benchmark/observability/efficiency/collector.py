@@ -12,7 +12,9 @@ import json
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
-from typing import Iterator
+from threading import Lock
+from typing import Callable, Iterator
+from uuid import uuid4
 
 from memory_benchmark.core import ConfigurationError
 from memory_benchmark.observability.efficiency.entities import (
@@ -20,6 +22,7 @@ from memory_benchmark.observability.efficiency.entities import (
     EfficiencyObservation,
     EfficiencyStage,
     EmbeddingCallObservation,
+    FailedEfficiencyAttempt,
     LLMCallObservation,
     MeasurementSource,
     QuestionEfficiencyObservation,
@@ -79,6 +82,29 @@ class EfficiencyCollector:
             f"efficiency_stage_{suffix}_{id(self)}",
             default=None,
         )
+        self._collector_session_id = uuid4().hex
+        self._attempt_lock = Lock()
+        self._attempt_index = 0
+        self._failed_attempt_sink: (
+            Callable[[FailedEfficiencyAttempt], None] | None
+        ) = None
+
+    def bind_failed_attempt_sink(
+        self,
+        sink: Callable[[FailedEfficiencyAttempt], None],
+    ) -> None:
+        """绑定一次 run 的 append-only 失败尝试写入器。
+
+        Collector 本身仍不拥有文件路径；runner 在模型清单 store 建立后绑定。重复
+        绑定会使失败成本流向不明确，因此一律拒绝。
+        """
+
+        if not callable(sink):
+            raise ConfigurationError("failed attempt sink must be callable")
+        with self._attempt_lock:
+            if self._failed_attempt_sink is not None:
+                raise ConfigurationError("failed attempt sink was already bound")
+            self._failed_attempt_sink = sink
 
     @contextmanager
     def conversation_scope(
@@ -383,10 +409,63 @@ class EfficiencyCollector:
             yield handle
             self._finalize_scope(state)
             completed = True
+        except BaseException as exc:
+            self._record_failed_attempt(state, exc)
+            raise
         finally:
             self._scope_var.reset(token)
             if completed:
                 handle.records = tuple(state.records)
+
+    def _record_failed_attempt(
+        self,
+        state: _ScopeState,
+        error: BaseException,
+    ) -> None:
+        """把异常前已完成的 model calls 送入 append-only attempt sink。"""
+
+        with self._attempt_lock:
+            sink = self._failed_attempt_sink
+            if sink is None:
+                return
+            attempt_index = self._attempt_index
+            self._attempt_index += 1
+        calls = tuple(
+            record
+            for record in state.records
+            if isinstance(record, (LLMCallObservation, EmbeddingCallObservation))
+        )
+        identity = json.dumps(
+            {
+                "run_id": self.run_id,
+                "collector_session_id": self._collector_session_id,
+                "attempt_index": attempt_index,
+                "scope_type": state.scope_type,
+                "conversation_id": state.conversation_id,
+                "question_id": state.question_id,
+                "scope_discriminator": state.scope_discriminator,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        attempt = FailedEfficiencyAttempt(
+            attempt_id=hashlib.sha256(identity.encode("utf-8")).hexdigest(),
+            collector_session_id=self._collector_session_id,
+            attempt_index=attempt_index,
+            scope_type=state.scope_type,
+            conversation_id=state.conversation_id,
+            question_id=state.question_id,
+            scope_discriminator=state.scope_discriminator,
+            error_type=type(error).__name__,
+            calls=calls,
+        )
+        try:
+            sink(attempt)
+        except BaseException as sink_error:
+            raise ConfigurationError(
+                "failed efficiency attempt could not be persisted"
+            ) from sink_error
 
     def _finalize_scope(self, state: _ScopeState) -> None:
         """把 scope 聚合字段转换为最终 observation。"""

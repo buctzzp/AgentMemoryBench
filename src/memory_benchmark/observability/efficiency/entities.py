@@ -295,6 +295,73 @@ class EmbeddingCallObservation:
         }
 
 
+ModelCallObservation: TypeAlias = LLMCallObservation | EmbeddingCallObservation
+
+
+@dataclass(frozen=True)
+class FailedEfficiencyAttempt:
+    """一次被框架捕获的失败作用域及其已完成模型调用。
+
+    该实体只保存成本事实，不保存异常正文，避免把 endpoint、credential 或产品私有
+    payload 带入 artifact。`calls` 仅包含异常发生前已经拿到 usage/latency 的成功
+    model calls；它不声称观测到失败中的网络请求或被硬杀进程内尚未回传的数据。
+    """
+
+    attempt_id: str
+    collector_session_id: str
+    attempt_index: int
+    scope_type: str
+    conversation_id: str
+    question_id: str | None
+    scope_discriminator: str | None
+    error_type: str
+    calls: tuple[ModelCallObservation, ...]
+
+    def __post_init__(self) -> None:
+        """校验 append-only attempt ledger 的公开字段。"""
+
+        _require_text(self.attempt_id, "attempt_id")
+        _require_text(self.collector_session_id, "collector_session_id")
+        _require_non_negative_int(self.attempt_index, "attempt_index")
+        if self.scope_type not in {"conversation", "question", "judge"}:
+            raise ConfigurationError(
+                "failed attempt scope_type must be conversation, question, or judge"
+            )
+        _require_text(self.conversation_id, "conversation_id")
+        if self.question_id is not None:
+            _require_text(self.question_id, "question_id")
+        if self.scope_discriminator is not None:
+            _require_text(self.scope_discriminator, "scope_discriminator")
+        _require_text(self.error_type, "error_type")
+        if not isinstance(self.calls, tuple) or not all(
+            isinstance(call, (LLMCallObservation, EmbeddingCallObservation))
+            for call in self.calls
+        ):
+            raise ConfigurationError(
+                "failed attempt calls must be model call observations"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        """返回不含异常正文的 append-only JSON 记录。"""
+
+        return {
+            "schema_version": 1,
+            "attempt_id": self.attempt_id,
+            "collector_session_id": self.collector_session_id,
+            "attempt_index": self.attempt_index,
+            "outcome": "failed",
+            "scope_type": self.scope_type,
+            "conversation_id": self.conversation_id,
+            "question_id": self.question_id,
+            "scope_discriminator": self.scope_discriminator,
+            "error_type": self.error_type,
+            "capture_completeness": (
+                "caught_scope_exception_completed_model_calls_only"
+            ),
+            "calls": [call.to_dict() for call in self.calls],
+        }
+
+
 EfficiencyObservation: TypeAlias = (
     ConversationEfficiencyObservation
     | QuestionEfficiencyObservation
@@ -395,8 +462,10 @@ __all__ = [
     "EfficiencyObservation",
     "EfficiencyStage",
     "EmbeddingCallObservation",
+    "FailedEfficiencyAttempt",
     "LLMCallObservation",
     "MeasurementSource",
+    "ModelCallObservation",
     "ModelDescriptor",
     "QuestionEfficiencyObservation",
     "RetrievalObservationContract",

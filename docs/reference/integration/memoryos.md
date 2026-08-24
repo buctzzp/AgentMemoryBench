@@ -175,7 +175,7 @@ user knowledge、assistant knowledge 五层组装成 `RetrievalResult`。`Retrie
 | LongMemEval | canonical role 顺序交给 pair aggregator；assistant-first、same-role、singleton 由单侧 page 保留，每个真实 turn 恰一次且不跨 session；只用本 session source time，不用 question time 回填 history | `valid/turn`；Recall 可算、rank pending；W1+W2 真实通过 |
 | MemBench | FirstAgent 的 user/assistant child 同 page；ThirdAgent user-only page 的 assistant 侧为空；原 content 的 place/time 不删，抽出的 turn time 另送 typed timestamp，noise 缺时保持 None | `valid/turn`；choice/source/Recall 全部落盘；四 source W2 真实通过 |
 | BEAM | 标准数据按 session 内 QA page；10M dangling/错位不猜修，孤立侧仍用空字符串 page 保真；raw id 由 canonical occurrence id 消歧 | provider `valid/turn`；本轮首题均为 abstention，故 Recall 正确 `null/n_a`，rubric judge 正常；100K W2+10M W1 通过 |
-| HaluMem | 每 session 独立 ingest；产品没有“本次 session 新产 memory points”接口，不用 raw echo/累计全库冒充 extraction；update 读取完整 product view，QA 走 framework reader | extraction=N/A、update/QA 可测、memory-type 因上游 extraction N/A；Medium W1 真实通过，judge=0/7/1 |
+| HaluMem | 每 session 独立 ingest；新增 STM QA page 仍是 raw input 载体，具 stable page ID 也不等于产品抽取出的 memory；MTM/LPM 只有按原生命周期迁移后才成为派生 product memory。为每个 session 强制迁移会改变算法，故不用 raw echo/累计全库或强制 flush 冒充 extraction；update 读取完整 product view，QA 走 framework reader | extraction=N/A、update/QA 可测、memory-type 因上游 extraction N/A；Medium W1 真实通过，judge=0/7/1 |
 
 私有 gold answer/evidence/answer-session id/memory point 只存在 evaluator-private artifacts，未进入
 method payload、formatted memory 或公开 prompt。上述任一 canonical、payload、lifecycle、source

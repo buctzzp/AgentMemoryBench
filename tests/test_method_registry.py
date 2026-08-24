@@ -56,7 +56,7 @@ def test_registry_lists_conversation_qa_methods() -> None:
 def test_pilot_profile_reuses_smoke_section_with_distinct_public_identity(
     method_name: str,
 ) -> None:
-    """十家 pilot 只复用 smoke TOML 参数，不伪造第三份算法 section。"""
+    """pilot 应复用十家统一的 method 参数并保留独立公开身份。"""
 
     resolved = resolve_method_profile(
         method_name,
@@ -65,8 +65,8 @@ def test_pilot_profile_reuses_smoke_section_with_distinct_public_identity(
     )
 
     assert resolved.public_name == "pilot"
-    assert resolved.section_name == "smoke"
-    assert resolved.config.profile_name == "smoke"
+    assert resolved.section_name == "method"
+    assert resolved.config.profile_name == "method"
 
 
 def test_mem0_registration_declares_capabilities_factory_and_api_boundary() -> None:
@@ -378,6 +378,12 @@ def test_letta_registration_declares_sleeptime_product_contract() -> None:
     inventory = registration.efficiency_model_inventory_getter(config)
     assert [entry.model_id for entry in inventory] == ["letta-build-llm"]
     assert [entry.model_role for entry in inventory] == ["memory_build_llm"]
+    declaration = registration.build_identity_resolver(config.to_manifest())
+    assert declaration.embedding_profile == "not_applicable_v1"
+    assert declaration.embedding.identity_status == "not_applicable"
+    assert declaration.embedding.revision_status == "not_applicable"
+    assert declaration.embedding.provider is None
+    assert declaration.embedding.model is None
 
 
 def test_langmem_registration_declares_background_product_contract() -> None:
@@ -445,19 +451,18 @@ def test_everos_registration_declares_typed_product_session_contract() -> None:
     assert [entry.model_id for entry in inventory] == [
         "everos-build-llm",
         "everos-embedding",
-        "everos-reranker",
     ]
     assert [entry.model_role for entry in inventory] == [
         "memory_build_llm",
         "embedding",
-        "reranker",
     ]
     declaration = registration.build_identity_resolver(config.to_manifest())
     assert declaration.implementation_variant == "product"
-    assert declaration.embedding_profile == "product_canonical_required_config_v1"
-    assert declaration.embedding.provider == "openrouter-openai-compatible"
-    assert declaration.embedding.model == "Qwen/Qwen3-Embedding-4B"
-    assert declaration.embedding.dimension == 1024
+    assert declaration.embedding_profile == "controlled_embedding_v1"
+    assert declaration.embedding.provider == "sentence-transformers-local"
+    assert declaration.embedding.model == "models/all-MiniLM-L6-v2"
+    assert declaration.embedding.dimension == 384
+    assert declaration.embedding.normalization == "model-internal-l2"
     assert declaration.embedding.distance == "lancedb-l2"
     registration.validate_variant("membench", "0_10k")
     with pytest.raises(ConfigurationError, match="timestamp fabrication is forbidden"):
@@ -468,15 +473,11 @@ def test_everos_registration_declares_typed_product_session_contract() -> None:
         "official-full",
         project_root=load_path_settings().project_root,
     )
-    official_declaration = registration.build_identity_resolver(
-        official.to_manifest()
-    )
-    assert official_declaration.embedding_profile == "product_default_v1"
-    assert official_declaration.embedding.provider == (
-        "deepinfra-openai-compatible"
-    )
+    official_declaration = registration.build_identity_resolver(official.to_manifest())
+    assert official_declaration.embedding_profile == "controlled_embedding_v1"
+    assert official_declaration.embedding.provider == "sentence-transformers-local"
     assert config.rerank_capability_mode == "disabled-zero-call"
-    assert official.rerank_capability_mode == "configured"
+    assert official.rerank_capability_mode == "disabled-zero-call"
 
 
 def test_clean_retry_hook_uses_failed_worker_state_for_isolated_runs(
@@ -671,7 +672,7 @@ def test_registered_profiles_declare_benchmark_answer_builder(
     method_name: str,
     profile_name: str,
 ) -> None:
-    """十家主 section 都必须由 TOML 显式选择 benchmark builder。"""
+    """主配置统一选择 benchmark builder，十家 method 均为单一参数源。"""
 
     resolved = resolve_method_profile(
         method_name=method_name,
@@ -680,7 +681,7 @@ def test_registered_profiles_declare_benchmark_answer_builder(
     )
 
     assert resolved.public_name == profile_name
-    assert resolved.section_name == profile_name.replace("-", "_")
+    assert resolved.section_name == "method"
     assert resolved.answer_builder == "benchmark"
     assert resolved.config.profile_name == resolved.section_name
 
@@ -859,8 +860,8 @@ def test_memos_profiles_only_differ_in_budget_model_and_are_both_serial() -> Non
     # profile 与 budget-only LLM 身份不同；其余 build/search 参数必须全等。
     smoke_fields = dataclasses.asdict(smoke)
     official_fields = dataclasses.asdict(official)
-    assert smoke_fields.pop("profile_name") == "smoke"
-    assert official_fields.pop("profile_name") == "official_full"
+    assert smoke_fields.pop("profile_name") == "method"
+    assert official_fields.pop("profile_name") == "method"
     assert smoke_fields.pop("llm_model") == "ox-alpha-free"
     assert official_fields.pop("llm_model") == "gpt-4o-mini"
     assert smoke_fields == official_fields
@@ -894,7 +895,7 @@ def test_memos_manifest_carries_adapter_version_and_no_absolute_paths() -> None:
 
     manifest = _memos_registry_config().to_manifest()
 
-    assert manifest["adapter_version"] == "memos-v2.0.25-product-v4"
+    assert manifest["adapter_version"] == "memos-v2.0.25-product-v5"
     assert manifest["implementation_identity"] == "typed-product-handler"
     assert manifest["build_llm_response_contract"] == (
         "provider-aware-v2:"

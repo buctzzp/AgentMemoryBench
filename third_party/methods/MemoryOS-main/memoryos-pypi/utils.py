@@ -128,6 +128,15 @@ def ensure_directory_exists(path):
 # ---- Embedding Utilities ----
 _model_cache = {}
 _embedding_cache = {}  # 添加embedding缓存
+_embedding_observer = None
+
+
+def set_embedding_observer(observer):
+    """安装可选的纯观测回调；传入 ``None`` 时关闭观测。"""
+    global _embedding_observer
+    if observer is not None and not callable(observer):
+        raise TypeError("embedding observer must be callable or None")
+    _embedding_observer = observer
 
 def _get_valid_kwargs(func, kwargs):
     """Helper to filter kwargs for a given function's signature."""
@@ -186,6 +195,7 @@ def get_embedding(text, model_name="all-MiniLM-L6-v2", use_cache=True, **kwargs)
     
     # --- Encoding ---
     embedding = None
+    encode_started = time.perf_counter_ns()
     if 'bge-m3' in model_name.lower():
         encode_kwargs = _get_valid_kwargs(model.encode, kwargs)
         print(f"-> Encoding with BGEM3FlagModel using kwargs: {encode_kwargs}")
@@ -195,6 +205,15 @@ def get_embedding(text, model_name="all-MiniLM-L6-v2", use_cache=True, **kwargs)
         encode_kwargs = _get_valid_kwargs(model.encode, kwargs)
         print(f"-> Encoding with SentenceTransformer using kwargs: {encode_kwargs}")
         embedding = model.encode([text], **encode_kwargs)[0]
+
+    observer = _embedding_observer
+    if observer is not None:
+        observer(
+            text=text,
+            model=model,
+            model_name=model_name,
+            latency_ms=max(0.0, (time.perf_counter_ns() - encode_started) / 1_000_000),
+        )
 
     if use_cache:
         cache_key = f"{model_config_key}::{hash(text)}"
@@ -383,4 +402,4 @@ def generate_page_meta_info(last_page_meta, current_page, client: OpenAIClient, 
         {"role": "system", "content": prompts.META_INFO_SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt}
     ]
-    return client.chat_completion(model=model, messages=messages, temperature=0.3, max_tokens=100).strip() 
+    return client.chat_completion(model=model, messages=messages, temperature=0.3, max_tokens=100).strip()

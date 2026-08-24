@@ -129,14 +129,10 @@ def _config(**overrides: Any) -> EverOSConfig:
         "memory_mode": "chat",
         "search_method": "hybrid",
         "add_batch_size": 25,
-        "embedding_model": "Qwen/Qwen3-Embedding-4B",
-        "embedding_dimension": 1024,
-        "embedding_provider": "deepinfra-openai-compatible",
-        "embedding_credential_env": "EVEROS_DEEPINFRA_API_KEY",
-        "rerank_provider": "deepinfra",
-        "rerank_model": "Qwen/Qwen3-Reranker-4B",
-        "rerank_credential_env": "EVEROS_DEEPINFRA_API_KEY",
-        "rerank_capability_mode": "configured",
+        "embedding_model": "models/all-MiniLM-L6-v2",
+        "embedding_dimension": 384,
+        "embedding_provider": "sentence-transformers-local",
+        "rerank_capability_mode": "disabled-zero-call",
         "app_id": "memorybenchmark",
         "project_id": "phase1",
         "worker_request_timeout_seconds": 30.0,
@@ -153,6 +149,7 @@ def _paths(root: Path) -> PathSettings:
     for relative in (
         "data",
         "models",
+        "models/all-MiniLM-L6-v2",
         "outputs",
         "third_party/benchmarks",
         "third_party/methods/EverOS",
@@ -250,19 +247,10 @@ def _batch(
         ({"memory_mode": "agent"}, "memory_mode='chat'"),
         ({"search_method": "agentic"}, "search_method='hybrid'"),
         ({"add_batch_size": 2}, "add_batch_size=25"),
-        ({"embedding_dimension": 768}, "embedding_dimension=1024"),
-        ({"embedding_model": "other"}, "Qwen/Qwen3-Embedding-4B"),
+        ({"embedding_dimension": 768}, "embedding_dimension=384"),
+        ({"embedding_model": "other"}, "all-MiniLM-L6-v2"),
         ({"embedding_provider": "other"}, "embedding_provider"),
-        (
-            {
-                "embedding_provider": "openrouter-openai-compatible",
-                "embedding_credential_env": "EVEROS_DEEPINFRA_API_KEY",
-            },
-            "credential environment",
-        ),
-        ({"rerank_provider": "vllm"}, "rerank provider"),
-        ({"rerank_model": "other"}, "rerank model"),
-        ({"rerank_capability_mode": "optional"}, "rerank_capability_mode"),
+        ({"rerank_capability_mode": "configured"}, "rerank"),
         ({"max_workers": 0}, "positive integer"),
         ({"drain_timeout_seconds": float("nan")}, "positive and finite"),
         ({"app_id": "../escape"}, "PathSafeId"),
@@ -296,19 +284,13 @@ def test_everos_manifest_contains_public_identity_but_no_secret_value() -> None:
     assert "base_url" not in serialized
 
 
-def test_everos_openrouter_embedding_transport_is_explicit_and_secret_safe(
-    monkeypatch: pytest.MonkeyPatch,
+def test_everos_local_embedding_transport_is_explicit_and_secret_free(
     tmp_path: Path,
 ) -> None:
-    """smoke transport 必须显式注入 OpenRouter endpoint，且不写进公开 manifest。"""
+    """worker 只接收本地模型路径/维度，不需要 embedding 或 rerank secret。"""
 
-    config = _config(
-        embedding_provider="openrouter-openai-compatible",
-        embedding_credential_env="openrouter_key",
-        rerank_capability_mode="disabled-zero-call",
-    )
-    monkeypatch.setenv("openrouter_key", "private-openrouter-key")
-    monkeypatch.setenv("openrouter_base_url", "https://openrouter.example/v1")
+    config = _config()
+    paths = _paths(tmp_path)
     runtime = EverOSRuntime(
         config=config,
         openai_settings=OpenAISettings(
@@ -318,22 +300,27 @@ def test_everos_openrouter_embedding_transport_is_explicit_and_secret_safe(
             provider="opencodego",
             judge_transport="chat_completions",
         ),
-        path_settings=_paths(tmp_path),
+        path_settings=paths,
         storage_root=tmp_path / "outputs/run/method_state",
     )
 
     environment = runtime._worker_environment(tmp_path / "product")
     manifest = config.to_manifest()
 
-    assert environment["EVEROS_EMBEDDING__API_KEY"] == "private-openrouter-key"
-    assert environment["EVEROS_EMBEDDING__BASE_URL"] == (
-        "https://openrouter.example/v1"
+    assert environment["EVEROS_EMBEDDING__DIMENSIONS"] == "384"
+    assert environment["EVEROS_LOCAL_EMBEDDING_MODEL_PATH"] == str(
+        (paths.models_root / "all-MiniLM-L6-v2").resolve()
     )
+    assert environment["HF_HUB_OFFLINE"] == "1"
+    assert environment["TRANSFORMERS_OFFLINE"] == "1"
+    assert "EVEROS_EMBEDDING__API_KEY" not in environment
+    assert "EVEROS_EMBEDDING__BASE_URL" not in environment
     assert "EVEROS_RERANK__API_KEY" not in environment
-    assert manifest["embedding_provider"] == "openrouter-openai-compatible"
+    assert manifest["embedding_provider"] == "sentence-transformers-local"
+    assert manifest["embedding_dimension"] == 384
     serialized = json.dumps(manifest, sort_keys=True)
-    assert "private-openrouter-key" not in serialized
-    assert "https://openrouter.example/v1" not in serialized
+    assert "api_key" not in serialized
+    assert "base_url" not in serialized
 
 
 def test_everos_product_root_omits_endpoint_template_and_keeps_ome_config(
@@ -384,22 +371,15 @@ def test_everos_product_root_omits_endpoint_template_and_keeps_ome_config(
         runtime._prepare_product_root("run_conv")
 
 
-def test_everos_openrouter_embedding_requires_its_declared_endpoint(
-    monkeypatch: pytest.MonkeyPatch,
+def test_everos_local_embedding_requires_its_declared_model_directory(
     tmp_path: Path,
 ) -> None:
-    """OpenRouter transport 缺 endpoint 时必须在 worker 启动前失败。"""
+    """本地模型目录缺失时必须在 worker 启动前失败。"""
 
-    config = _config(
-        embedding_provider="openrouter-openai-compatible",
-        embedding_credential_env="openrouter_key",
-        rerank_capability_mode="disabled-zero-call",
-    )
-    monkeypatch.setenv("openrouter_key", "private-openrouter-key")
-    monkeypatch.delenv("openrouter_base_url", raising=False)
-    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
+    paths = _paths(tmp_path)
+    shutil.rmtree(paths.models_root / "all-MiniLM-L6-v2")
     runtime = EverOSRuntime(
-        config=config,
+        config=_config(),
         openai_settings=OpenAISettings(
             api_key="private-llm-key",
             base_url="https://llm.example/v1",
@@ -407,29 +387,24 @@ def test_everos_openrouter_embedding_requires_its_declared_endpoint(
             provider="opencodego",
             judge_transport="chat_completions",
         ),
-        path_settings=_paths(tmp_path),
+        path_settings=paths,
         storage_root=tmp_path / "outputs/run/method_state",
     )
 
-    with pytest.raises(ConfigurationError, match="embedding endpoint is missing"):
+    with pytest.raises(ConfigurationError, match="model directory missing"):
         runtime._worker_environment(tmp_path / "product")
 
 
-def test_everos_configured_reranker_requires_credential_before_worker_start(
+def test_everos_worker_environment_drops_ambient_embedding_and_rerank_secrets(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """official-full 声明 configured 时，不得让缺 key 降级成 optional capability。"""
+    """controlled 本地 profile 不得把父进程远端 provider secret 透传给 worker。"""
 
-    config = _config(
-        embedding_provider="openrouter-openai-compatible",
-        embedding_credential_env="openrouter_key",
-    )
     monkeypatch.setenv("openrouter_key", "private-openrouter-key")
-    monkeypatch.setenv("openrouter_base_url", "https://openrouter.example/v1")
-    monkeypatch.delenv("EVEROS_DEEPINFRA_API_KEY", raising=False)
+    monkeypatch.setenv("EVEROS_DEEPINFRA_API_KEY", "private-deepinfra-key")
     runtime = EverOSRuntime(
-        config=config,
+        config=_config(),
         openai_settings=OpenAISettings(
             api_key="private-llm-key",
             base_url="https://llm.example/v1",
@@ -439,8 +414,10 @@ def test_everos_configured_reranker_requires_credential_before_worker_start(
         storage_root=tmp_path / "outputs/run/method_state",
     )
 
-    with pytest.raises(ConfigurationError, match="configured rerank capability"):
-        runtime._worker_environment(tmp_path / "product")
+    environment = runtime._worker_environment(tmp_path / "product")
+
+    assert "openrouter_key" not in environment
+    assert "EVEROS_DEEPINFRA_API_KEY" not in environment
 
 
 def test_everos_locomo_uses_real_speakers_all_user_owners_caption_and_30s(
@@ -1170,6 +1147,9 @@ def test_everos_source_identity_covers_patch_worker_runtime_lock_and_templates()
     assert "src/everos/config/default.toml" in identity["files"]
     assert "src/everos/config/default_ome.toml" in identity["files"]
     assert "scripts/patches/everos-product-runtime-observability.patch" in (
+        identity["wrapper_hashes"]
+    )
+    assert "scripts/requirements/everos-controlled-embedding.txt" in (
         identity["wrapper_hashes"]
     )
     assert "src/memory_benchmark/methods/worker_transport.py" in (

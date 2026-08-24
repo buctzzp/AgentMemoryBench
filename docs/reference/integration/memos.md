@@ -16,7 +16,7 @@
 | 本地路径 | `third_party/methods/MemOS`（gitignored，local-only） |
 | patch | `scripts/patches/memos-product-runtime-observability.patch`（zero-context，`--unidiff-zero` 幂等应用） |
 | adapter | `src/memory_benchmark/methods/memos_adapter.py` |
-| adapter version | `memos-v2.0.25-product-v4` |
+| adapter version | `memos-v2.0.25-product-v5` |
 | 实现身份 | `typed-product-handler` |
 
 判据：`clean v2.0.25 checkout + patch` 与当前 vendored 树逐字节一致。
@@ -105,6 +105,12 @@ local_tracker.wait_for_business_task(
 
 只有 tracker 抵达唯一 terminal success 才算该 session ingest 完成；reader、storage、
 archive、raw delete、refresh 或 scheduler submit 任一失败都必须传播。
+
+HaluMem profile 在提交前经同一 product `GetMemory` handler 读取完整 text-memory baseline；全部
+business task 唯一 terminal success 后再次读取同一 namespace。两个快照都必须是未分页全量、
+唯一 stable ID、非空 current text，adapter 才按 ID 报出新增或内容变化后的 memory。task 未到
+终态、GetMemory 不完整或 namespace 不一致都 fail-fast，不用 raw messages 或 scheduler 日志
+冒充 extraction。
 
 #### Retrieve
 
@@ -268,9 +274,9 @@ metadata 标记 `reference_time_effect="declared_but_unwired_v2.0.25"`；
 | --- | --- |
 | 五 benchmark Recall / NDCG / stable ranking | `pending` |
 | HaluMem QA | `valid`，真实 smoke 已通过 |
-| HaluMem extraction | `N/A`（async `MEM_READ` 未公开 task-scoped fine output） |
+| HaluMem extraction | `valid`（精确 terminal 后完整 product GetMemory stable-ID delta） |
 | HaluMem update | evaluator contract `valid`；本次极小 smoke 因 7 个 current-state probe 全部 zero-hit，结果诚实为 `N/A/no_nonempty_retrieval` |
-| HaluMem memory type | `N/A`（复合 evaluator 继承 upstream extraction 的 N/A；其 Event/Persona/Relationship 是 gold-side 分组，不要求 method 使用同名 taxonomy） |
+| HaluMem memory type | `valid`（复合 evaluator 消费 extraction/update artifact；Event/Persona/Relationship 是 evaluator-private gold 分组，不要求 method 使用同名 taxonomy） |
 
 逐题 `RetrievalEvidence` 一律：
 
@@ -344,6 +350,10 @@ product-v4 已关闭 B7：
   `tokenizer_estimate`；latency 使用实际调用 wall timer；
 - 操作失败会丢弃本操作未提交缓冲，不能污染下一 scope。
 
+product-v5 在成功路径只增加 HaluMem 的 terminal 前后 `GetMemory` 快照与 session report，
+不改变 reader、scheduler、fine memory 或 search 算法；它同时意味着旧 v4 method state/artifact
+不能重标为 v5，下一次真实运行必须新 run 全量重建。
+
 真实 B7 哨兵：
 
 | run | build LLM | build embedding | retrieval embedding |
@@ -375,7 +385,7 @@ current v4 结果：
 
 - LoCoMo：F1=`0.6667`、judge=`0`、normalized/substring EM=`0`；
   Recall=`null/pending`。极小分数不作效果判断。
-- HaluMem：QA=`1.0`；extraction=`null/N/A`；update=`null/N/A`
+- HaluMem（历史 v4）：QA=`1.0`；extraction=`null/N/A`；update=`null/N/A`
   （7 个 probe 均 zero-hit）；memory type=`null/N/A`。
 - 所有 v3 五格 predict/evaluate/machine gate 通过；MemBench 100k 的
   `chat_time=None`、BEAM 两 variant、LoCoMo 双 namespace 与 HaluMem 精确 terminal
@@ -385,8 +395,9 @@ current v4 结果：
 
 - MMR/rerank stable ranking；
 - window-generated memory 的 semantic provenance 与 Recall/NDCG 资格；
-- HaluMem session-local extraction output；memory-type 会按 composite contract 继承该 upstream
-  extraction 资格，不另要求 MemOS 暴露 Event/Persona/Relationship taxonomy；
+- HaluMem v5 的 session-local extraction 已由 terminal GetMemory stable-ID delta 闭合；真实 API
+  pilot 尚待 M5 后新 run 补证。memory-type 按 composite contract 继承该资格，不另要求 MemOS
+  暴露 Event/Persona/Relationship taxonomy；
 - HaluMem update 的非空 current-state 命中尚未由极小 smoke 覆盖；这不把 zero-hit
   改写成 0 分，也不影响 QA 已验证；
 - author LoCoMo 的 preference/top-k/server-env/paper-number parity；

@@ -1,9 +1,16 @@
 # Method 资源与参数审计
 
-更新日期：2026-06-22
+更新日期：2026-08-24
 
-本文记录 Phase 1 conversation + QA 实验前必须确认的 method 参数和本地资源。当前项目规则：
-**smoke 只缩小 benchmark 数据规模，不降低 method 内部官方参数**。这样可以基于局部真实
+> **现行政策提示**：本页主体是 2026-06-22 的历史快照，其中“官方 method 参数”与
+> 旧 runtime/model 倡的具体值不再是 current 恢复入口。当前以
+> [Method TOML 与 answer builder 政策](method-toml-and-answer-builder-policy.md) 和
+> [ws05 runtime 配置与观测裁决](../workstreams/ws05-experiment-reporting/branches/runtime-config-and-observability/README.md)
+> 为准：smoke/full 共用已冻结的 method 主参数，而 API runtime/execution 独立组合；
+> 实际消费 embedding 且公开 seam 兼容的 method 使用 controlled MiniLM-384。
+
+本文记录 Phase 1 conversation + QA 实验前必须确认的 method 参数和本地资源。2026-06-22 时的项目规则：
+**smoke 只缩小 benchmark 数据规模，不临时降低当时冻结的 method 参数**。这样可以基于局部真实
 运行结果估算全量成本；如果 smoke 修改检索深度、模型或压缩参数，局部成本就不再代表
 正式实验。
 

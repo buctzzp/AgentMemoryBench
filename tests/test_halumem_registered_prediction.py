@@ -41,6 +41,8 @@ from memory_benchmark.observability import RunContext
 from memory_benchmark.observability.efficiency import (
     EfficiencyArtifactStore,
     EfficiencyCollector,
+    EfficiencyStage,
+    MeasurementSource,
     ModelDescriptor,
     RetrievalObservationContract,
 )
@@ -79,6 +81,7 @@ class FakeHalumemProvider(MemoryProvider):
     """提供 session 增量报告的 HaluMem fake provider。"""
 
     consume_granularity = "session"
+    session_memory_report = True
 
     def __init__(self) -> None:
         """初始化调用记录和 session 状态。"""
@@ -131,9 +134,32 @@ class FakeHalumemProvider(MemoryProvider):
         self.calls.append(("cleanup", ""))
 
 
+class ObservedUpdateProbeProvider(FakeHalumemProvider):
+    """在 update probe 检索内模拟 SimpleMem planning LLM 的 provider。"""
+
+    def __init__(self, collector: EfficiencyCollector) -> None:
+        """保存 runner 共用 collector。"""
+
+        super().__init__()
+        self.collector = collector
+
+    def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+        """update probe 内记录一次调用，再复用 fake retrieval。"""
+
+        if query.purpose == "memory_update_probe":
+            self.collector.record_llm_call(
+                model_id="fake-retrieval-llm",
+                input_tokens=3,
+                output_tokens=2,
+                token_measurement_source=MeasurementSource.TOKENIZER_ESTIMATE,
+            )
+        return super().retrieve(query)
+
+
 class NoSessionReportHalumemProvider(FakeHalumemProvider):
     """不提供 session extraction report 的 fake provider。"""
 
+    session_memory_report = False
     end_session = MemoryProvider.end_session
 
 
@@ -731,6 +757,54 @@ def test_halumem_operation_level_records_efficiency_observations(
     assert any(
         obs.stage.value == "answer" for obs in by_type.get("llm_call", [])
     )
+
+
+def test_halumem_update_probe_internal_llm_is_retrieval_not_memory_build(
+    tmp_path: Path,
+) -> None:
+    """裸调 update probe 也必须显式切换 retrieval stage。"""
+
+    run_context = _context(tmp_path)
+    collector = EfficiencyCollector(run_id=run_context.run_id, enabled=True)
+    provider = ObservedUpdateProbeProvider(collector)
+    inventory = (
+        ModelDescriptor(
+            model_id="fake-retrieval-llm",
+            model_name="fake-retrieval-llm",
+            model_role="retrieval_llm",
+            execution_mode="api",
+        ),
+    )
+
+    run_operation_level_predictions(
+        dataset=_dataset("halu-user-1"),
+        provider=provider,
+        run_context=run_context,
+        policy=PredictionRunPolicy(max_workers=1, progress_enabled=False),
+        method_manifest={"adapter": "fake-v3", "protocol_version": "v3"},
+        benchmark_variant="medium",
+        run_scope=RunScope.SMOKE,
+        answer_reader=_reader(),
+        unified_prompt_builder=build_halumem_unified_answer_prompt,
+        efficiency_collector=collector,
+        model_inventory=inventory,
+        instrumentation_identity={"collector_schema": 1},
+        retrieval_observation_contract=RetrievalObservationContract(
+            required_by_profile=False,
+            supported_by_method=True,
+        ),
+    )
+
+    observations = EfficiencyArtifactStore.for_prediction(
+        ExperimentPaths.create(run_context.run_dir)
+    ).read_observations()
+    probe_calls = [
+        observation
+        for observation in observations
+        if observation.to_dict().get("model_id") == "fake-retrieval-llm"
+    ]
+    assert probe_calls
+    assert all(observation.stage is EfficiencyStage.RETRIEVAL for observation in probe_calls)
 
 
 def _dataset(*conversation_ids: str) -> Dataset:

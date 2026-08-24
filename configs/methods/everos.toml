@@ -1,46 +1,17 @@
-# EverOS v1.2.3 product-chat 配置。
+# EverOS v1.2.3 product-chat 的 method-owned 参数。
 #
-# 两个 section 只切换 build LLM 与 full worker 上限；product source、chat mode、
-# official add batch、HYBRID search、Qwen embedding/rerank identity、物理 conversation
-# 隔离与输入语义保持相同。embedding/rerank secret 只声明环境变量名；值不进
-# TOML、manifest、日志或 artifact。主轨没有暗中选择 benchmark 专用参数。
+# API runtime、请求重试、conversation workers 与 lifecycle timeout 由独立
+# configs/runtime/api.toml + configs/execution/prediction.toml 组合注入。主比较经 upstream
+# EmbeddingProvider seam 使用本地 MiniLM-384；LanceDB L2 在模型内 L2-normalize 后与 cosine
+# 排序单调等价。旧 Qwen3-Embedding-4B/1024 状态不可复用，必须以新 run_id 全量重建。
 
-[smoke]
-answer_builder = "benchmark"
-llm_model = "ox-alpha-free"
+[method]
 memory_mode = "chat"
 search_method = "hybrid"
 add_batch_size = 25
-embedding_model = "Qwen/Qwen3-Embedding-4B"
-embedding_dimension = 1024
-embedding_provider = "openrouter-openai-compatible"
-embedding_credential_env = "openrouter_key"
-rerank_provider = "deepinfra"
-rerank_model = "Qwen/Qwen3-Reranker-4B"
-rerank_credential_env = "EVEROS_DEEPINFRA_API_KEY"
+embedding_model = "models/all-MiniLM-L6-v2"
+embedding_dimension = 384
+embedding_provider = "sentence-transformers-local"
 rerank_capability_mode = "disabled-zero-call"
 app_id = "memorybenchmark"
 project_id = "phase1"
-worker_request_timeout_seconds = 900.0
-drain_timeout_seconds = 600.0
-max_workers = 1
-
-[official_full]
-answer_builder = "benchmark"
-llm_model = "gpt-4o-mini"
-memory_mode = "chat"
-search_method = "hybrid"
-add_batch_size = 25
-embedding_model = "Qwen/Qwen3-Embedding-4B"
-embedding_dimension = 1024
-embedding_provider = "deepinfra-openai-compatible"
-embedding_credential_env = "EVEROS_DEEPINFRA_API_KEY"
-rerank_provider = "deepinfra"
-rerank_model = "Qwen/Qwen3-Reranker-4B"
-rerank_credential_env = "EVEROS_DEEPINFRA_API_KEY"
-rerank_capability_mode = "configured"
-app_id = "memorybenchmark"
-project_id = "phase1"
-worker_request_timeout_seconds = 900.0
-drain_timeout_seconds = 600.0
-max_workers = 10

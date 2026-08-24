@@ -10,6 +10,7 @@ from memory_benchmark.core import ConfigurationError
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     EfficiencyStage,
+    FailedEfficiencyAttempt,
     MeasurementSource,
 )
 
@@ -283,6 +284,64 @@ def test_observation_ids_are_deterministic_for_same_scope_and_call_order() -> No
         return tuple(record.observation_id for record in scope.records)
 
     assert collect_once() == collect_once()
+
+
+def test_failed_scope_sends_completed_calls_to_attempt_sink_without_error_text() -> None:
+    """失败 scope 应保留已完成调用，但不把异常正文写入成本账。"""
+
+    collector = EfficiencyCollector(run_id="failed-run", enabled=True)
+    attempts: list[FailedEfficiencyAttempt] = []
+    collector.bind_failed_attempt_sink(attempts.append)
+
+    with pytest.raises(RuntimeError, match="secret-value"):
+        with collector.conversation_scope(
+            "conv-1",
+            scope_discriminator="session-1",
+        ):
+            collector.record_llm_call(
+                model_id="build-llm",
+                input_tokens=11,
+                output_tokens=2,
+                token_measurement_source=MeasurementSource.API_USAGE,
+            )
+            raise RuntimeError("secret-value")
+
+    assert len(attempts) == 1
+    payload = attempts[0].to_dict()
+    assert payload["outcome"] == "failed"
+    assert payload["error_type"] == "RuntimeError"
+    assert payload["scope_discriminator"] == "session-1"
+    assert payload["capture_completeness"] == (
+        "caught_scope_exception_completed_model_calls_only"
+    )
+    assert [call["observation_type"] for call in payload["calls"]] == [
+        "llm_call"
+    ]
+    assert "secret-value" not in str(payload)
+
+
+def test_failed_scope_attempts_are_distinct_across_retries() -> None:
+    """同一 scope 的两次失败 retry 必须形成两个 attempt，而非按 call id 合并。"""
+
+    collector = EfficiencyCollector(run_id="failed-run", enabled=True)
+    attempts: list[FailedEfficiencyAttempt] = []
+    collector.bind_failed_attempt_sink(attempts.append)
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="planned"):
+            with collector.question_scope("conv-1", "q-1"):
+                with collector.operation_stage(EfficiencyStage.RETRIEVAL):
+                    collector.record_llm_call(
+                        model_id="retrieval-llm",
+                        input_tokens=3,
+                        output_tokens=1,
+                        token_measurement_source=MeasurementSource.API_USAGE,
+                    )
+                raise RuntimeError("planned")
+
+    assert [attempt.attempt_index for attempt in attempts] == [0, 1]
+    assert attempts[0].attempt_id != attempts[1].attempt_id
+    assert attempts[0].calls[0].observation_id == attempts[1].calls[0].observation_id
 
 
 def test_disabled_collector_returns_empty_scope_and_ignores_records() -> None:

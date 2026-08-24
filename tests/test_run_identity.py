@@ -106,3 +106,38 @@ def test_method_run_identity_rejects_missing_extra_and_mixed_shape() -> None:
         MethodRunIdentity.from_manifest_dict(missing)
     with pytest.raises(ConfigurationError, match="keys mismatch"):
         MethodRunIdentity.from_manifest_dict(extra)
+
+
+def test_embedding_not_applicable_requires_all_concrete_fields_null() -> None:
+    """不消费 embedding 的 profile 必须显式 N/A，不能夹带假模型。"""
+
+    identity = BuildIdentityDeclaration(
+        implementation_variant="product",
+        embedding_profile="not_applicable_v1",
+        historical_controlled_build_equivalent_to_current_main=False,
+        embedding=EmbeddingIdentity(
+            provider=None,
+            model=None,
+            dimension=None,
+            revision=None,
+            revision_status="not_applicable",
+            normalization=None,
+            instruction=None,
+            distance=None,
+            identity_status="not_applicable",
+        ),
+    )
+    assert identity.embedding.to_manifest_dict()["identity_status"] == "not_applicable"
+
+    with pytest.raises(ConfigurationError, match="all concrete fields null"):
+        EmbeddingIdentity(
+            provider="sentence-transformers",
+            model=None,
+            dimension=None,
+            revision=None,
+            revision_status="not_applicable",
+            normalization=None,
+            instruction=None,
+            distance=None,
+            identity_status="not_applicable",
+        )

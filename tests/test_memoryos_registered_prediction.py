@@ -59,9 +59,7 @@ def _write_memoryos_profiles(project_root: Path) -> None:
     profile_path.parent.mkdir(parents=True, exist_ok=True)
     profile_path.write_text(
         """
-[smoke]
-answer_builder = "benchmark"
-llm_model = "ox-alpha-free"
+[method]
 embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
 short_term_capacity = 1
 mid_term_capacity = 2000
@@ -74,38 +72,55 @@ page_similarity_threshold = 0.1
 knowledge_threshold = 0.01
 top_k_sessions = 5
 top_k_knowledge = 20
-api_timeout_seconds = 120
-api_max_retries = 8
-api_retry_wait_seconds = 5
-api_retry_backoff_multiplier = 2
-api_retry_max_wait_seconds = 60
-suppress_official_stdout = true
-max_workers = 1
 longmemeval_prompt_profile = "memoryos-pypi-retrieve-v1"
+""",
+        encoding="utf-8",
+    )
+    runtime_path = project_root / "configs" / "runtime" / "api.toml"
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_path.write_text(
+        """
+[smoke]
+provider = "opencodego"
+model = "ox-alpha-free"
+timeout_seconds = 60.0
+max_retries = 8
+retry_wait_seconds = 5.0
+retry_backoff_multiplier = 2.0
+retry_max_wait_seconds = 60.0
+structured_output_mode = "json_object"
 
 [official_full]
-answer_builder = "benchmark"
-llm_model = "gpt-4o-mini"
-embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
-short_term_capacity = 1
-mid_term_capacity = 2000
-long_term_knowledge_capacity = 100
-retrieval_queue_capacity = 7
-mid_term_heat_threshold = 5.0
-mid_term_similarity_threshold = 0.6
-segment_similarity_threshold = 0.1
-page_similarity_threshold = 0.1
-knowledge_threshold = 0.01
-top_k_sessions = 5
-top_k_knowledge = 20
-api_timeout_seconds = 120
-api_max_retries = 8
-api_retry_wait_seconds = 5
-api_retry_backoff_multiplier = 2
-api_retry_max_wait_seconds = 60
-suppress_official_stdout = true
-max_workers = 1
-longmemeval_prompt_profile = "memoryos-pypi-retrieve-v1"
+provider = "primary"
+model = "gpt-4o-mini"
+timeout_seconds = 60.0
+max_retries = 8
+retry_wait_seconds = 5.0
+retry_backoff_multiplier = 2.0
+retry_max_wait_seconds = 60.0
+structured_output_mode = "json_schema"
+""",
+        encoding="utf-8",
+    )
+    execution_path = project_root / "configs" / "execution" / "prediction.toml"
+    execution_path.parent.mkdir(parents=True, exist_ok=True)
+    execution_path.write_text(
+        """
+[smoke]
+default_max_workers = 1
+worker_request_timeout_seconds = 900.0
+drain_timeout_seconds = 600.0
+task_timeout_seconds = 600.0
+service_startup_timeout_seconds = 60.0
+suppress_method_stdout = true
+
+[official_full]
+default_max_workers = 10
+worker_request_timeout_seconds = 900.0
+drain_timeout_seconds = 600.0
+task_timeout_seconds = 600.0
+service_startup_timeout_seconds = 60.0
+suppress_method_stdout = true
 """,
         encoding="utf-8",
     )
@@ -530,7 +545,7 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -601,6 +616,12 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
     assert [question.question_id for question in smoke_conversation.questions] == [
         "conv-1:q1"
     ]
+    resolved_profile = method_registry_module.resolve_method_profile(
+        "memoryos",
+        "smoke",
+        tmp_path,
+    )
+    assert resolved_profile.method_config_manifest is not None
     # LoCoMo reader 参数由 benchmark 统一冻结，不能继续沿用 MemoryOS 旧 profile。
     assert captured["method_manifest"] == {
         "answer_reader": {
@@ -626,8 +647,9 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
             },
             "provider_compatibility": "opencodego_locomo_explicit_completion_cap_4096_v3",
         },
-        "config": _FakeMemoryOS.instances[0].config.to_manifest(),
-        "consume_granularity": "session",
+            "config": resolved_profile.method_config_manifest,
+            "composition": resolved_profile.composition.to_manifest_dict(),
+            "consume_granularity": "session",
         "prompt_track": "unified",
         "source": {"source": "fake-memoryos"},
         "retrieval_evidence_contract_version": "v1",
@@ -638,11 +660,11 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
         },
         "run_identity": build_method_run_identity(
             profile_name="smoke",
-            profile_section="smoke",
+            profile_section="method",
             answer_builder="benchmark",
             build_identity=method_registry_module.resolve_registered_build_identity(
                 "memoryos",
-                _FakeMemoryOS.instances[0].config.to_manifest(),
+                resolved_profile.method_config_manifest,
             )
         ).to_manifest_dict(),
     }
@@ -676,7 +698,7 @@ def test_new_memoryos_run_writes_only_canonical_prediction_artifacts(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _openai_settings(),
         raising=False,
     )
     _patch_framework_answer_client(monkeypatch)
@@ -776,7 +798,7 @@ def test_new_memoryos_run_writes_only_canonical_prediction_artifacts(
     assert "config_track" not in first_manifest["method"]
     assert "track_identity" not in first_manifest["method"]
     assert first_identity["contract_version"] == "v1"
-    assert first_identity["profile"] == {"name": "smoke", "section": "smoke"}
+    assert first_identity["profile"] == {"name": "smoke", "section": "method"}
     assert first_identity["answer_builder"] == "benchmark"
     assert first_identity["build"]["implementation_variant"] == "product"
     assert first_identity["build"]["embedding"] == {
@@ -917,7 +939,7 @@ def test_memoryos_resume_manifest_mismatch_fails_before_factory_attach_or_direct
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -983,7 +1005,7 @@ def test_memoryos_smoke_worker_override_is_accepted(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(

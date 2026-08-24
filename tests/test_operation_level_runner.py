@@ -93,6 +93,7 @@ class OperationFakeProvider(MemoryProvider):
     """记录 operation-level 调用序列的 fake provider。"""
 
     consume_granularity = "session"
+    session_memory_report = True
 
     def __init__(self, *, evidence: RetrievalEvidence | None = None) -> None:
         """初始化调用记录、累积 session 状态与可选逐题 evidence。"""
@@ -167,8 +168,9 @@ class OperationFakeProvider(MemoryProvider):
 
 
 class NoSessionReportProvider(OperationFakeProvider):
-    """不覆写 end_session 的 fake provider，用于 extraction N/A 路径。"""
+    """显式关闭 session report 的 fake provider，用于 extraction N/A 路径。"""
 
+    session_memory_report = False
     end_session = MemoryProvider.end_session
 
 
@@ -573,6 +575,9 @@ def test_operation_level_update_probe_tolerates_self_recording_provider(
     )
     expected_identity = {
         "enabled": True,
+        "failed_attempt_ledger_contract": (
+            "append-only-caught-scope-completed-calls-v1"
+        ),
         "model_inventory": [
             ModelDescriptor(
                 model_id="fake-answer",

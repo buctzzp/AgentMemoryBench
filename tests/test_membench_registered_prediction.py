@@ -115,7 +115,7 @@ def _install_offline_probe_runtime(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: OpenAISettings(
+        lambda project_root, api_provider=None, expected_model=None: OpenAISettings(
             api_key="sk-test",
             model="ox-alpha-free",
             provider="opencodego",

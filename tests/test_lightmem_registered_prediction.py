@@ -248,7 +248,7 @@ def test_lightmem_registered_prediction_runs_generic_runner_offline(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: OpenAISettings(
+        lambda project_root, api_provider=None, expected_model=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
             model="ox-alpha-free",
@@ -314,7 +314,7 @@ def test_lightmem_registered_prediction_runs_generic_runner_offline(
     assert result.runs[0].run_id == "lightmem-offline-smoke"
     assert len(FakeLightMemForRegisteredPrediction.instances) == 1
     fake_method = FakeLightMemForRegisteredPrediction.instances[0]
-    assert fake_method.kwargs["config"].profile_name == "smoke"
+    assert fake_method.kwargs["config"].profile_name == "method"
     assert len(fake_method.ingested_units) == 2
     assert [unit.turn_id for unit in fake_method.ingested_units] == [
         "turn-1",
@@ -331,7 +331,7 @@ def test_lightmem_registered_prediction_runs_generic_runner_offline(
     public_questions = read_jsonl(run_dir / "artifacts" / "public_questions.jsonl")
 
     assert manifest["method_name"] == "LightMem"
-    assert manifest["method"]["config"]["profile_name"] == "smoke"
+    assert manifest["method"]["config"]["profile_name"] == "method"
     assert manifest["method"]["consume_granularity"] == "turn"
     assert predictions[0]["answer"] == "framework fake answer"
     assert public_questions[0]["question_id"] == "q-1"

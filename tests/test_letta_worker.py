@@ -196,6 +196,17 @@ def test_letta_worker_captures_chat_and_responses_usage_exactly() -> None:
     ]
 
 
+def test_letta_worker_rejects_successful_llm_call_outside_usage_scope() -> None:
+    """任何脱离 ingest scope 的真实调用都不得静默丢 usage。"""
+
+    engine = _WorkerEngine()
+
+    with pytest.raises(RuntimeError, match="outside an active usage capture scope"):
+        engine._capture_usage(
+            {"usage": {"prompt_tokens": 11, "completion_tokens": 3}}
+        )
+
+
 @pytest.mark.parametrize(
     "response",
     [

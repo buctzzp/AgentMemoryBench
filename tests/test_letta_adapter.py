@@ -15,6 +15,7 @@ from memory_benchmark.core import ConfigurationError
 from memory_benchmark.core.provider_protocol import (
     RetrievalQuery,
     SessionBatch,
+    SessionRef,
     TurnEvent,
 )
 from memory_benchmark.methods.letta_adapter import (
@@ -27,7 +28,12 @@ from memory_benchmark.methods.letta_adapter import (
     build_letta_source_identity,
     clean_letta_conversation_state,
 )
-from memory_benchmark.observability.efficiency import EfficiencyCollector
+from memory_benchmark.methods.worker_transport import WorkerCommandError
+from memory_benchmark.observability.efficiency import (
+    EfficiencyCollector,
+    FailedEfficiencyAttempt,
+    LLMCallObservation,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -176,6 +182,8 @@ def _provider(
     benchmark_name: str = "longmemeval",
     collector: EfficiencyCollector | None = None,
     config: LettaConfig | None = None,
+    session_memory_report: bool = False,
+    runtime_factory: Any = _FakeRuntime,
 ) -> Letta:
     """构造使用 fake runtime 的 adapter。"""
 
@@ -190,8 +198,9 @@ def _provider(
             model=selected.llm_model,
         ),
         efficiency_collector=collector,
+        session_memory_report=session_memory_report,
         benchmark_name=benchmark_name,
-        runtime_factory=_FakeRuntime,
+        runtime_factory=runtime_factory,
     )
 
 
@@ -577,6 +586,61 @@ def test_letta_completed_operation_replay_is_idempotent(tmp_path: Path) -> None:
     assert len(sidecar["completed_operation_ids"]) == 1
 
 
+def test_letta_halumem_reports_crash_safe_changed_core_block_delta(
+    tmp_path: Path,
+) -> None:
+    """报告稳定 block ID 的产品 after-value，并从 sidecar 原样重放结果。"""
+
+    provider = _provider(
+        tmp_path,
+        benchmark_name="halumem",
+        session_memory_report=True,
+    )
+    runtime = provider._require_runtime()
+    assert isinstance(runtime, _FakeRuntime)
+    original_ingest = runtime.ingest
+
+    def _mutating_ingest(
+        *,
+        subject_id: str,
+        operation_id: str,
+        content: str,
+    ) -> dict[str, Any]:
+        """模拟 sleeptime tool 在成功 step 中改写 human block。"""
+
+        result = original_ingest(
+            subject_id=subject_id,
+            operation_id=operation_id,
+            content=content,
+        )
+        runtime.blocks[1] = {
+            **runtime.blocks[1],
+            "value": "Alice now lives in Boston.",
+        }
+        return result
+
+    runtime.ingest = _mutating_ingest
+    batch = _batch(
+        [_event(role="user", speaker="user", content="raw input", turn_id="t1")]
+    )
+
+    provider.ingest(batch)
+    first = provider.end_session(
+        SessionRef(isolation_key="run_conv", session_id="s1")
+    )
+    provider.ingest(batch)
+    second = provider.end_session(
+        SessionRef(isolation_key="run_conv", session_id="s1")
+    )
+
+    assert first is not None and second is not None
+    assert first.memories == ["Alice now lives in Boston."]
+    assert second.memories == first.memories
+    sidecar = json.loads(provider._sidecar_path("run_conv").read_text())
+    assert sidecar["session_reports"]["s1"]["before_blocks"][0]["id"] == "block-human"
+    assert sidecar["session_reports"]["s1"]["memories"] == first.memories
+
+
 def test_letta_ambiguous_pending_operation_requires_namespace_clean(
     tmp_path: Path,
 ) -> None:
@@ -722,6 +786,50 @@ def test_letta_usage_is_replayed_as_exact_per_call_observations(tmp_path: Path) 
         (7, 2),
     ]
     assert all(record.token_measurement_source.value == "api_usage" for record in llm_records)
+
+
+def test_letta_failed_worker_usage_reaches_attempt_ledger(tmp_path: Path) -> None:
+    """Letta step 失败不能抹掉此前已返回 exact usage 的 provider calls。"""
+
+    class _FailingRuntime(_FakeRuntime):
+        """模拟 worker 带结构化 usage 的业务失败。"""
+
+        def ingest(self, **kwargs: Any) -> dict[str, Any]:
+            """记录请求后返回 WorkerCommandError。"""
+
+            self.ingest_calls.append(dict(kwargs))
+            raise WorkerCommandError(
+                "Letta worker ingest failed [RuntimeError]: planned",
+                error_type="RuntimeError",
+                details={
+                    "llm_observations": [
+                        {"input_tokens": 17, "output_tokens": 5}
+                    ]
+                },
+            )
+
+    collector = EfficiencyCollector(run_id="letta-failed", enabled=True)
+    attempts: list[FailedEfficiencyAttempt] = []
+    collector.bind_failed_attempt_sink(attempts.append)
+    provider = _provider(
+        tmp_path,
+        collector=collector,
+        runtime_factory=_FailingRuntime,
+    )
+
+    with pytest.raises(WorkerCommandError, match="planned"):
+        with collector.conversation_scope("conv"):
+            provider.ingest(
+                _batch(
+                    [_event(role="user", speaker="user", content="hello", turn_id="t1")]
+                )
+            )
+
+    assert len(attempts) == 1
+    assert len(attempts[0].calls) == 1
+    call = attempts[0].calls[0]
+    assert isinstance(call, LLMCallObservation)
+    assert (call.input_tokens, call.output_tokens) == (17, 5)
 
 
 def test_letta_readout_is_sorted_query_independent_and_metric_na(tmp_path: Path) -> None:

@@ -44,6 +44,7 @@ from memory_benchmark.core.provider_protocol import (
     RetrievalResult,
     RetrievedItem,
     SessionBatch,
+    SessionMemoryReport,
     SessionRef,
 )
 from memory_benchmark.methods import registry as method_registry_module
@@ -71,9 +72,11 @@ class FakeMemOSForRegisteredPrediction(MemoryProvider):
         """记录 registry factory 传入的构造参数。"""
 
         self.kwargs = kwargs
+        self.session_memory_report = bool(kwargs.get("session_memory_report", False))
         self.ingested_batches: list[SessionBatch] = []
         self.retrievals: list[RetrievalQuery] = []
         self.cleanup_calls = 0
+        self.session_memories: dict[tuple[str, str | None], list[str]] = {}
         self.instances.append(self)
 
     def ingest(self, unit: IngestUnit) -> IngestResult | None:
@@ -81,12 +84,30 @@ class FakeMemOSForRegisteredPrediction(MemoryProvider):
 
         assert isinstance(unit, SessionBatch)
         self.ingested_batches.append(unit)
+        if self.session_memory_report:
+            self.session_memories[(unit.isolation_key, unit.session_id)] = [
+                "fake terminal MemOS memory"
+            ]
         return IngestResult(
             unit_ref=SessionRef(
                 isolation_key=unit.isolation_key,
                 session_id=unit.session_id,
             ),
             metadata={"method": "memos", "message_count": len(unit.events)},
+        )
+
+    def end_session(self, ref: SessionRef) -> SessionMemoryReport | None:
+        """镜像真实 adapter 的 terminal GetMemory delta。"""
+
+        if not self.session_memory_report:
+            return None
+        return SessionMemoryReport(
+            session_ref=ref,
+            memories=self.session_memories.pop(
+                (ref.isolation_key, ref.session_id),
+                [],
+            ),
+            metadata={"method": "memos"},
         )
 
     def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
@@ -180,7 +201,7 @@ def test_memos_registered_prediction_runs_five_benchmarks_through_generic_runner
     assert manifest["method"]["consume_granularity"] == "session"
     assert manifest["method"]["provenance_granularity"] == "none"
     assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"
-    assert manifest["method"]["config"]["adapter_version"] == "memos-v2.0.25-product-v4"
+    assert manifest["method"]["config"]["adapter_version"] == "memos-v2.0.25-product-v5"
     assert manifest["method"]["config"]["build_llm_response_contract"] == (
         "provider-aware-v2:"
         "opencodego=model_aware_json_reasoning_control;"
@@ -284,7 +305,7 @@ def _install_offline_registered_stack(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: OpenAISettings(
+        lambda project_root, api_provider=None, expected_model=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
             model="ox-alpha-free",

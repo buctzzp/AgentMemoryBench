@@ -10,7 +10,12 @@ import pytest
 
 from memory_benchmark.config import OpenAISettings, PathSettings, load_path_settings
 from memory_benchmark.core import ConfigurationError
-from memory_benchmark.core.provider_protocol import RetrievalQuery, SessionBatch, TurnEvent
+from memory_benchmark.core.provider_protocol import (
+    RetrievalQuery,
+    SessionBatch,
+    SessionRef,
+    TurnEvent,
+)
 from memory_benchmark.methods.langmem_adapter import (
     LANGMEM_ADAPTER_VERSION,
     LANGMEM_EMPTY_MEMORY_SENTINEL,
@@ -23,9 +28,11 @@ from memory_benchmark.methods.langmem_adapter import (
     build_langmem_source_identity,
     clean_langmem_conversation_state,
 )
+from memory_benchmark.methods.worker_transport import WorkerCommandError
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     EmbeddingCallObservation,
+    FailedEfficiencyAttempt,
     LLMCallObservation,
 )
 
@@ -90,6 +97,15 @@ class _FakeRuntime:
             }
         )
         return {
+            "changed_memories": [
+                {
+                    "key": "mem-1",
+                    "value": {
+                        "kind": "Memory",
+                        "content": {"content": "Current evolved memory."},
+                    },
+                }
+            ],
             "changed_memory_keys": ["mem-1"],
             "embedding_observations": [
                 {"input_tokens": 5, "latency_ms": 1.25, "text_count": 1},
@@ -184,6 +200,8 @@ def _provider(
     *,
     benchmark_name: str = "longmemeval",
     collector: EfficiencyCollector | None = None,
+    session_memory_report: bool = False,
+    runtime_factory: Any = _FakeRuntime,
 ) -> LangMem:
     """构造使用 fake runtime 的真实 adapter。"""
 
@@ -200,8 +218,9 @@ def _provider(
             judge_transport="chat_completions",
         ),
         efficiency_collector=collector,
+        session_memory_report=session_memory_report,
         benchmark_name=benchmark_name,
-        runtime_factory=_FakeRuntime,
+        runtime_factory=runtime_factory,
     )
 
 
@@ -458,6 +477,86 @@ def test_langmem_ingest_operation_identity_and_observations_are_exact_once(
     ]
     assert [(item.input_tokens, item.output_tokens) for item in llm] == [(21, 7)]
     assert [item.input_tokens for item in embeddings] == [5, 8]
+
+
+def test_langmem_failed_worker_usage_reaches_attempt_ledger(tmp_path: Path) -> None:
+    """worker 回滚产品状态时，已完成 LLM/embedding 调用仍属于成本事实。"""
+
+    class _FailingRuntime(_FakeRuntime):
+        """返回带脱敏 usage 的结构化 worker 业务异常。"""
+
+        def ingest(self, **kwargs: Any) -> dict[str, Any]:
+            """记录请求后抛出 transport 领域异常。"""
+
+            self.ingest_calls.append(dict(kwargs))
+            raise WorkerCommandError(
+                "LangMem worker ingest failed [RuntimeError]: planned",
+                error_type="RuntimeError",
+                details={
+                    "llm_observations": [
+                        {"input_tokens": 23, "output_tokens": 6}
+                    ],
+                    "embedding_observations": [
+                        {"input_tokens": 7, "latency_ms": 1.25}
+                    ],
+                },
+            )
+
+    collector = EfficiencyCollector(run_id="langmem-failed", enabled=True)
+    attempts: list[FailedEfficiencyAttempt] = []
+    collector.bind_failed_attempt_sink(attempts.append)
+    provider = _provider(
+        tmp_path,
+        collector=collector,
+        runtime_factory=_FailingRuntime,
+    )
+
+    with pytest.raises(WorkerCommandError, match="planned"):
+        with collector.conversation_scope("conv"):
+            provider.ingest(
+                _batch(
+                    [_event(role="user", speaker="user", content="fact", turn_id="t1")]
+                )
+            )
+
+    assert len(attempts) == 1
+    assert [type(call) for call in attempts[0].calls] == [
+        LLMCallObservation,
+        EmbeddingCallObservation,
+    ]
+    assert [call.input_tokens for call in attempts[0].calls] == [23, 7]
+
+
+def test_langmem_halumem_reports_current_changed_product_memory_on_replay(
+    tmp_path: Path,
+) -> None:
+    """session extraction 读取事务提交后的 current value，重放不回显 raw turn。"""
+
+    provider = _provider(
+        tmp_path,
+        benchmark_name="halumem",
+        session_memory_report=True,
+    )
+    batch = _batch(
+        [_event(role="user", speaker="user", content="raw fact", turn_id="t1")]
+    )
+
+    first = provider.ingest(batch)
+    first_report = provider.end_session(
+        SessionRef(isolation_key="run_conv", session_id="s1")
+    )
+    runtime = _FakeRuntime.instances[0]
+    runtime.reused_operation = True
+    second = provider.ingest(batch)
+    second_report = provider.end_session(
+        SessionRef(isolation_key="run_conv", session_id="s1")
+    )
+
+    assert first is not None and second is not None
+    assert first_report is not None and second_report is not None
+    assert first_report.memories == ["Current evolved memory."]
+    assert second_report.memories == first_report.memories
+    assert first_report.memories != ["raw fact"]
 
 
 def test_langmem_retrieve_preserves_rank_score_and_evidence(

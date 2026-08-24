@@ -45,3 +45,4 @@ fetch_method "letta" "https://github.com/letta-ai/letta.git" "b76da9092518cbaa2d
 fetch_method "graphiti" "https://github.com/getzep/graphiti.git" "021d3a57d511f21b10adaf7fa923bd5c1fce5e9d"
 fetch_method "EverOS" "https://github.com/EverMind-AI/EverOS.git" "48fc9084888bc17100053227284f939a5aca5e91"
 apply_method_patch "EverOS" "${ROOT_DIR}/scripts/patches/everos-product-runtime-observability.patch"
+apply_method_patch "EverOS" "${ROOT_DIR}/scripts/patches/everos-configured-embedding-dimension.patch"

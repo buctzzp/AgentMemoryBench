@@ -98,11 +98,13 @@ class _WorkerEngine:
         self.actor: Any = None
         self.config: dict[str, Any] = {}
         self._usage_buffer: list[dict[str, int]] | None = None
+        self._failed_error_details: dict[str, Any] | None = None
         self._closed = False
 
     async def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         """路由一条已解析的 worker 请求。"""
 
+        self._failed_error_details = None
         command = _required_text(request.get("command"), "command")
         payload = request.get("payload")
         if not isinstance(payload, dict):
@@ -285,7 +287,9 @@ class _WorkerEngine:
         """从一次成功响应提取精确 token usage；缺失时立即失败。"""
 
         if self._usage_buffer is None:
-            return
+            raise RuntimeError(
+                "Letta LLM call completed outside an active usage capture scope"
+            )
         usage = response.get("usage") if isinstance(response, dict) else None
         if not isinstance(usage, dict):
             raise RuntimeError("Letta build LLM response has no exact usage object")
@@ -314,10 +318,19 @@ class _WorkerEngine:
         self._usage_buffer = None
         return captured
 
-    def _discard_usage(self) -> None:
-        """异常路径丢弃未完成 observation，禁止写半条记录。"""
+    def _discard_usage(self) -> list[dict[str, int]]:
+        """异常路径弹出已完成 usage，供父进程失败尝试账使用。"""
 
+        captured = list(self._usage_buffer or [])
         self._usage_buffer = None
+        return captured
+
+    def pop_failed_error_details(self) -> dict[str, Any] | None:
+        """返回并清除最近失败 ingest 的结构化 usage。"""
+
+        details = self._failed_error_details
+        self._failed_error_details = None
+        return details
 
     def _subject_tags(self, subject_id: str) -> list[str]:
         """返回 official SDK tag 加框架 runtime/subject 隔离 tag。"""
@@ -562,6 +575,7 @@ class _WorkerEngine:
             actor=self.actor,
         )
         response = None
+        usage: list[dict[str, int]] = []
         run_status = RunStatus.failed
         run_update_metadata = None
         stop_reason_object = None
@@ -585,7 +599,10 @@ class _WorkerEngine:
                 )
             run_status = stop_reason_object.run_status
         except BaseException as exc:
-            self._discard_usage()
+            buffered_usage = self._discard_usage()
+            self._failed_error_details = {
+                "llm_observations": usage or buffered_usage,
+            }
             run_update_metadata = {"error_type": type(exc).__name__}
             raise
         finally:
@@ -788,6 +805,9 @@ def main() -> int:
                     "error_type": exc.__class__.__name__,
                     "error": _sanitize_error(str(exc)),
                 }
+                error_details = engine.pop_failed_error_details()
+                if error_details is not None:
+                    response["error_details"] = error_details
             protocol.write(json.dumps(response, ensure_ascii=False, sort_keys=True) + "\n")
             protocol.flush()
             if should_stop:

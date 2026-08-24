@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Lock
 from typing import Any, Sequence
 
 from memory_benchmark.core import ConfigurationError
@@ -17,6 +18,7 @@ from memory_benchmark.observability.efficiency.entities import (
     EfficiencyObservation,
     EfficiencyStage,
     EmbeddingCallObservation,
+    FailedEfficiencyAttempt,
     LLMCallObservation,
     MeasurementSource,
     ModelDescriptor,
@@ -24,7 +26,7 @@ from memory_benchmark.observability.efficiency.entities import (
 )
 from memory_benchmark.storage.atomic import atomic_write_json, atomic_write_jsonl
 from memory_benchmark.storage.experiment_paths import ExperimentPaths
-from memory_benchmark.storage.jsonl import read_jsonl
+from memory_benchmark.storage.jsonl import JsonlWriter, read_jsonl
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,12 @@ class EfficiencyArtifactStore:
 
     model_inventory_path: Path
     observations_path: Path
+    failed_attempts_path: Path
+    _failed_attempt_lock: Lock = field(
+        default_factory=Lock,
+        compare=False,
+        repr=False,
+    )
 
     @classmethod
     def for_prediction(
@@ -44,6 +52,7 @@ class EfficiencyArtifactStore:
         return cls(
             model_inventory_path=paths.prediction_model_inventory_path,
             observations_path=paths.prediction_efficiency_observations_path,
+            failed_attempts_path=paths.prediction_failed_efficiency_attempts_path,
         )
 
     @classmethod
@@ -59,7 +68,93 @@ class EfficiencyArtifactStore:
             observations_path=paths.evaluator_efficiency_observations_path(
                 metric_name
             ),
+            failed_attempts_path=(
+                paths.evaluator_failed_efficiency_attempts_path(metric_name)
+            ),
         )
+
+    def append_failed_attempt(self, attempt: FailedEfficiencyAttempt) -> None:
+        """追加一次失败 scope 的成本事实，不与成功 artifact 一起回滚。
+
+        失败很少发生，因此每次追加前读取现存 id 以拒绝重复或冲突；文件使用
+        append-only JSONL，不会因后续 retry 改写先前尝试。
+        """
+
+        if not isinstance(attempt, FailedEfficiencyAttempt):
+            raise ConfigurationError(
+                "failed efficiency attempt must be FailedEfficiencyAttempt"
+            )
+        payload = attempt.to_dict()
+        with self._failed_attempt_lock:
+            existing = self.read_failed_attempts()
+            if any(record.get("attempt_id") == attempt.attempt_id for record in existing):
+                raise ConfigurationError(
+                    "Efficiency attempt ledger has duplicate attempt_id: "
+                    f"{attempt.attempt_id}"
+                )
+            JsonlWriter(self.failed_attempts_path).append(payload)
+
+    def read_failed_attempts(self) -> list[dict[str, Any]]:
+        """严格读取失败尝试账，并校验 schema、唯一 id 与固定完成度声明。"""
+
+        try:
+            records = read_jsonl(self.failed_attempts_path)
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+            raise ConfigurationError(
+                f"Efficiency attempt JSONL is invalid: {self.failed_attempts_path}"
+            ) from exc
+        seen_ids: set[str] = set()
+        for record in records:
+            expected = {
+                "schema_version",
+                "attempt_id",
+                "collector_session_id",
+                "attempt_index",
+                "outcome",
+                "scope_type",
+                "conversation_id",
+                "question_id",
+                "scope_discriminator",
+                "error_type",
+                "capture_completeness",
+                "calls",
+            }
+            if set(record) != expected:
+                raise ConfigurationError(
+                    "Efficiency attempt fields do not match schema"
+                )
+            if record.get("schema_version") != 1 or record.get("outcome") != "failed":
+                raise ConfigurationError(
+                    "Efficiency attempt schema or outcome is invalid"
+                )
+            attempt_id = record.get("attempt_id")
+            if not isinstance(attempt_id, str) or not attempt_id.strip():
+                raise ConfigurationError("Efficiency attempt_id is invalid")
+            if attempt_id in seen_ids:
+                raise ConfigurationError(
+                    f"Efficiency attempt ledger has duplicate attempt_id: {attempt_id}"
+                )
+            seen_ids.add(attempt_id)
+            if record.get("capture_completeness") != (
+                "caught_scope_exception_completed_model_calls_only"
+            ):
+                raise ConfigurationError(
+                    "Efficiency attempt capture_completeness is invalid"
+                )
+            calls = record.get("calls")
+            if not isinstance(calls, list):
+                raise ConfigurationError("Efficiency attempt calls must be a list")
+            for call in calls:
+                if not isinstance(call, dict):
+                    raise ConfigurationError(
+                        "Efficiency attempt call must be an object"
+                    )
+                observation = _observation_from_record(call)
+                if not isinstance(observation, (LLMCallObservation, EmbeddingCallObservation)):
+                    raise ConfigurationError(
+                        "Efficiency attempt calls must be model-call observations"
+                    )
+        return records
 
     def write_model_inventory(
         self,

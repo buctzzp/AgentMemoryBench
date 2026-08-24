@@ -13,7 +13,7 @@
 | LangMem | https://github.com/langchain-ai/langmem.git | 56d85939d80bb731bd5e237567148d817d7bfd16（package 0.0.30） | local-only；按 fetch 脚本恢复；current remote 相对旧 pin 仅 `uv.lock` 依赖维护漂移，产品源码未变 |
 | letta | https://github.com/letta-ai/letta.git | b76da9092518cbaa2d09042e52fdcbde69243e18 | local-only；按 fetch 脚本恢复 |
 | graphiti | https://github.com/getzep/graphiti.git | v0.29.3 / 021d3a57d511f21b10adaf7fa923bd5c1fce5e9d | local-only；按 fetch 脚本恢复。Graphiti 是 Apache-2.0 temporal context graph engine，不冒充 Zep 托管产品；Phase 1 用 direct core product surface，source/product 裁决见 ws02.7 |
-| EverOS | https://github.com/EverMind-AI/EverOS.git | v1.2.3 / 48fc9084888bc17100053227284f939a5aca5e91 | local-only；按 fetch 脚本恢复并应用 `scripts/patches/everos-product-runtime-observability.patch`。patch 只让 lifespan shutdown 失败在全部 provider settle 后向调用方可见，不改成功路径或算法。运行算法依赖由该版本 `uv.lock` 固定，公开源码对应 EverMind-AI/EverAlgo 的精确 package tags。用户本地 `EverMemOS.pdf` 不属于恢复资产 |
+| EverOS | https://github.com/EverMind-AI/EverOS.git | v1.2.3 / 48fc9084888bc17100053227284f939a5aca5e91 | local-only；按 fetch 脚本恢复并依次应用 `everos-product-runtime-observability.patch` 与 `everos-configured-embedding-dimension.patch`。前者只传播 lifespan shutdown 失败；后者让 upstream `EmbeddingProvider` 的公开 `dimensions` 同时驱动 provider 与六张 LanceDB schema，默认仍为 1024，受控主比较使用 MiniLM-384。运行算法依赖由该版本 `uv.lock` 固定，额外本地 embedding overlay 由 `scripts/requirements/everos-controlled-embedding.txt` + `bootstrap_everos_runtime.sh` 锁定；其唯一 upstream 共享依赖升级为 `click 8.3.3→8.4.2`，由 `huggingface-hub==1.28.0` 的公开约束要求，不改变 memory pipeline。用户本地 `EverMemOS.pdf` 不属于恢复资产 |
 
 ## 已退出 Phase 1 的 source-gate 快照
 

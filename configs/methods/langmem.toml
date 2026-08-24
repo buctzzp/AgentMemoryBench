@@ -1,12 +1,10 @@
 # LangMem 0.0.30 async background MemoryStoreManager 产品配置。
 #
-# 两个 section 只切换 API runtime/model 与 full worker 上限；session 粒度、public
-# factory 默认、InMemoryStore、controlled MiniLM 与 query/readout 语义完全相同。
+# API runtime/model、worker timeout 与 conversation workers 由独立组合根注入；
+# 本文件只保留 session memory 算法与 controlled MiniLM 参数。
 # 当前官方 repo 对五个 Phase-1 benchmark 均无 author harness，故不虚构 author section。
 
-[smoke]
-answer_builder = "benchmark"
-llm_model = "ox-alpha-free"
+[method]
 embedding_model_path = "models/all-MiniLM-L6-v2"
 embedding_dimension = 384
 embedding_normalize = true
@@ -14,18 +12,3 @@ query_limit = 5
 max_steps = 1
 enable_inserts = true
 enable_deletes = false
-worker_request_timeout_seconds = 600.0
-max_workers = 1
-
-[official_full]
-answer_builder = "benchmark"
-llm_model = "gpt-4o-mini"
-embedding_model_path = "models/all-MiniLM-L6-v2"
-embedding_dimension = 384
-embedding_normalize = true
-query_limit = 5
-max_steps = 1
-enable_inserts = true
-enable_deletes = false
-worker_request_timeout_seconds = 600.0
-max_workers = 10

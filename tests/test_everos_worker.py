@@ -15,9 +15,8 @@ import pytest
 
 from memory_benchmark.methods.everos_worker import (
     EVEROS_ADAPTER_VERSION,
-    _ObservedEmbeddingsEndpoint,
+    _LocalSentenceTransformerEmbeddingProvider,
     _ObservedLLMClient,
-    _ObservedRerankProvider,
     _WorkerEngine,
 )
 
@@ -343,18 +342,17 @@ def test_multi_owner_search_merge_is_score_first_stable_and_deduplicated() -> No
     assert result["rerank_observations"] == []
 
 
-def test_observation_wrappers_record_only_successful_exact_usage() -> None:
-    """LLM/embedding/rerank wrapper 逐字透传并只记录成功调用。"""
+def test_observation_wrappers_record_api_llm_and_local_embedding_usage(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """LLM exact usage 与本地 tokenizer/墙钟 embedding 观测必须同时成立。"""
 
     engine = _WorkerEngine()
     engine.begin_observations()
     llm_response = SimpleNamespace(
         usage=SimpleNamespace(prompt_tokens=11, completion_tokens=3)
     )
-    embedding_response = SimpleNamespace(
-        usage=SimpleNamespace(prompt_tokens=7)
-    )
-    rerank_response = [SimpleNamespace(index=0, score=0.9)]
 
     class _LLM:
         """返回固定 ChatResponse。"""
@@ -368,56 +366,77 @@ def test_observation_wrappers_record_only_successful_exact_usage() -> None:
             assert kwargs == {"temperature": 0}
             return llm_response
 
-    class _Embedding:
-        """返回固定 embedding response。"""
+    class _Encoded(list):
+        """模拟 numpy array 的 tolist。"""
 
-        async def create(self, *args: Any, **kwargs: Any) -> Any:
-            """确认输入透传。"""
+        def tolist(self) -> list[list[float]]:
+            """返回二维向量。"""
 
-            assert args == ()
-            assert kwargs == {"input": ["a", "b"]}
-            return embedding_response
+            return list(self)
 
-    class _Rerank:
-        """返回固定 rerank response。"""
+    class _Tokenizer:
+        """按文本长度返回可预测 token id。"""
 
-        model = "fake-reranker"
+        @staticmethod
+        def encode(text: str, **kwargs: Any) -> list[int]:
+            """验证截断参数并返回稳定 token 数。"""
 
-        async def rerank(self, *args: Any, **kwargs: Any) -> Any:
-            """确认 query/documents/instruction 逐字透传。"""
+            assert kwargs == {
+                "add_special_tokens": True,
+                "truncation": True,
+                "max_length": 8,
+            }
+            return list(range(len(text) + 1))
 
-            assert args == ("query", ["doc-a", "doc-b"])
-            assert kwargs == {"instruction": "rank passages"}
-            return rerank_response
+    class _Model:
+        """模拟本地 3 维 SentenceTransformer。"""
+
+        tokenizer = _Tokenizer()
+        max_seq_length = 8
+
+        @staticmethod
+        def get_embedding_dimension() -> int:
+            """返回固定维度。"""
+
+            return 3
+
+        @staticmethod
+        def encode(texts: list[str], **kwargs: Any) -> _Encoded:
+            """验证 production encode 参数并返回稳定向量。"""
+
+            assert kwargs == {
+                "convert_to_numpy": True,
+                "show_progress_bar": False,
+            }
+            return _Encoded([[1.0, 0.0, 0.0] for _ in texts])
+
+    sentence_transformers = ModuleType("sentence_transformers")
+    sentence_transformers.SentenceTransformer = (  # type: ignore[attr-defined]
+        lambda *args, **kwargs: _Model()
+    )
+    monkeypatch.setitem(sys.modules, "sentence_transformers", sentence_transformers)
+    model_path = tmp_path / "model"
+    model_path.mkdir()
 
     observed_llm = _ObservedLLMClient(_LLM(), engine)
-    observed_embedding = _ObservedEmbeddingsEndpoint(_Embedding(), engine)
-    observed_rerank = _ObservedRerankProvider(_Rerank(), engine)
+    observed_embedding = _LocalSentenceTransformerEmbeddingProvider(
+        model_path=model_path,
+        dimension=3,
+        engine=engine,
+    )
 
     assert asyncio.run(observed_llm.chat("prompt", temperature=0)) is llm_response
     assert observed_llm.model == "fake-model"
-    assert (
-        asyncio.run(observed_embedding.create(input=["a", "b"]))
-        is embedding_response
-    )
-    assert (
-        asyncio.run(
-            observed_rerank.rerank(
-                "query",
-                ["doc-a", "doc-b"],
-                instruction="rank passages",
-            )
-        )
-        is rerank_response
-    )
-    assert observed_rerank.model == "fake-reranker"
+    assert asyncio.run(observed_embedding.embed_batch(["a", "bb"])) == [
+        [1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+    ]
     llm, embedding, rerank = engine.finish_observations()
     assert llm == [{"input_tokens": 11, "output_tokens": 3}]
-    assert embedding[0]["input_tokens"] == 7
+    assert embedding[0]["input_tokens"] == 5
     assert embedding[0]["text_count"] == 2
     assert embedding[0]["latency_ms"] >= 0
-    assert rerank[0]["document_count"] == 2
-    assert rerank[0]["latency_ms"] >= 0
+    assert rerank == []
 
 
 def test_everos_observed_llm_uses_low_reasoning_for_ox(
@@ -449,10 +468,85 @@ def test_everos_observed_llm_uses_low_reasoning_for_ox(
     assert llm == [{"input_tokens": 5, "output_tokens": 2}]
 
 
-def test_install_observers_wraps_rerank_capability_before_search_manager_build(
+def test_install_controlled_embedding_provider_uses_upstream_capability_seam(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """本地 MiniLM 必须经 upstream capability 注入，且不允许二次初始化。"""
+
+    @dataclass(frozen=True)
+    class _Capability:
+        """模拟 upstream frozen capability。"""
+
+        provider: Any
+
+    class _Tokenizer:
+        """提供最小 tokenizer 契约。"""
+
+        @staticmethod
+        def encode(text: str, **kwargs: Any) -> list[int]:
+            """返回稳定 token id。"""
+
+            return [1]
+
+    class _Model:
+        """提供最小 SentenceTransformer 契约。"""
+
+        tokenizer = _Tokenizer()
+        max_seq_length = 8
+
+        @staticmethod
+        def get_embedding_dimension() -> int:
+            """返回受控维度。"""
+
+            return 3
+
+    sentence_transformers = ModuleType("sentence_transformers")
+    sentence_transformers.SentenceTransformer = (  # type: ignore[attr-defined]
+        lambda *args, **kwargs: _Model()
+    )
+    everos_package = ModuleType("everos")
+    component_package = ModuleType("everos.component")
+    embedding_package = ModuleType("everos.component.embedding")
+    for package in (everos_package, component_package, embedding_package):
+        package.__path__ = []  # type: ignore[attr-defined]
+    accessor = ModuleType("everos.component.embedding.accessor")
+    accessor._capability = None  # type: ignore[attr-defined]
+    capability = ModuleType("everos.component.embedding.capability")
+    capability.EmbeddingCapability = _Capability  # type: ignore[attr-defined]
+    everos_package.component = component_package  # type: ignore[attr-defined]
+    component_package.embedding = embedding_package  # type: ignore[attr-defined]
+    embedding_package.accessor = accessor  # type: ignore[attr-defined]
+    embedding_package.capability = capability  # type: ignore[attr-defined]
+    for module in (
+        sentence_transformers,
+        everos_package,
+        component_package,
+        embedding_package,
+        accessor,
+        capability,
+    ):
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    monkeypatch.setenv("EVEROS_LOCAL_EMBEDDING_MODEL_PATH", str(model_path))
+    engine = _WorkerEngine()
+    engine.config = {"embedding_dimension": 3}
+
+    engine._install_controlled_embedding_provider()
+
+    assert isinstance(
+        accessor._capability.provider,  # type: ignore[attr-defined]
+        _LocalSentenceTransformerEmbeddingProvider,
+    )
+    with pytest.raises(RuntimeError, match="initialized before controlled provider"):
+        engine._install_controlled_embedding_provider()
+
+
+def test_install_observers_accepts_controlled_provider_before_search_manager_build(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """observer 必须在 lazy SearchManager 前原子安装到三类 product 单例。"""
+    """observer 只包装 LLM，并锁本地 embedder/rerank-disabled/search-manager 时序。"""
 
     @dataclass(frozen=True)
     class _Capability:
@@ -477,11 +571,9 @@ def test_install_observers_wraps_rerank_capability_before_search_manager_build(
         package.__path__ = []  # type: ignore[attr-defined]
 
     llm_client = SimpleNamespace(model="llm")
-    embedding_endpoint = SimpleNamespace(name="embeddings")
-    embedding_provider = SimpleNamespace(
-        _client=SimpleNamespace(embeddings=embedding_endpoint)
+    embedding_provider = object.__new__(
+        _LocalSentenceTransformerEmbeddingProvider
     )
-    rerank_provider = SimpleNamespace(model="reranker")
     embedding_accessor = ModuleType("everos.component.embedding.accessor")
     embedding_accessor.get_embedding_capability = (  # type: ignore[attr-defined]
         lambda: _Capability(provider=embedding_provider)
@@ -489,9 +581,7 @@ def test_install_observers_wraps_rerank_capability_before_search_manager_build(
     llm_accessor = ModuleType("everos.component.llm.client")
     llm_accessor._llm_client = llm_client  # type: ignore[attr-defined]
     rerank_accessor = ModuleType("everos.component.rerank.accessor")
-    rerank_accessor._capability = _Capability(  # type: ignore[attr-defined]
-        provider=rerank_provider
-    )
+    rerank_accessor._capability = _Capability(provider=None)  # type: ignore[attr-defined]
     rerank_accessor.get_rerank_capability = (  # type: ignore[attr-defined]
         lambda: rerank_accessor._capability  # type: ignore[attr-defined]
     )
@@ -525,32 +615,21 @@ def test_install_observers_wraps_rerank_capability_before_search_manager_build(
     engine._install_observers()
 
     assert isinstance(llm_accessor._llm_client, _ObservedLLMClient)  # type: ignore[attr-defined]
-    assert isinstance(
-        embedding_provider._client.embeddings,
-        _ObservedEmbeddingsEndpoint,
-    )
-    assert isinstance(
-        rerank_accessor._capability.provider,  # type: ignore[attr-defined]
-        _ObservedRerankProvider,
-    )
+    assert embedding_accessor.get_embedding_capability().provider is embedding_provider  # type: ignore[attr-defined]
+    assert rerank_accessor._capability.provider is None  # type: ignore[attr-defined]
 
     llm_accessor._llm_client = llm_client  # type: ignore[attr-defined]
-    embedding_provider._client.embeddings = embedding_endpoint
-    rerank_accessor._capability = _Capability(  # type: ignore[attr-defined]
-        provider=rerank_provider
-    )
     search_module._manager = object()  # type: ignore[attr-defined]
     with pytest.raises(RuntimeError, match="initialized before rerank observer"):
         _WorkerEngine()._install_observers()
     assert llm_accessor._llm_client is llm_client  # type: ignore[attr-defined]
-    assert embedding_provider._client.embeddings is embedding_endpoint
-    assert rerank_accessor._capability.provider is rerank_provider  # type: ignore[attr-defined]
+    assert rerank_accessor._capability.provider is None  # type: ignore[attr-defined]
 
 
-def test_install_observers_allows_absent_optional_reranker(
+def test_install_observers_rejects_ambient_reranker_capability(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """HYBRID Episode 主轨零 rerank 时，不得把未调用的 credential 伪造成启动硬门。"""
+    """controlled 主轨若意外装入 reranker，必须在搜索 manager 构造前失败。"""
 
     @dataclass(frozen=True)
     class _Capability:
@@ -571,9 +650,8 @@ def test_install_observers_allows_absent_optional_reranker(
         package.__path__ = []  # type: ignore[attr-defined]
         monkeypatch.setitem(sys.modules, package.__name__, package)
     embedding_accessor = ModuleType("everos.component.embedding.accessor")
-    embedding_endpoint = SimpleNamespace(name="embeddings")
-    embedding_provider = SimpleNamespace(
-        _client=SimpleNamespace(embeddings=embedding_endpoint)
+    embedding_provider = object.__new__(
+        _LocalSentenceTransformerEmbeddingProvider
     )
     embedding_accessor.get_embedding_capability = (  # type: ignore[attr-defined]
         lambda: _Capability(provider=embedding_provider)
@@ -581,7 +659,7 @@ def test_install_observers_allows_absent_optional_reranker(
     llm_accessor = ModuleType("everos.component.llm.client")
     llm_accessor._llm_client = SimpleNamespace(model="llm")  # type: ignore[attr-defined]
     rerank_accessor = ModuleType("everos.component.rerank.accessor")
-    rerank_accessor._capability = _Capability(provider=None)  # type: ignore[attr-defined]
+    rerank_accessor._capability = _Capability(provider=object())  # type: ignore[attr-defined]
     rerank_accessor.get_rerank_capability = (  # type: ignore[attr-defined]
         lambda: rerank_accessor._capability  # type: ignore[attr-defined]
     )
@@ -596,14 +674,10 @@ def test_install_observers_allows_absent_optional_reranker(
         monkeypatch.setitem(sys.modules, module.__name__, module)
 
     engine = _WorkerEngine()
-    engine._install_observers()
+    with pytest.raises(RuntimeError, match="rerank capability"):
+        engine._install_observers()
 
-    assert isinstance(llm_accessor._llm_client, _ObservedLLMClient)  # type: ignore[attr-defined]
-    assert isinstance(
-        embedding_provider._client.embeddings,
-        _ObservedEmbeddingsEndpoint,
-    )
-    assert rerank_accessor._capability.provider is None  # type: ignore[attr-defined]
+    assert not isinstance(llm_accessor._llm_client, _ObservedLLMClient)  # type: ignore[attr-defined]
 
 
 def test_initialize_enter_failure_preserves_original_error_and_never_calls_exit(
@@ -644,6 +718,11 @@ def test_initialize_enter_failure_preserves_original_error_and_never_calls_exit(
     module.create_app = lambda: app  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "everos.entrypoints.api.app", module)
     engine = _WorkerEngine()
+    monkeypatch.setattr(
+        engine,
+        "_install_controlled_embedding_provider",
+        lambda: None,
+    )
 
     with pytest.raises(RuntimeError, match="original startup failure"):
         asyncio.run(
@@ -653,6 +732,8 @@ def test_initialize_enter_failure_preserves_original_error_and_never_calls_exit(
                     "add_batch_size": 25,
                     "app_id": "memorybenchmark",
                     "drain_timeout_seconds": 20.0,
+                    "embedding_dimension": 384,
+                    "embedding_provider": "sentence-transformers-local",
                     "project_id": "phase1",
                     "root_marker": marker,
                     "search_method": "hybrid",

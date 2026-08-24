@@ -40,6 +40,7 @@ from memory_benchmark.methods.image_text import turn_text_with_images
 from memory_benchmark.methods.worker_transport import (
     JsonLinesWorkerTransport,
     WORKER_TRANSPORT_LOGICAL_PATH,
+    WorkerCommandError,
 )
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
@@ -624,15 +625,22 @@ class GraphitiOSS(MemoryProvider):
         operation_id = hashlib.sha256(
             f"{GRAPHITI_ADAPTER_VERSION}|{input_digest}".encode("utf-8")
         ).hexdigest()
-        result = self._require_runtime().ingest(
-            isolation_key=unit.isolation_key,
-            operation_id=operation_id,
-            input_digest=input_digest,
-            turn_id=unit.turn_id,
-            session_id=unit.session_id,
-            episode_body=episode_body,
-            reference_time=reference_time,
-        )
+        try:
+            result = self._require_runtime().ingest(
+                isolation_key=unit.isolation_key,
+                operation_id=operation_id,
+                input_digest=input_digest,
+                turn_id=unit.turn_id,
+                session_id=unit.session_id,
+                episode_body=episode_body,
+                reference_time=reference_time,
+            )
+        except WorkerCommandError as exc:
+            self._record_failed_worker_observations(
+                exc.details,
+                stage=EfficiencyStage.MEMORY_BUILD,
+            )
+            raise
         self._record_build_observations(operation_id, result)
         return IngestResult(
             metadata={
@@ -704,11 +712,18 @@ class GraphitiOSS(MemoryProvider):
                 f"{query.top_k}>{self.config.query_limit}"
             )
         started_ns = perf_counter_ns()
-        result = self._require_runtime().retrieve(
-            isolation_key=query.isolation_key,
-            query=query.query_text,
-            limit=query.top_k,
-        )
+        try:
+            result = self._require_runtime().retrieve(
+                isolation_key=query.isolation_key,
+                query=query.query_text,
+                limit=query.top_k,
+            )
+        except WorkerCommandError as exc:
+            self._record_failed_worker_observations(
+                exc.details,
+                stage=EfficiencyStage.RETRIEVAL,
+            )
+            raise
         total_latency_ms = max(0.0, (perf_counter_ns() - started_ns) / 1_000_000)
         embeddings = _validated_observations(
             result.get("embedding_observations"), "embedding"
@@ -781,6 +796,42 @@ class GraphitiOSS(MemoryProvider):
                     observation,
                 )
         self._observed_operation_ids.add(operation_id)
+
+    def _record_failed_worker_observations(
+        self,
+        details: dict[str, Any] | None,
+        *,
+        stage: EfficiencyStage,
+    ) -> None:
+        """回放失败 Graphiti command 已完成的 LLM/embedding 调用。"""
+
+        if details is None or self.efficiency_collector is None:
+            return
+        if set(details) != {"llm_observations", "embedding_observations"}:
+            raise ConfigurationError(
+                "Graphiti worker failure observation fields are malformed"
+            )
+        llm = _validated_observations(details["llm_observations"], "llm")
+        embeddings = _validated_observations(
+            details["embedding_observations"], "embedding"
+        )
+        with self.efficiency_collector.operation_stage(stage):
+            for observation in llm:
+                self.efficiency_collector.record_llm_call(
+                    model_id=GRAPHITI_LLM_MODEL_ID,
+                    input_tokens=_required_non_negative_int(
+                        observation.get("input_tokens"), "input_tokens"
+                    ),
+                    output_tokens=_required_non_negative_int(
+                        observation.get("output_tokens"), "output_tokens"
+                    ),
+                    token_measurement_source=MeasurementSource.API_USAGE,
+                )
+            for observation in embeddings:
+                _record_embedding_observation(
+                    self.efficiency_collector,
+                    observation,
+                )
 
     def cleanup(self) -> None:
         """关闭独占 worker；成功后才提交 provider cleaned 状态。"""

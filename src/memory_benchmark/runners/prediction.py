@@ -286,6 +286,9 @@ def run_predictions(
     if efficiency_collector is not None and efficiency_collector.enabled:
         efficiency_store = EfficiencyArtifactStore.for_prediction(paths)
         efficiency_store.write_model_inventory(model_inventory)
+        efficiency_collector.bind_failed_attempt_sink(
+            efficiency_store.append_failed_attempt
+        )
     with method_log_scope(paths.logs_dir):
         logger = RunLogger(paths.logs_dir)
         atomic_write_json(paths.dataset_fingerprint_path, dataset_fingerprint)

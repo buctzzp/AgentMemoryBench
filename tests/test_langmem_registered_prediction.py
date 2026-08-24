@@ -91,6 +91,15 @@ class _RegisteredFakeRuntime:
             }
         )
         return {
+            "changed_memories": [
+                {
+                    "key": "memory-1",
+                    "value": {
+                        "kind": "Memory",
+                        "content": {"content": "LangMem current memory."},
+                    },
+                }
+            ],
             "changed_memory_keys": ["memory-1"],
             "embedding_observations": [
                 {"input_tokens": 5, "latency_ms": 0.5, "text_count": 1}
@@ -259,7 +268,7 @@ def test_langmem_registered_prediction_runs_five_benchmarks_through_generic_runn
     assert manifest["method"]["provenance_granularity"] == "none"
     assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"
     config = manifest["method"]["config"]
-    assert config["adapter_version"] == "langmem-background-product-v1"
+    assert config["adapter_version"] == "langmem-background-product-v2"
     assert config["product_surface"] == (
         "create_memory_store_manager+ainvoke+asearch"
     )
@@ -279,10 +288,10 @@ def test_langmem_registered_prediction_runs_five_benchmarks_through_generic_runn
     assert "evidence" not in public_questions[0]
 
 
-def test_langmem_halumem_operation_runner_keeps_update_and_qa_but_extraction_na(
+def test_langmem_halumem_operation_runner_reports_changed_product_memory(
     tmp_path: Path,
 ) -> None:
-    """operation runner 保留 evolved-state update/QA，session extraction 诚实 N/A。"""
+    """operation runner 报告事务 current delta，并保留 evolved-state update/QA。"""
 
     _RegisteredLangMem.instances.clear()
     _RegisteredFakeRuntime.instances.clear()
@@ -306,6 +315,7 @@ def test_langmem_halumem_operation_runner_keeps_update_and_qa_but_extraction_na(
             provider="opencodego",
             judge_transport="chat_completions",
         ),
+        session_memory_report=True,
         benchmark_name="halumem",
     )
     question = Question(
@@ -387,7 +397,8 @@ def test_langmem_halumem_operation_runner_keeps_update_and_qa_but_extraction_na(
     assert len(runtime.ingest_calls) == 1
     assert len(runtime.retrieve_calls) == 2
     assert runtime.close_calls == 1
-    assert session_reports[0]["status"] == "n/a"
+    assert session_reports[0]["status"] == "ok"
+    assert session_reports[0]["memories"] == ["LangMem current memory."]
     assert update_probes[0]["memories_from_system"] == [
         "LangMem current memory."
     ]
@@ -464,7 +475,7 @@ def _install_offline_stack(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: OpenAISettings(
+        lambda project_root, api_provider=None, expected_model=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
             model="ox-alpha-free",

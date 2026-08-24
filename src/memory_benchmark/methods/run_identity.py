@@ -19,14 +19,16 @@ EmbeddingProfile = Literal[
     "controlled_embedding_v1",
     "product_canonical_required_config_v1",
     "product_default_v1",
+    "not_applicable_v1",
     "unclassified_pending",
 ]
 EmbeddingRevisionStatus = Literal[
     "local_unpinned",
     "provider_managed_unpinned",
+    "not_applicable",
     "pending",
 ]
-EmbeddingIdentityStatus = Literal["declared", "pending"]
+EmbeddingIdentityStatus = Literal["declared", "not_applicable", "pending"]
 
 LiteralAlias: TypeAlias = Any
 RUN_IDENTITY_CONTRACT_VERSION: RunIdentityContractVersion = cast(
@@ -408,7 +410,7 @@ def validate_embedding_identity(embedding: EmbeddingIdentity) -> None:
             raise ConfigurationError(
                 "declared embedding identity requires a known distance"
             )
-    else:
+    elif embedding.identity_status == "pending":
         if embedding.revision_status != "pending":
             raise ConfigurationError(
                 "pending embedding identity requires revision_status='pending'"
@@ -416,6 +418,30 @@ def validate_embedding_identity(embedding: EmbeddingIdentity) -> None:
         if embedding.revision is not None:
             raise ConfigurationError(
                 "pending embedding identity cannot claim a concrete revision"
+            )
+    else:
+        if embedding.revision_status != "not_applicable":
+            raise ConfigurationError(
+                "not_applicable embedding identity requires "
+                "revision_status='not_applicable'"
+            )
+        non_null = {
+            label: value
+            for label, value in (
+                ("provider", embedding.provider),
+                ("model", embedding.model),
+                ("dimension", embedding.dimension),
+                ("revision", embedding.revision),
+                ("normalization", embedding.normalization),
+                ("instruction", embedding.instruction),
+                ("distance", embedding.distance),
+            )
+            if value is not None
+        }
+        if non_null:
+            raise ConfigurationError(
+                "not_applicable embedding identity requires all concrete fields null: "
+                f"{sorted(non_null)}"
             )
 
 
@@ -443,7 +469,12 @@ def validate_build_identity(identity: BuildIdentityDeclaration) -> None:
         raise ConfigurationError(
             "unclassified_pending profile requires pending embedding identity"
         )
-    if (
+    if identity.embedding_profile == "not_applicable_v1":
+        if identity.embedding.identity_status != "not_applicable":
+            raise ConfigurationError(
+                "not_applicable_v1 profile requires not_applicable embedding identity"
+            )
+    elif (
         identity.embedding_profile != "unclassified_pending"
         and identity.embedding.identity_status != "declared"
     ):

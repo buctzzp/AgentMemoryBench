@@ -356,11 +356,13 @@ class _WorkerEngine:
         self.embedder: Any = None
         self.llm_observations: list[dict[str, int]] = []
         self.embedding_observations: list[dict[str, Any]] = []
+        self._failed_error_details: dict[str, Any] | None = None
         self._secret_values: tuple[str, ...] = ()
 
     async def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         """按 command 分派一个严格 JSON 请求。"""
 
+        self._failed_error_details = None
         command = _required_text(request.get("command"), "command")
         payload = request.get("payload")
         if not isinstance(payload, dict):
@@ -735,6 +737,21 @@ class _WorkerEngine:
         self._begin_observations()
         return llm, embedding
 
+    def pop_failed_error_details(self) -> dict[str, Any] | None:
+        """冻结失败命令已完成的模型调用，并清空当前 buffer。"""
+
+        details = self._failed_error_details
+        if details is None and (self.llm_observations or self.embedding_observations):
+            details = {
+                "llm_observations": [dict(item) for item in self.llm_observations],
+                "embedding_observations": [
+                    dict(item) for item in self.embedding_observations
+                ],
+            }
+        self._begin_observations()
+        self._failed_error_details = None
+        return details
+
     async def ingest(self, payload: dict[str, Any]) -> dict[str, Any]:
         """逐条 await product add_episode，并在成功后原子提交 sidecar。"""
 
@@ -1066,6 +1083,9 @@ def main() -> int:
                     "error_type": type(exc).__name__,
                     "error": engine.sanitize_error(str(exc)),
                 }
+                error_details = engine.pop_failed_error_details()
+                if error_details is not None:
+                    response["error_details"] = error_details
                 traceback.print_exc(file=sys.stderr)
             protocol.write(json.dumps(response, ensure_ascii=False) + "\n")
             protocol.flush()

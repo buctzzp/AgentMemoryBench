@@ -144,12 +144,22 @@ def run_artifact_evaluation(
     )
     efficiency_observations: list[EfficiencyObservation] = []
     model_inventory: tuple[ModelDescriptor, ...] = ()
+    efficiency_store: EfficiencyArtifactStore | None = None
+    declared_metric_name: str | None = None
     if efficiency_collector is not None and efficiency_collector.enabled:
         if efficiency_collector.run_id != run_id:
             raise ConfigurationError(
                 "Evaluator EfficiencyCollector run_id must match manifest run_id"
             )
         model_inventory = _get_evaluator_model_inventory(evaluator)
+        declared_metric_name = _declared_evaluator_metric_name(evaluator)
+        efficiency_store = EfficiencyArtifactStore.for_evaluator(
+            paths,
+            declared_metric_name,
+        )
+        efficiency_collector.bind_failed_attempt_sink(
+            efficiency_store.append_failed_attempt
+        )
 
     ordered_question_ids = [
         qid for qid in ordered_question_ids if qid in prediction_by_id
@@ -193,6 +203,14 @@ def run_artifact_evaluation(
     resolved_metric_name = metric_name or getattr(evaluator, "metric_name", None)
     if not resolved_metric_name:
         raise ConfigurationError("evaluator metric_name is required")
+    if (
+        declared_metric_name is not None
+        and resolved_metric_name != declared_metric_name
+    ):
+        raise ConfigurationError(
+            "evaluator returned a metric_name different from its declared identity: "
+            f"{resolved_metric_name!r} != {declared_metric_name!r}"
+        )
     score_path = paths.metric_scores_path(resolved_metric_name)
     summary_path = paths.metric_summary_path(resolved_metric_name)
     total_questions = len(score_records)
@@ -212,11 +230,7 @@ def run_artifact_evaluation(
         score_path=str(score_path.resolve()),
         summary_path=str(summary_path.resolve()),
     )
-    if efficiency_collector is not None and efficiency_collector.enabled:
-        efficiency_store = EfficiencyArtifactStore.for_evaluator(
-            paths,
-            resolved_metric_name,
-        )
+    if efficiency_store is not None:
         efficiency_store.write_model_inventory(model_inventory)
         efficiency_store.merge_observations(efficiency_observations)
     summary_dict = summary.to_dict()
@@ -252,12 +266,22 @@ def _run_artifact_level_evaluation(
         efficiency_collector is not None and efficiency_collector.enabled
     )
     model_inventory: tuple[ModelDescriptor, ...] = ()
+    efficiency_store: EfficiencyArtifactStore | None = None
+    declared_metric_name: str | None = None
     if collector_enabled:
         if efficiency_collector.run_id != run_id:
             raise ConfigurationError(
                 "Evaluator EfficiencyCollector run_id must match manifest run_id"
             )
         model_inventory = _get_evaluator_model_inventory(evaluator)
+        declared_metric_name = _declared_evaluator_metric_name(evaluator)
+        efficiency_store = EfficiencyArtifactStore.for_evaluator(
+            paths,
+            declared_metric_name,
+        )
+        efficiency_collector.bind_failed_attempt_sink(
+            efficiency_store.append_failed_attempt
+        )
 
     payload = evaluator.evaluate_run_artifacts(
         paths=paths,
@@ -274,6 +298,11 @@ def _run_artifact_level_evaluation(
         payload.get("metric_name"),
         "artifact evaluator metric_name",
     )
+    if declared_metric_name is not None and metric_name != declared_metric_name:
+        raise ConfigurationError(
+            "artifact evaluator returned a metric_name different from its declared "
+            f"identity: {metric_name!r} != {declared_metric_name!r}"
+        )
     raw_score_records = payload.get("score_records", [])
     if not isinstance(raw_score_records, list) or any(
         not isinstance(record, dict) for record in raw_score_records
@@ -310,8 +339,7 @@ def _run_artifact_level_evaluation(
     if not isinstance(extra_summary, dict):
         raise ConfigurationError("artifact evaluator summary must be a JSON object")
     summary_dict.update(extra_summary)
-    if collector_enabled:
-        efficiency_store = EfficiencyArtifactStore.for_evaluator(paths, metric_name)
+    if efficiency_store is not None:
         efficiency_store.write_model_inventory(model_inventory)
         efficiency_store.merge_observations(efficiency_observations)
     atomic_write_jsonl(score_path, score_records)
@@ -481,6 +509,20 @@ def _get_evaluator_model_inventory(
             "evaluator efficiency_model_inventory() must return tuple[ModelDescriptor, ...]"
         )
     return inventory
+
+
+def _declared_evaluator_metric_name(evaluator: BaseAnswerEvaluator) -> str:
+    """返回调用前可用的稳定 evaluator metric identity。
+
+    失败尝试必须在 judge 发起前绑定 append-only store，不能等 evaluator 返回 payload
+    后才知道路径。因此启用效率观测的 evaluator 必须在类/实例上预先声明 metric_name；
+    返回结果若与该声明不一致会由调用路径再次 fail-fast。
+    """
+
+    return _require_non_empty_string(
+        getattr(evaluator, "metric_name", None),
+        "evaluator declared metric_name",
+    )
 
 
 def _read_json_object(path: Path, *, payload_name: str) -> dict[str, Any]:

@@ -112,6 +112,8 @@ class Mem0Config:
         ingestion_chunk_size: 每次 Mem0 add 包含的 turn 数；官方 LoCoMo 配置为 1。
         infer: 是否启用 vendored Mem0 V3 事实抽取与 ADD/hash-dedup 写入；本 adapter 的
             可达调用链不执行手工 update/delete API。
+        rerank: 是否启用 Mem0 产品 reranker。当前观测契约只允许 False；
+            任何启用请求必须先补齐对应模型的 token/latency 观测。
         api_timeout_seconds: Mem0 内部 OpenAI-compatible LLM/embedding 请求超时秒数。
         api_max_retries: Mem0 内部 OpenAI-compatible LLM/embedding 请求最大重试次数。
         profile_name: 可审计的 profile 名称。
@@ -126,6 +128,7 @@ class Mem0Config:
     embedding_provider: str = "huggingface"
     ingestion_chunk_size: int = 1
     infer: bool = True
+    rerank: bool = False
     api_timeout_seconds: float = 60.0
     api_max_retries: int = 8
     profile_name: str = "custom"
@@ -152,6 +155,11 @@ class Mem0Config:
         if not self.infer:
             raise ConfigurationError(
                 "Mem0 benchmark adapter requires infer=True to test the Mem0 algorithm"
+            )
+        if self.rerank:
+            raise ConfigurationError(
+                "Mem0 rerank=True is unavailable until the configured reranker has "
+                "complete token/latency observation"
             )
         if self.api_timeout_seconds <= 0:
             raise ConfigurationError(
@@ -181,6 +189,7 @@ class Mem0Config:
             max_workers=1,
             ingestion_chunk_size=1,
             infer=True,
+            rerank=False,
             api_timeout_seconds=60.0,
             api_max_retries=8,
             profile_name="smoke",
@@ -200,6 +209,7 @@ class Mem0Config:
             max_workers=10,
             ingestion_chunk_size=1,
             infer=True,
+            rerank=False,
             api_timeout_seconds=60.0,
             api_max_retries=8,
             profile_name="official_full",
@@ -949,12 +959,14 @@ class Mem0(BaseMemoryProvider, BaseResumableMemorySystem, MemoryProvider):
                     question.text,
                     filters={"run_id": question.conversation_id},
                     top_k=self.config.top_k,
+                    rerank=self.config.rerank,
                 )
         else:
             raw_result = self._memory.search(
                 question.text,
                 filters={"run_id": question.conversation_id},
                 top_k=self.config.top_k,
+                rerank=self.config.rerank,
             )
         memories = self._normalize_search_results(raw_result)
         injected_memory_text = self._memory_context_text(memories)
@@ -1041,12 +1053,14 @@ class Mem0(BaseMemoryProvider, BaseResumableMemorySystem, MemoryProvider):
                     native_question.text,
                     filters={"run_id": query.isolation_key},
                     top_k=effective_top_k,
+                    rerank=self.config.rerank,
                 )
         else:
             raw_result = self._memory.search(
                 native_question.text,
                 filters={"run_id": query.isolation_key},
                 top_k=effective_top_k,
+                rerank=self.config.rerank,
             )
         memories = self._normalize_search_results(raw_result)
         injected_memory_text = self._memory_context_text(memories)

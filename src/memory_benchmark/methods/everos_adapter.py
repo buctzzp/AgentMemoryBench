@@ -42,6 +42,7 @@ from memory_benchmark.methods.image_text import turn_text_with_images
 from memory_benchmark.methods.worker_transport import (
     JsonLinesWorkerTransport,
     WORKER_TRANSPORT_LOGICAL_PATH,
+    WorkerCommandError,
 )
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
@@ -50,8 +51,8 @@ from memory_benchmark.observability.efficiency import (
 )
 
 
-EVEROS_ADAPTER_VERSION = "everos-product-chat-v6"
-EVEROS_WORKER_SCHEMA_VERSION = "everos-worker-protocol-v2"
+EVEROS_ADAPTER_VERSION = "everos-product-chat-v7"
+EVEROS_WORKER_SCHEMA_VERSION = "everos-worker-protocol-v3"
 EVEROS_METHOD_DIRECTORY = "EverOS"
 EVEROS_UPSTREAM_URL = "https://github.com/EverMind-AI/EverOS.git"
 EVEROS_COMMIT = "48fc9084888bc17100053227284f939a5aca5e91"
@@ -60,15 +61,22 @@ EVEROS_PRODUCT_SURFACE = "create_app-lifespan+typed-memorize-search-get"
 EVEROS_IMPLEMENTATION_IDENTITY = "product-chat-session-isolated"
 EVEROS_LLM_MODEL_ID = "everos-build-llm"
 EVEROS_EMBEDDING_MODEL_ID = "everos-embedding"
-EVEROS_RERANKER_MODEL_ID = "everos-reranker"
 EVEROS_EMPTY_MEMORY_SENTINEL = "(No EverOS episodes retrieved)"
 EVEROS_WRAPPER_LOGICAL_PATH = "src/memory_benchmark/methods/everos_adapter.py"
 EVEROS_WORKER_LOGICAL_PATH = "src/memory_benchmark/methods/everos_worker.py"
 EVEROS_BOOTSTRAP_LOGICAL_PATH = "scripts/bootstrap_everos_runtime.sh"
+EVEROS_EMBEDDING_OVERLAY_LOGICAL_PATH = (
+    "scripts/requirements/everos-controlled-embedding.txt"
+)
 EVEROS_PATCH_LOGICAL_PATH = "scripts/patches/everos-product-runtime-observability.patch"
 EVEROS_STATE_SCHEMA_VERSION = "everos-conversation-sidecar-v2"
 EVEROS_ROOT_MARKER = ".memory-benchmark-everos-root.json"
-EVEROS_SOURCE_MODE = "vendored-v1.2.3-plus-observability-patch"
+EVEROS_SOURCE_MODE = (
+    "vendored-v1.2.3-plus-observability-and-configured-dimension-patches"
+)
+EVEROS_CONTROLLED_EMBEDDING_PATCH_LOGICAL_PATH = (
+    "scripts/patches/everos-configured-embedding-dimension.patch"
+)
 EVEROS_SOURCE_FILES = (
     "LICENSE",
     "pyproject.toml",
@@ -127,10 +135,6 @@ class EverOSConfig:
     embedding_model: str
     embedding_dimension: int
     embedding_provider: str
-    embedding_credential_env: str
-    rerank_provider: str
-    rerank_model: str
-    rerank_credential_env: str
     rerank_capability_mode: str
     app_id: str
     project_id: str
@@ -148,10 +152,6 @@ class EverOSConfig:
             "search_method",
             "embedding_model",
             "embedding_provider",
-            "embedding_credential_env",
-            "rerank_provider",
-            "rerank_model",
-            "rerank_credential_env",
             "rerank_capability_mode",
             "app_id",
             "project_id",
@@ -191,46 +191,22 @@ class EverOSConfig:
             raise ConfigurationError(
                 "EverOS main profile preserves official add_batch_size=25"
             )
-        if self.embedding_model != "Qwen/Qwen3-Embedding-4B":
+        if self.embedding_model.strip().split("/")[-1] != "all-MiniLM-L6-v2":
             raise ConfigurationError(
-                "EverOS main profile preserves Qwen/Qwen3-Embedding-4B"
+                "EverOS controlled profile requires all-MiniLM-L6-v2"
             )
-        if self.embedding_dimension != 1024:
+        if self.embedding_dimension != 384:
             raise ConfigurationError(
-                "EverOS LanceDB schema requires embedding_dimension=1024"
+                "EverOS controlled profile requires embedding_dimension=384"
             )
-        if self.embedding_provider not in {
-            "deepinfra-openai-compatible",
-            "openrouter-openai-compatible",
-        }:
+        if self.embedding_provider != "sentence-transformers-local":
             raise ConfigurationError(
-                "EverOS embedding_provider must name an approved "
-                "OpenAI-compatible Qwen transport"
+                "EverOS controlled profile requires "
+                "embedding_provider='sentence-transformers-local'"
             )
-        expected_credential_env = {
-            "deepinfra-openai-compatible": "EVEROS_DEEPINFRA_API_KEY",
-            "openrouter-openai-compatible": "openrouter_key",
-        }[self.embedding_provider]
-        if self.embedding_credential_env != expected_credential_env:
+        if self.rerank_capability_mode != "disabled-zero-call":
             raise ConfigurationError(
-                "EverOS embedding credential environment does not match "
-                f"{self.embedding_provider}"
-            )
-        if self.rerank_provider != "deepinfra":
-            raise ConfigurationError(
-                "EverOS current product rerank provider must be deepinfra"
-            )
-        if self.rerank_model != "Qwen/Qwen3-Reranker-4B":
-            raise ConfigurationError(
-                "EverOS current product rerank model identity drifted"
-            )
-        if self.rerank_capability_mode not in {
-            "configured",
-            "disabled-zero-call",
-        }:
-            raise ConfigurationError(
-                "EverOS rerank_capability_mode must be configured or "
-                "disabled-zero-call"
+                "EverOS controlled main profile keeps product reranking disabled"
             )
         for field_name in ("app_id", "project_id"):
             value = getattr(self, field_name)
@@ -250,6 +226,7 @@ class EverOSConfig:
             "product_surface": EVEROS_PRODUCT_SURFACE,
             "consume_granularity": "session",
             "embedding_distance": "lancedb-l2",
+            "embedding_normalization": "model-internal-l2",
             "missing_timestamp_policy": "require-source-time-v1",
             "timestamp_derivation_policy": "locomo-official-30s-only-v1",
             "locomo_role_policy": "all-user-real-speaker-owner",
@@ -369,11 +346,17 @@ class EverOSRuntime:
     def _worker_environment(self, product_root: Path) -> dict[str, str]:
         """构造最小 worker 环境，secret 仅由环境变量进入子进程。"""
 
-        embedding_key = os.environ.get(self.config.embedding_credential_env)
-        if not isinstance(embedding_key, str) or not embedding_key.strip():
+        model_path = (self.path_settings.project_root / self.config.embedding_model).resolve()
+        models_root = self.path_settings.models_root.resolve()
+        try:
+            model_path.relative_to(models_root)
+        except ValueError as exc:
             raise ConfigurationError(
-                "EverOS embedding credential is missing: set environment variable "
-                f"{self.config.embedding_credential_env} before running"
+                "EverOS local embedding path must stay under models_root"
+            ) from exc
+        if not model_path.is_dir():
+            raise ConfigurationError(
+                f"EverOS local embedding model directory missing: {model_path}"
             )
         environment = {
             name: value
@@ -389,37 +372,16 @@ class EverOSRuntime:
                 "EVEROS_LLM__API_KEY": self.openai_settings.api_key,
                 "EVEROS_LLM__BASE_URL": self.openai_settings.base_url,
                 "EVEROS_EMBEDDING__MODEL": self.config.embedding_model,
-                "EVEROS_EMBEDDING__API_KEY": embedding_key,
                 "EVEROS_EMBEDDING__DIMENSIONS": str(
                     self.config.embedding_dimension
                 ),
-                "EVEROS_RERANK__PROVIDER": self.config.rerank_provider,
-                "EVEROS_RERANK__MODEL": self.config.rerank_model,
+                "EVEROS_LOCAL_EMBEDDING_MODEL_PATH": str(model_path),
                 "EVEROS_OBSERVABILITY__ENABLED": "false",
+                "HF_HUB_OFFLINE": "1",
                 "PYTHONUNBUFFERED": "1",
+                "TRANSFORMERS_OFFLINE": "1",
             }
         )
-        if self.config.embedding_provider == "openrouter-openai-compatible":
-            embedding_base_url = os.environ.get(
-                "openrouter_base_url"
-            ) or os.environ.get("OPENROUTER_BASE_URL")
-            if (
-                not isinstance(embedding_base_url, str)
-                or not embedding_base_url.strip()
-            ):
-                raise ConfigurationError(
-                    "EverOS OpenRouter embedding endpoint is missing: set "
-                    "openrouter_base_url or OPENROUTER_BASE_URL before running"
-                )
-            environment["EVEROS_EMBEDDING__BASE_URL"] = embedding_base_url
-        rerank_key = os.environ.get(self.config.rerank_credential_env)
-        if self.config.rerank_capability_mode == "configured":
-            if not isinstance(rerank_key, str) or not rerank_key.strip():
-                raise ConfigurationError(
-                    "EverOS configured rerank capability is missing credential: "
-                    f"set {self.config.rerank_credential_env} before running"
-                )
-            environment["EVEROS_RERANK__API_KEY"] = rerank_key
         return environment
 
     def _activate(self, isolation_key: str) -> None:
@@ -460,6 +422,8 @@ class EverOSRuntime:
                     "add_batch_size": self.config.add_batch_size,
                     "search_method": self.config.search_method,
                     "drain_timeout_seconds": self.config.drain_timeout_seconds,
+                    "embedding_dimension": self.config.embedding_dimension,
+                    "embedding_provider": self.config.embedding_provider,
                     "root_marker": root_marker,
                 },
             )
@@ -527,13 +491,6 @@ class EverOSRuntime:
         """冻结本次 worker 的 secret 集并返回逐行脱敏器。"""
 
         secrets = [self.openai_settings.api_key]
-        for env_name in (
-            self.config.embedding_credential_env,
-            self.config.rerank_credential_env,
-        ):
-            value = os.environ.get(env_name)
-            if value:
-                secrets.append(value)
 
         def redact(line: str) -> str:
             """替换本次 worker 可见的全部 credential。"""
@@ -853,13 +810,20 @@ class EverOS(MemoryProvider):
                     ],
                 },
             )
-        result = self._require_runtime().ingest_session(
-            isolation_key=unit.isolation_key,
-            operation_id=operation_id,
-            session_id=product_session_id,
-            messages=messages,
-            owner_ids=owners,
-        )
+        try:
+            result = self._require_runtime().ingest_session(
+                isolation_key=unit.isolation_key,
+                operation_id=operation_id,
+                session_id=product_session_id,
+                messages=messages,
+                owner_ids=owners,
+            )
+        except WorkerCommandError as exc:
+            self._record_failed_worker_observations(
+                exc.details,
+                stage=EfficiencyStage.MEMORY_BUILD,
+            )
+            raise
         self._record_observations(operation_id, result, stage=EfficiencyStage.MEMORY_BUILD)
         session_items = _required_object_list(result.get("session_items"), "session_items")
         session_memories = [_episode_content(item) for item in session_items]
@@ -1054,12 +1018,19 @@ class EverOS(MemoryProvider):
             sidecar.get("owner_ids"), "sidecar.owner_ids", allow_empty=False
         )
         started_ns = perf_counter_ns()
-        result = self._require_runtime().retrieve(
-            isolation_key=query.isolation_key,
-            owner_ids=owners,
-            query=query.query_text,
-            top_k=query.top_k,
-        )
+        try:
+            result = self._require_runtime().retrieve(
+                isolation_key=query.isolation_key,
+                owner_ids=owners,
+                query=query.query_text,
+                top_k=query.top_k,
+            )
+        except WorkerCommandError as exc:
+            self._record_failed_worker_observations(
+                exc.details,
+                stage=EfficiencyStage.RETRIEVAL,
+            )
+            raise
         latency_ms = max(0.0, (perf_counter_ns() - started_ns) / 1_000_000)
         self._record_retrieval_observations(result)
         raw_items = _required_object_list(result.get("items"), "items")
@@ -1137,10 +1108,67 @@ class EverOS(MemoryProvider):
                         latency_ms=_required_non_negative_number(
                             observation.get("latency_ms"), "latency_ms"
                         ),
-                        token_measurement_source=MeasurementSource.API_USAGE,
+                        token_measurement_source=MeasurementSource.TOKENIZER_ESTIMATE,
                         latency_measurement_source=MeasurementSource.FRAMEWORK_TIMER,
                     )
         self._observed_operation_ids.add(operation_id)
+
+    def _record_failed_worker_observations(
+        self,
+        details: dict[str, Any] | None,
+        *,
+        stage: EfficiencyStage,
+    ) -> None:
+        """回放失败 worker operation 已完成的模型调用。"""
+
+        if details is None or self.efficiency_collector is None:
+            return
+        expected = {
+            "llm_observations",
+            "embedding_observations",
+            "rerank_observations",
+        }
+        if set(details) != expected:
+            raise ConfigurationError(
+                "EverOS worker failure observation fields are malformed"
+            )
+        rerank = _required_object_list(
+            details["rerank_observations"], "rerank_observations"
+        )
+        if rerank:
+            raise ConfigurationError(
+                "EverOS failed operation invoked an unmetered reranker"
+            )
+        llm = _required_object_list(
+            details["llm_observations"], "llm_observations"
+        )
+        embedding = _required_object_list(
+            details["embedding_observations"], "embedding_observations"
+        )
+        with self.efficiency_collector.operation_stage(stage):
+            for observation in llm:
+                self.efficiency_collector.record_llm_call(
+                    model_id=EVEROS_LLM_MODEL_ID,
+                    input_tokens=_required_non_negative_int(
+                        observation.get("input_tokens"), "input_tokens"
+                    ),
+                    output_tokens=_required_non_negative_int(
+                        observation.get("output_tokens"), "output_tokens"
+                    ),
+                    token_measurement_source=MeasurementSource.API_USAGE,
+                )
+            for observation in embedding:
+                self.efficiency_collector.record_embedding_call(
+                    model_id=EVEROS_EMBEDDING_MODEL_ID,
+                    input_tokens=_required_non_negative_int(
+                        observation.get("input_tokens"), "input_tokens"
+                    ),
+                    latency_ms=_required_non_negative_number(
+                        observation.get("latency_ms"), "latency_ms"
+                    ),
+                    token_measurement_source=MeasurementSource.TOKENIZER_ESTIMATE,
+                    latency_measurement_source=MeasurementSource.FRAMEWORK_TIMER,
+                )
 
     def _record_retrieval_observations(self, result: dict[str, Any]) -> None:
         """回放一次检索 embedding；HYBRID 主轨不得暗中调用 LLM/rerank。"""
@@ -1165,7 +1193,7 @@ class EverOS(MemoryProvider):
                     latency_ms=_required_non_negative_number(
                         observation.get("latency_ms"), "latency_ms"
                     ),
-                    token_measurement_source=MeasurementSource.API_USAGE,
+                    token_measurement_source=MeasurementSource.TOKENIZER_ESTIMATE,
                     latency_measurement_source=MeasurementSource.FRAMEWORK_TIMER,
                 )
 
@@ -2018,7 +2046,9 @@ def build_everos_source_identity(
         settings.project_root / EVEROS_WORKER_LOGICAL_PATH,
         settings.project_root / WORKER_TRANSPORT_LOGICAL_PATH,
         settings.project_root / EVEROS_BOOTSTRAP_LOGICAL_PATH,
+        settings.project_root / EVEROS_EMBEDDING_OVERLAY_LOGICAL_PATH,
         settings.project_root / EVEROS_PATCH_LOGICAL_PATH,
+        settings.project_root / EVEROS_CONTROLLED_EMBEDDING_PATCH_LOGICAL_PATH,
     ]
     missing_wrappers = [path for path in wrapper_paths if not path.is_file()]
     if missing_wrappers:
@@ -2079,7 +2109,6 @@ __all__ = [
     "EVEROS_IMPLEMENTATION_IDENTITY",
     "EVEROS_LLM_MODEL_ID",
     "EVEROS_PRODUCT_SURFACE",
-    "EVEROS_RERANKER_MODEL_ID",
     "EverOS",
     "EverOSConfig",
     "EverOSRuntime",

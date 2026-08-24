@@ -146,7 +146,7 @@ def test_simplemem_registered_prediction_runs_locomo_and_longmemeval_fake_smoke(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: OpenAISettings(
+        lambda project_root, api_provider=None, expected_model=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
             model="ox-alpha-free",
@@ -194,7 +194,7 @@ def test_simplemem_registered_prediction_runs_locomo_and_longmemeval_fake_smoke(
         FakeSimpleMemForRegisteredPrediction.instances,
         strict=True,
     ):
-        assert instance.kwargs["config"].profile_name == "smoke"
+        assert instance.kwargs["config"].profile_name == "method"
         assert len(instance.ingested_turns) == 2
         assert len(instance.finalized) == 1
         assert [query.query_text for query in instance.retrievals] == [
@@ -212,7 +212,7 @@ def test_simplemem_registered_prediction_runs_locomo_and_longmemeval_fake_smoke(
         assert manifest["method"]["provenance_granularity"] == "none"
         assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"
         assert manifest["method"]["prompt_track"] == "unified"
-        assert manifest["method"]["config"]["profile_name"] == "smoke"
+        assert manifest["method"]["config"]["profile_name"] == "method"
         assert predictions[0]["answer"] == "framework fake answer"
         assert prompts[0]["metadata"]["prompt_track"] == "unified"
         assert prompts[0]["formatted_memory"] == (
@@ -241,7 +241,7 @@ def test_simplemem_registered_prediction_workers_gt_1_manifest_has_protocol_fiel
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: OpenAISettings(
+        lambda project_root, api_provider=None, expected_model=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
             model="ox-alpha-free",
@@ -289,7 +289,7 @@ def test_simplemem_registered_prediction_workers_gt_1_manifest_has_protocol_fiel
     assert "profile" not in manifest["method"]
     assert manifest["method"]["run_identity"]["profile"] == {
         "name": "smoke",
-        "section": "smoke",
+        "section": "method",
     }
     # 交叉校验：worker 内实例必须是 MemoryProvider
     assert len(FakeSimpleMemForRegisteredPrediction.instances) >= 1

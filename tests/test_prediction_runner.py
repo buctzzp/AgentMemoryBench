@@ -16,6 +16,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from memory_benchmark.config import (
+    ApiRuntimeProfile,
+    ExecutionProfile,
+    RunComposition,
+)
 from memory_benchmark.core import (
     AddResult,
     AnswerResult,
@@ -3483,6 +3488,80 @@ def test_isolated_worker_persists_conversation_efficiency_observation(
     ] == ["conversation_efficiency", "conversation_efficiency"]
 
 
+def test_failed_ingest_appends_completed_model_calls_to_attempt_ledger(
+    tmp_path: Path,
+) -> None:
+    """算法状态失败时，已发生的模型花费必须独立于成功 observation 持久化。"""
+
+    from memory_benchmark.observability.efficiency import (
+        EfficiencyCollector,
+        MeasurementSource,
+        ModelDescriptor,
+        RetrievalObservationContract,
+    )
+
+    context = _create_context(tmp_path)
+    collector = EfficiencyCollector(run_id=context.run_id, enabled=True)
+
+    class _FailingObservedSystem(BaseMemorySystem):
+        """记录一次已完成 build LLM 调用后模拟产品写入失败。"""
+
+        def add(self, conversations: list[Conversation]) -> AddResult:
+            """写 usage 后抛错，确保 normal observation batch 不会返回。"""
+
+            collector.record_llm_call(
+                model_id="fake-build-llm",
+                input_tokens=19,
+                output_tokens=4,
+                token_measurement_source=MeasurementSource.API_USAGE,
+            )
+            raise RuntimeError("planned ingest failure with private detail")
+
+        def get_answer(self, question: Question) -> AnswerResult:
+            """失败 ingest 后不可到达。"""
+
+            raise AssertionError(f"unexpected answer call: {question.question_id}")
+
+    dataset = _build_dataset()
+    dataset.conversations = dataset.conversations[:1]
+    with pytest.raises(RuntimeError, match="planned ingest failure"):
+        run_predictions(
+            dataset=dataset,
+            system=_FailingObservedSystem(),
+            run_context=context,
+            policy=PredictionRunPolicy(max_workers=1),
+            method_manifest={"adapter": "failing-observed-v1"},
+            benchmark_variant="test_variant",
+            run_scope=RunScope.SMOKE,
+            efficiency_collector=collector,
+            model_inventory=(
+                ModelDescriptor(
+                    model_id="fake-build-llm",
+                    model_name="fake-build-llm",
+                    model_role="memory_build_llm",
+                    execution_mode="api",
+                ),
+            ),
+            instrumentation_identity={"observer_version": "test-v2"},
+            retrieval_observation_contract=RetrievalObservationContract(
+                required_by_profile=False,
+                supported_by_method=False,
+                unsupported_reason="ingest fails before retrieval",
+            ),
+        )
+
+    attempts = read_jsonl(
+        context.artifacts_dir / "efficiency_attempts.prediction.jsonl"
+    )
+    assert len(attempts) == 1
+    assert attempts[0]["error_type"] == "RuntimeError"
+    assert attempts[0]["capture_completeness"] == (
+        "caught_scope_exception_completed_model_calls_only"
+    )
+    assert attempts[0]["calls"][0]["input_tokens"] == 19
+    assert "private detail" not in str(attempts[0])
+
+
 def test_isolated_worker_resume_keeps_stable_worker_state_root(
     tmp_path: Path,
 ) -> None:
@@ -3890,6 +3969,18 @@ def test_registered_prediction_missing_build_identity_fails_before_side_effects(
             section_name="smoke",
             answer_builder="benchmark",
             config=_FakeConfig(),
+            composition=RunComposition(
+                runtime=ApiRuntimeProfile(
+                    profile_name="smoke",
+                    provider="opencodego",
+                    model="ox-alpha-free",
+                ),
+                execution=ExecutionProfile(
+                    profile_name="smoke",
+                    default_max_workers=1,
+                ),
+                resolved_max_workers=1,
+            ),
         ),
     )
 
@@ -4047,6 +4138,18 @@ def test_registered_isolated_prediction_does_not_construct_root_system(
             section_name="smoke",
             answer_builder="benchmark",
             config=_FakeConfig(),
+            composition=RunComposition(
+                runtime=ApiRuntimeProfile(
+                    profile_name="smoke",
+                    provider="opencodego",
+                    model="ox-alpha-free",
+                ),
+                execution=ExecutionProfile(
+                    profile_name="smoke",
+                    default_max_workers=2,
+                ),
+                resolved_max_workers=2,
+            ),
         ),
     )
 

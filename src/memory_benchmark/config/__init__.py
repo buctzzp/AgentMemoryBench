@@ -5,6 +5,12 @@ TOML profile，但不负责创建 OpenAI client 或执行 API 请求。
 """
 
 from .profiles import load_typed_profile
+from .run_profiles import (
+    ApiRuntimeProfile,
+    ExecutionProfile,
+    RunComposition,
+    load_run_composition,
+)
 from .settings import (
     AppSettings,
     AnswerLLMSettings,
@@ -27,19 +33,23 @@ from .settings import (
 __all__ = [
     "AppSettings",
     "AnswerLLMSettings",
+    "ApiRuntimeProfile",
     "build_api_runtime_manifest",
     "CHAT_COMPLETIONS_JUDGE_TRANSPORT",
     "load_openai_settings",
+    "load_run_composition",
     "load_path_settings",
     "load_typed_profile",
     "OPENCODEGO_API_PROVIDER",
     "OPENCODEGO_SMOKE_MODEL",
     "OpenAISettings",
+    "ExecutionProfile",
     "PathSettings",
     "PRIMARY_API_PROVIDER",
     "RESPONSES_JUDGE_TRANSPORT",
     "resolve_api_model_for_provider",
     "resolve_api_provider_for_profile",
     "resolve_answer_llm_settings",
+    "RunComposition",
     "load_settings",
 ]

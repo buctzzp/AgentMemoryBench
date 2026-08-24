@@ -256,7 +256,7 @@ def test_amem_registered_prediction_runs_generic_runner_offline(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: OpenAISettings(
+        lambda project_root, api_provider=None, expected_model=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
             model="ox-alpha-free",
@@ -323,7 +323,7 @@ def test_amem_registered_prediction_runs_generic_runner_offline(
     assert method_settings.chat_completions_request_overrides() == {
         "reasoning_effort": "low"
     }
-    assert fake_method.kwargs["config"].profile_name == "smoke"
+    assert fake_method.kwargs["config"].profile_name == "method"
     assert [turn.turn_id for turn in fake_method.ingested_turns] == [
         "turn-1",
         "turn-2",
@@ -340,7 +340,7 @@ def test_amem_registered_prediction_runs_generic_runner_offline(
     public_questions = read_jsonl(run_dir / "artifacts" / "public_questions.jsonl")
 
     assert manifest["method_name"] == "A-Mem"
-    assert manifest["method"]["config"]["profile_name"] == "smoke"
+    assert manifest["method"]["config"]["profile_name"] == "method"
     assert manifest["method"]["protocol_version"] == "v3"
     assert manifest["method"]["provenance_granularity"] == "none"
     assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"

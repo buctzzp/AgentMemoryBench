@@ -32,6 +32,7 @@ from memory_benchmark.core.entities import Conversation
 from memory_benchmark.core.provider_protocol import (
     RetrievalQuery,
     SessionBatch,
+    SessionRef,
     TurnEvent,
 )
 from memory_benchmark.methods.memos_adapter import (
@@ -49,6 +50,7 @@ from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
     EfficiencyStage,
     EmbeddingCallObservation,
+    FailedEfficiencyAttempt,
     LLMCallObservation,
     MeasurementSource,
 )
@@ -205,11 +207,20 @@ class _FakeRuntime:
         self.naive_mem_cube = object()
         self.scheduler = types.SimpleNamespace(stop_calls=0)
         self.stop_calls = 0
+        self.memory_snapshots: list[list[dict[str, str]]] = [[], []]
+        self.snapshot_calls: list[str] = []
         self._closed = False
         # 与真实 MemosRuntime 同构的永久 fail-closed 状态。
         self.fail_stop = False
         self._close_failed = False
         self._close_error = None
+
+    def snapshot_namespace_memories(self, namespace: str) -> list[dict[str, str]]:
+        """返回可注入的完整 stable-ID product 快照序列。"""
+
+        self.snapshot_calls.append(namespace)
+        index = min(len(self.snapshot_calls) - 1, len(self.memory_snapshots) - 1)
+        return [dict(item) for item in self.memory_snapshots[index]]
 
     @property
     def closed(self) -> bool:
@@ -252,6 +263,7 @@ def _make_provider(
     config=None,
     runtime_factory=None,
     efficiency_collector=None,
+    session_memory_report=False,
 ):
     """构造挂在独立 runtime owner 上的 MemOS provider。"""
 
@@ -271,6 +283,7 @@ def _make_provider(
         storage_root=storage_root,
         openai_settings=OpenAISettings(api_key="unit-test-key", base_url=None),
         efficiency_collector=efficiency_collector,
+        session_memory_report=session_memory_report,
         benchmark_name=benchmark_name,
         runtime_owner=_MemosRuntimeOwner(),
         runtime_factory=runtime_factory or _FakeRuntime,
@@ -706,6 +719,42 @@ def test_async_model_calls_are_replayed_into_original_framework_scopes(tmp_path)
     assert retrieval_embeddings[0].question_id == "q1"
 
 
+def test_failed_operation_replays_completed_calls_into_attempt_ledger(tmp_path):
+    """MemOS 业务失败不得把此前已完成的 API 花费随算法回滚一起丢弃。"""
+
+    collector = EfficiencyCollector(run_id="memos-failed-attempt", enabled=True)
+    attempts: list[FailedEfficiencyAttempt] = []
+    collector.bind_failed_attempt_sink(attempts.append)
+    provider = _make_provider(
+        tmp_path,
+        benchmark_name="longmemeval",
+        efficiency_collector=collector,
+    )
+
+    with pytest.raises(RuntimeError, match="planned product failure"):
+        with collector.conversation_scope("conv-1"):
+            assert provider._begin_efficiency_capture(EfficiencyStage.MEMORY_BUILD)
+            provider._capture_llm_call(
+                _fake_chat_completion(
+                    '{"memory list":[]}',
+                    input_tokens=13,
+                    output_tokens=4,
+                ),
+                {"messages": [{"role": "user", "content": "alpha"}]},
+                '{"memory list":[]}',
+            )
+            provider._fail_efficiency_capture(EfficiencyStage.MEMORY_BUILD)
+            raise RuntimeError("planned product failure")
+
+    assert len(attempts) == 1
+    assert len(attempts[0].calls) == 1
+    call = attempts[0].calls[0]
+    assert isinstance(call, LLMCallObservation)
+    assert call.input_tokens == 13
+    assert call.output_tokens == 4
+    assert call.stage is EfficiencyStage.MEMORY_BUILD
+
+
 # --------------------------------------------------------------------------------------
 # 2. 新增 patch hunk：search 失败可见性
 # --------------------------------------------------------------------------------------
@@ -909,6 +958,47 @@ def test_one_session_batch_emits_one_add_request_and_one_terminal(tmp_path):
     assert result.metadata["source_message_count"] == 5
     assert result.metadata["written_message_count"] == 5
     assert runtime.add_handler.requests[0].task_id == result.metadata["business_task_ids"][0]
+
+
+def test_halumem_session_report_uses_terminal_full_get_memory_stable_id_delta(
+    tmp_path,
+) -> None:
+    """只报告 task 终态后新增/变化的 product memory，不回显原始 session。"""
+
+    provider = _make_provider(
+        tmp_path,
+        benchmark_name="halumem",
+        session_memory_report=True,
+    )
+    batch = _session_batches(_longmemeval_conversation(), "run1_conv1")[0]
+    runtime = provider._require_runtime()
+    runtime.memory_snapshots = [
+        [
+            {"id": "stable", "memory": "Existing memory."},
+            {"id": "updated", "memory": "Old value."},
+        ],
+        [
+            {"id": "new", "memory": "New extracted product memory."},
+            {"id": "stable", "memory": "Existing memory."},
+            {"id": "updated", "memory": "Updated product memory."},
+        ],
+    ]
+
+    provider.ingest(batch)
+    report = provider.end_session(
+        SessionRef(isolation_key="run1_conv1", session_id=batch.session_id)
+    )
+
+    assert report is not None
+    assert report.memories == [
+        "New extracted product memory.",
+        "Updated product memory.",
+    ]
+    assert runtime.snapshot_calls == [
+        runtime.add_handler.requests[0].user_id,
+        runtime.add_handler.requests[0].user_id,
+    ]
+    assert all(turn.content not in report.memories for turn in batch.events)
 
 
 def test_failed_background_task_propagates(tmp_path):
@@ -2171,7 +2261,7 @@ def test_manifest_never_leaks_secrets_or_absolute_paths():
 
     manifest = _make_config().to_manifest()
 
-    assert manifest["adapter_version"] == "memos-v2.0.25-product-v4"
+    assert manifest["adapter_version"] == "memos-v2.0.25-product-v5"
     assert manifest["build_llm_response_contract"] == (
         "provider-aware-v2:"
         "opencodego=model_aware_json_reasoning_control;"
@@ -2646,7 +2736,7 @@ def test_real_runtime_inits_once_and_shares_one_dependencies_bundle(
     assert isinstance(runtime.tracker, MemosLocalTaskTracker)
     # 仍然不得触发 server_router。
     assert "memos.api.routers.server_router" not in sys.modules
-    assert adapter_module.MEMOS_ADAPTER_VERSION == "memos-v2.0.25-product-v4"
+    assert adapter_module.MEMOS_ADAPTER_VERSION == "memos-v2.0.25-product-v5"
 
 
 # --------------------------------------------------------------------------------------

@@ -42,6 +42,7 @@ from memory_benchmark.core.provider_protocol import (
     RetrievalResult,
     RetrievedItem,
     SessionBatch,
+    SessionMemoryReport,
     SessionRef,
     TurnEvent,
     UnitRef,
@@ -61,7 +62,7 @@ from memory_benchmark.observability.efficiency import (
 from memory_benchmark.storage import atomic_write_json
 
 
-MEMOS_ADAPTER_VERSION = "memos-v2.0.25-product-v4"
+MEMOS_ADAPTER_VERSION = "memos-v2.0.25-product-v5"
 MEMOS_METHOD_DIRECTORY = "MemOS"
 MEMOS_UPSTREAM_URL = "https://github.com/MemTensor/MemOS.git"
 MEMOS_RELEASE_TAG = "v2.0.25"
@@ -495,6 +496,26 @@ class MemosRuntime:
         self.naive_mem_cube = self.dependencies.naive_mem_cube
         self.tracker: MemosLocalTaskTracker = install_local_tracker(self.scheduler)
 
+    def snapshot_namespace_memories(self, namespace: str) -> list[dict[str, str]]:
+        """经 product GetMemory handler 读取一个 namespace 的完整 text-memory 快照。"""
+
+        from memos.api.handlers.memory_handler import handle_get_memories
+        from memos.api.product_models import GetMemoryRequest
+
+        response = handle_get_memories(
+            GetMemoryRequest(
+                mem_cube_id=namespace,
+                user_id=namespace,
+                include_preference=False,
+                include_tool_memory=False,
+                include_skill_memory=False,
+                page=None,
+                page_size=None,
+            ),
+            self.naive_mem_cube,
+        )
+        return _normalize_memos_snapshot(response, expected_namespace=namespace)
+
     @property
     def closed(self) -> bool:
         """返回该 runtime 是否已经关闭。"""
@@ -701,6 +722,7 @@ class MemOS(MemoryProvider):
         storage_root: Path,
         openai_settings: OpenAISettings | None = None,
         efficiency_collector: EfficiencyCollector | None = None,
+        session_memory_report: bool = False,
         benchmark_name: str | None = None,
         runtime_owner: _MemosRuntimeOwner | None = None,
         runtime_factory: Any | None = None,
@@ -713,6 +735,9 @@ class MemOS(MemoryProvider):
         self.storage_root = storage_root
         self._openai_settings = openai_settings
         self._efficiency_collector = efficiency_collector
+        if not isinstance(session_memory_report, bool):
+            raise ConfigurationError("MemOS session_memory_report must be bool")
+        self.session_memory_report = session_memory_report
         self.benchmark_name = benchmark_name
         self._runtime_owner = runtime_owner or MEMOS_RUNTIME_OWNER
         self._runtime_factory = runtime_factory
@@ -726,6 +751,7 @@ class MemOS(MemoryProvider):
         self._efficiency_lock = threading.RLock()
         self._efficiency_capture: _MemosEfficiencyCapture | None = None
         self._efficiency_observer_runtime_id: int | None = None
+        self._session_report_memories: dict[tuple[str, str | None], list[str]] = {}
 
     # ------------------------------------------------------------------
     # runtime / namespace
@@ -934,8 +960,8 @@ class MemOS(MemoryProvider):
                 )
             )
 
-    def _discard_efficiency_capture(self, stage: EfficiencyStage) -> None:
-        """算法操作失败时丢弃本操作的未提交观测，避免污染下一 scope。"""
+    def _fail_efficiency_capture(self, stage: EfficiencyStage) -> None:
+        """算法操作失败时回放已完成调用，供 scope 写入失败尝试账。"""
 
         with self._efficiency_lock:
             capture = self._efficiency_capture
@@ -943,9 +969,10 @@ class MemOS(MemoryProvider):
                 return
             if capture.stage is not stage:
                 raise ConfigurationError(
-                    "MemOS efficiency capture stage changed before discard"
+                    "MemOS efficiency capture stage changed before failure"
                 )
             self._efficiency_capture = None
+        self._replay_efficiency_capture(capture)
 
     def _finish_efficiency_capture(self, stage: EfficiencyStage) -> None:
         """弹出原始缓冲，并在当前调用线程的 framework scope 中精确回放。"""
@@ -961,7 +988,19 @@ class MemOS(MemoryProvider):
                 )
             self._efficiency_capture = None
 
-        with collector.operation_stage(stage):
+        self._replay_efficiency_capture(capture)
+
+    def _replay_efficiency_capture(
+        self,
+        capture: _MemosEfficiencyCapture,
+    ) -> None:
+        """把成功或失败 operation 中已完成的原始调用写入当前 scope。"""
+
+        collector = self._efficiency_collector
+        if collector is None or not collector.enabled:
+            return
+
+        with collector.operation_stage(capture.stage):
             for call in capture.llm_calls:
                 api_input, api_output = extract_api_token_usage(call.usage)
                 usage = resolve_token_usage(
@@ -1100,6 +1139,13 @@ class MemOS(MemoryProvider):
                 )
 
         runtime = self._require_runtime()
+        before_snapshot: list[dict[str, str]] | None = None
+        if self.session_memory_report:
+            if len(view_plans) != 1:
+                raise ConfigurationError(
+                    "MemOS session memory reporting requires one product namespace"
+                )
+            before_snapshot = runtime.snapshot_namespace_memories(view_plans[0][1])
         from memos.api.product_models import APIADDRequest
 
         capture_started = self._begin_efficiency_capture(
@@ -1140,11 +1186,21 @@ class MemOS(MemoryProvider):
                 terminal_task_count += len(terminal)
         except BaseException:
             if capture_started:
-                self._discard_efficiency_capture(EfficiencyStage.MEMORY_BUILD)
+                self._fail_efficiency_capture(EfficiencyStage.MEMORY_BUILD)
             raise
         else:
             if capture_started:
                 self._finish_efficiency_capture(EfficiencyStage.MEMORY_BUILD)
+
+        if before_snapshot is not None:
+            namespace = view_plans[0][1]
+            after_snapshot = runtime.snapshot_namespace_memories(namespace)
+            self._session_report_memories[
+                (unit.isolation_key, unit.session_id)
+            ] = _memos_changed_memory_values(
+                before=before_snapshot,
+                after=after_snapshot,
+            )
 
         return IngestResult(
             unit_ref=SessionRef(
@@ -1163,6 +1219,25 @@ class MemOS(MemoryProvider):
                 "written_message_count": written_message_count,
                 "add_request_count": len(submitted),
                 "terminal_task_count": terminal_task_count,
+            },
+        )
+
+    def end_session(self, ref: SessionRef) -> SessionMemoryReport | None:
+        """报告 async business task 终态后的完整 GetMemory stable-ID delta。"""
+
+        if not self.session_memory_report:
+            return None
+        memories = self._session_report_memories.pop(
+            (ref.isolation_key, ref.session_id),
+            [],
+        )
+        return SessionMemoryReport(
+            session_ref=ref,
+            memories=memories,
+            metadata={
+                "method": "memos",
+                "memory_unit": "terminal_get_memory_text_unit_delta",
+                "changed_memory_count": len(memories),
             },
         )
 
@@ -1402,7 +1477,7 @@ class MemOS(MemoryProvider):
                 all_items.extend(view_items)
         except BaseException:
             if capture_started:
-                self._discard_efficiency_capture(EfficiencyStage.RETRIEVAL)
+                self._fail_efficiency_capture(EfficiencyStage.RETRIEVAL)
             raise
         else:
             if capture_started:
@@ -1603,6 +1678,75 @@ def _require_empty_text_memory(get_response: Any, namespace: str) -> None:
                 f"MemOS namespace {namespace} still holds memories after clean: "
                 f"memories={len(memories)}, total_nodes={total_nodes!r}"
             )
+
+
+def _normalize_memos_snapshot(
+    response: Any,
+    *,
+    expected_namespace: str,
+) -> list[dict[str, str]]:
+    """把 product GetMemory response 约束成稳定 ``id/memory`` 完整快照。"""
+
+    data = getattr(response, "data", None)
+    if not isinstance(data, dict):
+        raise ConfigurationError("MemOS GetMemory response data must be an object")
+    buckets = data.get("text_mem")
+    if not isinstance(buckets, list) or len(buckets) != 1:
+        raise ConfigurationError(
+            "MemOS GetMemory must return exactly one text-memory bucket"
+        )
+    bucket = buckets[0]
+    if not isinstance(bucket, dict) or bucket.get("cube_id") != expected_namespace:
+        raise ConfigurationError("MemOS GetMemory bucket namespace mismatch")
+    raw_memories = bucket.get("memories")
+    total_nodes = bucket.get("total_nodes")
+    if not isinstance(raw_memories, list):
+        raise ConfigurationError("MemOS GetMemory memories must be a list")
+    if type(total_nodes) is not int or total_nodes < 0:
+        raise ConfigurationError("MemOS GetMemory total_nodes must be non-negative int")
+    if total_nodes != len(raw_memories):
+        raise ConfigurationError(
+            "MemOS GetMemory must be unpaginated and complete: "
+            f"total_nodes={total_nodes}, memories={len(raw_memories)}"
+        )
+    normalized: list[dict[str, str]] = []
+    for index, raw in enumerate(raw_memories):
+        if hasattr(raw, "model_dump"):
+            raw = raw.model_dump(mode="json", exclude_none=True)
+        if not isinstance(raw, dict):
+            raise ConfigurationError(
+                f"MemOS GetMemory memories[{index}] must be an object"
+            )
+        memory_id = raw.get("id")
+        memory = raw.get("memory")
+        if not isinstance(memory_id, str) or not memory_id.strip():
+            raise ConfigurationError(
+                f"MemOS GetMemory memories[{index}].id must be non-blank"
+            )
+        if not isinstance(memory, str) or not memory.strip():
+            raise ConfigurationError(
+                f"MemOS GetMemory memories[{index}].memory must be non-blank"
+            )
+        normalized.append({"id": memory_id, "memory": memory})
+    normalized.sort(key=lambda item: item["id"])
+    if len({item["id"] for item in normalized}) != len(normalized):
+        raise ConfigurationError("MemOS GetMemory returned duplicate memory ids")
+    return normalized
+
+
+def _memos_changed_memory_values(
+    *,
+    before: list[dict[str, str]],
+    after: list[dict[str, str]],
+) -> list[str]:
+    """返回新建或内容变化的 current product text-memory values。"""
+
+    before_by_id = {item["id"]: item["memory"] for item in before}
+    return [
+        item["memory"]
+        for item in after
+        if before_by_id.get(item["id"]) != item["memory"]
+    ]
 
 
 def _memos_retrieval_evidence() -> RetrievalEvidence:

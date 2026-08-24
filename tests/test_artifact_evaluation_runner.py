@@ -13,7 +13,12 @@ from types import SimpleNamespace
 import pytest
 
 from memory_benchmark.cli import run_prediction as run_prediction_module
-from memory_benchmark.config import OpenAISettings
+from memory_benchmark.config import (
+    ApiRuntimeProfile,
+    ExecutionProfile,
+    OpenAISettings,
+    RunComposition,
+)
 from memory_benchmark.core import (
     AddResult,
     AnswerResult,
@@ -52,7 +57,10 @@ from memory_benchmark.cli.run_prediction import PredictionBatchResult
 from memory_benchmark.evaluators import LoCoMoF1Evaluator
 from memory_benchmark.evaluators.llm_judge import LLMJudgeEvaluator
 from memory_benchmark.evaluators.longmemeval_judge import LongMemEvalJudgeEvaluator
-from memory_benchmark.observability.efficiency import EfficiencyCollector
+from memory_benchmark.observability.efficiency import (
+    EfficiencyCollector,
+    MeasurementSource,
+)
 from memory_benchmark.evaluators.membench_choice_accuracy import (
     MemBenchChoiceAccuracyEvaluator,
 )
@@ -71,11 +79,26 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 def _resolved_fake_profile(config: object, profile_name: str) -> ResolvedMethodProfile:
     """把局部 fake config 包装成新 run 的 profile envelope。"""
 
+    section_name = getattr(config, "profile_name")
+    max_workers = getattr(config, "max_workers", 1)
+    runtime_section = "official_full" if profile_name == "official-full" else profile_name
     return ResolvedMethodProfile(
         public_name=profile_name,
-        section_name=getattr(config, "profile_name"),
+        section_name=section_name,
         answer_builder="benchmark",
         config=config,
+        composition=RunComposition(
+            runtime=ApiRuntimeProfile(
+                profile_name=runtime_section,
+                provider="primary" if profile_name == "official-full" else "opencodego",
+                model="gpt-4o-mini" if profile_name == "official-full" else "ox-alpha-free",
+            ),
+            execution=ExecutionProfile(
+                profile_name=runtime_section,
+                default_max_workers=max_workers,
+            ),
+            resolved_max_workers=max_workers,
+        ),
     )
 
 
@@ -616,7 +639,7 @@ def test_registered_mock_v3_prediction_can_be_evaluated_offline(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1065,7 +1088,7 @@ def test_longmemeval_s_smoke_registered_prediction_stays_offline_and_separates_p
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1590,6 +1613,30 @@ class _SupportDeclaringArtifactEvaluator(LLMJudgeEvaluator):
         return dict(self._payload)
 
 
+class _FailingSupportArtifactEvaluator(LLMJudgeEvaluator):
+    """记录一次已完成 judge 调用后失败，验证 append-only 成本账。"""
+
+    metric_name = "failing_support_metric"
+    benchmark_name = "locomo"
+
+    def evaluate_run_artifacts(
+        self, *, paths: object, manifest: dict[str, object], max_workers: int = 1
+    ) -> dict[str, object]:
+        """在 runner 已绑定 store 后制造带 usage 的确定性失败。"""
+
+        del paths, manifest, max_workers
+        collector = self.efficiency_collector
+        assert collector is not None
+        with collector.judge_scope("conv-1", "q-1"):
+            collector.record_llm_call(
+                model_id="judge-llm",
+                input_tokens=13,
+                output_tokens=2,
+                token_measurement_source=MeasurementSource.API_USAGE,
+            )
+            raise RuntimeError("private failure detail must not be persisted")
+
+
 @pytest.mark.parametrize(
     ("efficiency_payload_extra", "error_text"),
     [
@@ -1663,6 +1710,42 @@ def test_disabled_collector_writes_no_artifact_efficiency_files(
     assert not paths.evaluator_efficiency_observations_path(
         "support_declaring_metric"
     ).exists()
+
+
+def test_failed_artifact_evaluator_persists_completed_usage_before_score_output(
+    tmp_path: Path,
+) -> None:
+    """judge 失败时已发生的 usage 必须留账，且不得写 score 或异常正文。"""
+
+    run_dir = _build_run_dir(tmp_path)
+    _write_manifest(run_dir, benchmark_name="locomo")
+    evaluator = _FailingSupportArtifactEvaluator(
+        model="gpt-4o-mini",
+        efficiency_collector=EfficiencyCollector(run_id="unit-run", enabled=True),
+    )
+
+    with pytest.raises(RuntimeError, match="private failure detail"):
+        run_artifact_evaluation(
+            run_dir=run_dir,
+            evaluator=evaluator,
+            expected_benchmark="locomo",
+        )
+
+    paths = ExperimentPaths(run_dir=run_dir)
+    attempts = read_jsonl(
+        paths.evaluator_failed_efficiency_attempts_path(
+            "failing_support_metric"
+        )
+    )
+    assert len(attempts) == 1
+    assert attempts[0]["scope_type"] == "judge"
+    assert attempts[0]["conversation_id"] == "conv-1"
+    assert attempts[0]["question_id"] == "q-1"
+    assert attempts[0]["error_type"] == "RuntimeError"
+    assert attempts[0]["calls"][0]["input_tokens"] == 13
+    assert attempts[0]["calls"][0]["output_tokens"] == 2
+    assert "private failure detail" not in json.dumps(attempts)
+    assert not paths.metric_scores_path("failing_support_metric").exists()
 
 
 def _build_run_dir(tmp_path: Path) -> Path:
@@ -1844,7 +1927,7 @@ def _patch_membench_mock_prediction(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: _smoke_openai_settings(),
+        lambda project_root, api_provider=None, expected_model=None: _smoke_openai_settings(),
         raising=False,
     )
     monkeypatch.setattr(

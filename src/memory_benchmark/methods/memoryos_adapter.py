@@ -316,6 +316,8 @@ def _load_memoryos_pypi_classes(path_settings: PathSettings) -> dict[str, Any]:
         _MEMORYOS_PYPI_CACHE["Memoryos"] = memoryos_cls
         _MEMORYOS_PYPI_CACHE["package"] = module
         _MEMORYOS_PYPI_CACHE["package_dir"] = pypi_dir
+        utils_module = importlib.import_module(f"{_MEMORYOS_PYPI_PACKAGE_NAME}.utils")
+        _MEMORYOS_PYPI_CACHE["utils"] = utils_module
         return _MEMORYOS_PYPI_CACHE
 
 
@@ -427,6 +429,27 @@ def _require_non_empty_string(value: object, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ConfigurationError(f"MemoryOS {field_name} must be a non-empty string")
     return value
+
+
+def _count_memoryos_embedding_tokens(model: Any, text: str) -> int:
+    """按 MemoryOS 实际 SentenceTransformer tokenizer 与截断长度计数。"""
+
+    tokenizer = getattr(model, "tokenizer", None)
+    if tokenizer is None or not hasattr(tokenizer, "encode"):
+        raise ConfigurationError(
+            "MemoryOS local embedding token counting requires "
+            "model.tokenizer.encode"
+        )
+    max_length = getattr(model, "max_seq_length", None)
+    if isinstance(max_length, int) and max_length > 0:
+        encoded = tokenizer.encode(
+            text,
+            truncation=True,
+            max_length=max_length,
+        )
+    else:
+        encoded = tokenizer.encode(text)
+    return len(encoded)
 
 
 def _require_positive_int(value: object, field_name: str) -> int:
@@ -558,12 +581,59 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
 
         # 生产路径预加载 pypi 包，确保 source identity 与 backend 构造可用。
         if self._backend_factory is None:
-            _load_memoryos_pypi_classes(self.path_settings)
+            classes = _load_memoryos_pypi_classes(self.path_settings)
+            self._install_embedding_observer(classes)
 
         self._backends: dict[str, Any] = {}
         self._conversation_metadata: dict[str, dict[str, Any]] = {}
         self._native_isolation_to_conversation_id: dict[str, str] = {}
         self._sidecars: dict[str, dict[str, Any]] = {}
+
+    def _install_embedding_observer(self, classes: dict[str, Any]) -> None:
+        """在 MemoryOS 真实 ``model.encode`` 成功后记录 embedding 调用。
+
+        upstream 的 ``get_embedding`` 有独立 embedding cache；回调放在 cache-miss
+        的真实 encode 之后，因此 cache hit 不伪造模型调用，encode 失败也不写
+        成功 observation。当前 MemoryOS 一个 worker 进程只运行一个 method
+        profile，因此 vendored 包的单 observer 不会跨 run 竞争。
+        """
+
+        utils_module = classes.get("utils")
+        setter = getattr(utils_module, "set_embedding_observer", None)
+        if not callable(setter):
+            raise ConfigurationError(
+                "MemoryOS vendored runtime exposes no embedding observer seam"
+            )
+        collector = self._efficiency_collector
+        if collector is None or not collector.enabled:
+            setter(None)
+            return
+
+        def observe_embedding_call(
+            *,
+            text: str,
+            model: Any,
+            model_name: str,
+            latency_ms: float,
+        ) -> None:
+            """把 vendored 真实 encode 事件写入当前 runner scope。"""
+
+            if collector.active_scope_type() is None:
+                return
+            if model_name != self.config.embedding_model_name:
+                raise ConfigurationError(
+                    "MemoryOS embedding observer model mismatch: "
+                    f"{model_name!r} != {self.config.embedding_model_name!r}"
+                )
+            collector.record_embedding_call(
+                model_id=MEMORYOS_EMBEDDING_MODEL_ID,
+                input_tokens=_count_memoryos_embedding_tokens(model, text),
+                latency_ms=latency_ms,
+                token_measurement_source=MeasurementSource.TOKENIZER_ESTIMATE,
+                latency_measurement_source=MeasurementSource.FRAMEWORK_TIMER,
+            )
+
+        setter(observe_embedding_call)
 
     # ------------------------------------------------------------------ #
     # bridge 路径：add / get_answer / load_existing_conversation_state

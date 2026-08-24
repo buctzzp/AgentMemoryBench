@@ -1,30 +1,26 @@
 # Method TOML 配置与 answer prompt 构造政策
 
-> **现行长期政策（2026-07-17，用户与 GPT-5.6 架构师对齐）。**本文取代
+> **现行长期政策（2026-07-17 建立，2026-08-24 配置所有权修订）。**本文取代
 > `dual-track-config-policy.md` 作为 method 参数选择与 answer prompt 构造的事实源。
 > 旧 `config_track=unified/native` 实现和既有产物继续如实保留历史身份，但不再代表目标
 > 配置模型。
 
 ## 0. 一句话裁决
 
-每个 method 只维护一个 TOML 文件；主配置跨五个 benchmark 固定，作者实际跑过的
-benchmark 可以增加少量 `author_<benchmark>` section。CLI 只选择 section，不逐项传
-超参数，也不根据 benchmark 暗中自动切换。answer 配置选择的是**完整 prompt builder**，
+每个 method 只维护一个 TOML 文件；method 主算法参数跨五个 benchmark 固定，作者实际跑过的
+benchmark 可以增加少量 `author_<benchmark>` section。API runtime、benchmark answer/judge 与
+execution 参数由各自配置层组合，不再复制进十家 method 参数。CLI 只选择明确 profile，不逐项
+携带算法值，也不根据 benchmark 暗中自动切换。answer 配置选择的是**完整 prompt builder**，
 不是一份尚未填变量的模板文件。
 
 ## 1. TOML 结构
 
-目标结构如下；具体字段由各 method 的强类型 config 决定：
+目标结构如下；具体字段由各 method 的强类型 config 决定。迁移期旧
+`smoke/official_full` section 保持严格只读兼容，但新 run 最终只组合一份主 method 参数：
 
 ```toml
-[smoke]
-# 5×10 极小流通验证。method 算法参数原则上与 official_full 相同；只允许缩小
-# 数据范围、问题数、并发或其他不改变 method 行为的运行规模。
-answer_builder = "benchmark"
-
-[official_full]
-# Phase 1 主配置：同一个 method 跨 LoCoMo、LongMemEval、HaluMem、BEAM、MemBench
-# 使用同一套 method 超参数。
+[method]
+# 跨五格固定的主 method 算法参数。只包含 upstream 公开的算法/产品旋钮。
 answer_builder = "benchmark"
 
 [author_locomo]
@@ -40,20 +36,24 @@ answer_builder = "<method>_longmemeval_official"
 
 1. “跨五个 benchmark 固定”指**同一 method** 的主配置固定，不要求十个 method 使用
    相同的内部数值。
-2. `smoke` 不为省钱篡改 embedding、检索、update、summary、storage 等 method 算法参数；
-   成本优先靠数据、conversation/question/turn 范围和并发缩小。2026-07-27 起允许一个
-   明确例外：低预算 smoke 的 API runtime 使用
+2. `smoke`/`pilot`/`official_full` 首先是 runtime 与 execution scope，不是三套 method 算法。
+   smoke 不为省钱篡改 embedding、检索、update、summary、storage 等 method 算法参数；成本
+   优先靠数据、conversation/question/turn 范围和并发缩小。低预算 runtime 使用
    `opencodego/ox-alpha-free`，正式 `official_full` 保持
    `primary/gpt-4o-mini`。这是流通验证而非效果对比，provider/model/transport 与必要的
    reasoning completion floor 必须进入 manifest/resume；细则见
    [`api-runtime-profiles.md`](api-runtime-profiles.md)。
 3. `author_<benchmark>` 是稀疏的作者复现配置，不是主表默认，也不因为当前 benchmark
    同名就自动启用。作者没有跑过的格子不编造 section、不代替作者调参。
-4. 每个 section 写完整、可独立解析的参数。当前阶段不引入继承或多层 merge，少量重复优于
-   隐藏覆盖关系。
-5. embedding model、dimension、normalization、retrieval depth、chunk、update、summary 等
-   都是普通 TOML 字段，不再为它们发明另一条全局轨。共同 embedding 还是产品默认 embedding
-   的最终主表选择，留到真实效果实验前逐 method 裁定；5×10 smoke 沿用当前已验收配置。
+4. `author_<benchmark>` 写完整可审计的覆盖；主参数不使用隐式 benchmark merge。runtime 与
+   execution 的组合由强类型 composition root 完成，并完整进入 manifest，不靠 TOML 复制。
+5. embedding model、dimension、normalization、retrieval depth、chunk、update、summary 等若为
+   upstream 公开算法旋钮，属于 method 配置。Phase 1 主比较对所有实际消费 embedding 且接口
+   兼容的方法统一 `all-MiniLM-L6-v2`/384；完整 identity 与重建门必填。不消费 embedding 的
+   profile 记 N/A，product default/author 配置只作显式补充校准。
+6. 通用 `api_timeout_seconds`、`api_max_retries`、credential/base URL 与 runner `max_workers`
+   不属于 method 算法参数。作者未暴露的内部 LLM temperature/max-token 常量也不为对称性强行
+   变成配置；作者明确暴露且影响算法时才保留，默认锁 upstream 值。
 
 ## 2. 运行选择
 
@@ -132,8 +132,12 @@ shim，保证现有扩展可导入；新代码必须引用 canonical prompt pack
 
 TOML 负责**保存数值与选择实现**；代码只负责两类不可避免的工作：
 
-1. 把第三方库里原先写死、但确属可配置的参数暴露给强类型 config；
+1. 把第三方库通过公开 seam 暴露、且确属算法配置的参数交给强类型 config；
 2. 实现并注册需要逻辑构造的 answer builder。
+
+API provider/model/base URL/credential/timeout/retry 归 runtime；workers/crop/queue 归 execution；
+answer/judge decode 与 prompt 归 benchmark evaluation。把字段移出 method TOML 不等于把值隐藏到
+代码里：组合后的公开配置仍须完整进入 manifest/resume identity。
 
 如果两个官方目录改变了 update/retrieval/storage 等算法流程，它们是不同 implementation，
 不能靠 TOML section 或旧 `native` 名称伪装成同一个 method 的参数差。
@@ -159,11 +163,13 @@ TOML 负责**保存数值与选择实现**；代码只负责两类不可避免�
 1. **现在已完成**：政策落盘；不改既有实验史，不触发真实 API。
 2. **2026-08-14 状态**：MemBench canonical split、RetrievalEvidence 与 5×10 主 smoke
    均已关闭。旧“当前主线”只属历史，不再作为恢复动作。
-3. **2026-08-14 ws03 M1-B 已完成**：十家 `smoke/official_full` section 均显式声明
+3. **2026-08-14 ws03 M1-B 已完成（迁移基线）**：十家 `smoke/official_full` section 均显式声明
    `answer_builder="benchmark"`；新 loader/registry 把 framework envelope 与 method dataclass
    严格分离；新 manifest/resume/output identity 已切换至 `MethodRunIdentity v1`；旧 artifact
    只读回读保持。当前只注册 `benchmark` builder，不凭已有 prompt 文件虚构任何作者 profile。
-4. **逐 method 到性能阶段时**：再裁 `official_full` 的最终参数；作者跑过的 benchmark 才补
+4. **2026-08-24 ws05 再迁移**：开始把上述两份重复 section 收敛为一份 method 主参数，
+   runtime/execution 独立组合；旧 section 与 artifact 只读兼容，完成前不得删旧 parser。
+5. **逐 method 到性能阶段时**：作者跑过的 benchmark 才补
    对应 author section。Phase 1 不做五个 benchmark 各自 sweep，也不追求 smoke 分数最优。
    新 `author_<benchmark>` section 必须同时注册经过最终消息 parity 验收的完整 builder；名字
    未注册或变量链未闭合时在 API/runtime 前 fail-fast。

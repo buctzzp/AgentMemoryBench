@@ -84,6 +84,7 @@ class _FakeManager:
         self.calls = 0
         self.fail_after_write = False
         self.search_items: list[Any] = []
+        self.search_configs: list[dict[str, Any]] = []
 
     async def ainvoke(
         self,
@@ -124,7 +125,8 @@ class _FakeManager:
     ) -> list[Any]:
         """返回预设 product order，并记录 query embedding。"""
 
-        del query, config
+        del query
+        self.search_configs.append(config)
         self.engine._record_embedding_observation(
             {"input_tokens": 2, "latency_ms": 0.25, "text_count": 1}
         )
@@ -169,6 +171,15 @@ def test_langmem_worker_atomic_state_and_result_loss_retry(tmp_path: Path) -> No
     assert first["reused_operation"] is False
     assert second["reused_operation"] is True
     assert first["changed_memory_keys"] == ["memory-1"]
+    assert first["changed_memories"] == [
+        {
+            "key": "memory-1",
+            "value": {
+                "content": {"content": "Alice moved to Boston"},
+                "kind": "Memory",
+            },
+        }
+    ]
     assert first["llm_observations"] == [
         {"input_tokens": 11, "output_tokens": 4}
     ]
@@ -363,6 +374,7 @@ def test_langmem_worker_retrieve_preserves_product_order_score_and_zero_hit(
     assert result["embedding_observations"] == [
         {"input_tokens": 2, "latency_ms": 0.25, "text_count": 1}
     ]
+    assert manager.search_configs[0]["callbacks"] == [engine.usage_callback]
     manager.search_items = []
     zero = asyncio.run(
         engine.retrieve({"namespace_id": NAMESPACE_ID, "query": "q", "limit": 5})
@@ -380,6 +392,7 @@ def test_langmem_worker_state_validation_rejects_adapter_and_digest_drift() -> N
 
     state = _empty_state(NAMESPACE_ID)
     state["completed_operations"]["op"] = {
+        "changed_memories": [],
         "changed_memory_keys": [],
         "embedding_observations": [],
         "input_digest": "",

@@ -2,12 +2,14 @@
 
 worker 进入官方 ``create_app`` lifespan，随后调用与 HTTP route 相同的 typed
 memorize/search/get service。它不理解 benchmark/gold/answer，只负责产品输入、
-精确后台完成门、public readout 与 API usage 观测。
+精确后台完成门、public readout 与模型调用观测。controlled embedding 通过 upstream
+``EmbeddingProvider`` 协议注入本地 MiniLM，不绕过产品的 Cascade/LanceDB/search。
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from importlib import import_module
 import json
 import math
@@ -19,8 +21,8 @@ import traceback
 from typing import Any
 
 
-EVEROS_ADAPTER_VERSION = "everos-product-chat-v6"
-EVEROS_WORKER_SCHEMA_VERSION = "everos-worker-protocol-v2"
+EVEROS_ADAPTER_VERSION = "everos-product-chat-v7"
+EVEROS_WORKER_SCHEMA_VERSION = "everos-worker-protocol-v3"
 EVEROS_PRODUCT_SURFACE = "create_app-lifespan+typed-memorize-search-get"
 EVEROS_ROOT_MARKER = ".memory-benchmark-everos-root.json"
 _TERMINAL_FAILURES = frozenset({"dead_letter", "crashed"})
@@ -168,77 +170,100 @@ class _ObservedLLMClient:
         return getattr(self._inner, name)
 
 
-class _ObservedEmbeddingsEndpoint:
-    """透传 AsyncOpenAI embeddings endpoint 并捕获 response usage。"""
+class _LocalSentenceTransformerEmbeddingProvider:
+    """用官方 EmbeddingProvider 协议承载本地 controlled MiniLM。"""
 
-    def __init__(self, inner: Any, engine: "_WorkerEngine") -> None:
-        """保存原 embeddings endpoint 与当前 operation 观测账。"""
+    def __init__(
+        self,
+        *,
+        model_path: Path,
+        dimension: int,
+        engine: "_WorkerEngine",
+    ) -> None:
+        """离线加载模型并锁定产品可见维度。"""
 
-        self._inner = inner
+        from sentence_transformers import SentenceTransformer
+
+        self.dim = dimension
         self._engine = engine
+        self._lock = asyncio.Lock()
+        self._model = SentenceTransformer(
+            str(model_path),
+            local_files_only=True,
+            trust_remote_code=False,
+        )
+        actual_dimension = self._model.get_embedding_dimension()
+        if actual_dimension != dimension:
+            raise RuntimeError(
+                "EverOS local embedding dimension mismatch: "
+                f"model={actual_dimension}, configured={dimension}"
+            )
+        tokenizer = getattr(self._model, "tokenizer", None)
+        max_length = getattr(self._model, "max_seq_length", None)
+        if tokenizer is None or type(max_length) is not int or max_length < 1:
+            raise RuntimeError(
+                "EverOS local embedding model lacks tokenizer/max_seq_length"
+            )
+        self._tokenizer = tokenizer
+        self._max_length = max_length
 
-    async def create(self, *args: Any, **kwargs: Any) -> Any:
-        """保持 request/response 不变，只记录 API usage 与调用延迟。"""
+    def _input_token_count(self, texts: list[str]) -> int:
+        """按实际模型 tokenizer 与截断上限统计未 padding 的输入 token。"""
 
-        raw_input = kwargs.get("input")
-        text_count = len(raw_input) if isinstance(raw_input, list) else 1
+        total = 0
+        for text in texts:
+            encoded = self._tokenizer.encode(
+                text,
+                add_special_tokens=True,
+                truncation=True,
+                max_length=self._max_length,
+            )
+            total += len(encoded)
+        return total
+
+    def _encode(self, texts: list[str]) -> list[list[float]]:
+        """在线程中执行同步 SentenceTransformer encode。"""
+
+        encoded = self._model.encode(
+            texts,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
+        vectors = encoded.tolist()
+        if len(vectors) != len(texts) or any(
+            not isinstance(vector, list) or len(vector) != self.dim
+            for vector in vectors
+        ):
+            raise RuntimeError("EverOS local embedding returned invalid shape")
+        return [[float(value) for value in vector] for vector in vectors]
+
+    async def embed(self, text: str) -> list[float]:
+        """嵌入单条文本。"""
+
+        return (await self.embed_batch([text]))[0]
+
+    async def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
+        """保持输入顺序嵌入一批文本并记录 tokenizer/墙钟观测。"""
+
+        normalized = list(texts)
+        if not normalized:
+            return []
+        if not all(isinstance(text, str) for text in normalized):
+            raise TypeError("EverOS local embedding inputs must be strings")
+        input_tokens = self._input_token_count(normalized)
         started_ns = perf_counter_ns()
-        response = await self._inner.create(*args, **kwargs)
-        latency_ms = max(0.0, (perf_counter_ns() - started_ns) / 1_000_000)
-        usage = getattr(response, "usage", None)
-        if usage is None:
-            raise RuntimeError("EverOS embedding response has no exact usage")
+        async with self._lock:
+            vectors = await asyncio.to_thread(self._encode, normalized)
         self._engine.record_embedding(
             {
-                "input_tokens": _required_int(
-                    getattr(usage, "prompt_tokens", None), "prompt_tokens"
+                "input_tokens": input_tokens,
+                "latency_ms": max(
+                    0.0, (perf_counter_ns() - started_ns) / 1_000_000
                 ),
-                "latency_ms": latency_ms,
-                "text_count": text_count,
+                "text_count": len(normalized),
             }
         )
-        return response
-
-    def __getattr__(self, name: str) -> Any:
-        """透传 endpoint 其余属性。"""
-
-        return getattr(self._inner, name)
-
-
-class _ObservedRerankProvider:
-    """透传 product reranker，并为主 chat/Episode 轨证明零外部调用。"""
-
-    def __init__(self, inner: Any, engine: "_WorkerEngine") -> None:
-        """保存原 provider 与当前 operation 观测账。"""
-
-        self._inner = inner
-        self._engine = engine
-
-    async def rerank(self, *args: Any, **kwargs: Any) -> Any:
-        """逐字透传非空 rerank；成功返回后记录逻辑调用与延迟。"""
-
-        documents = args[1] if len(args) >= 2 else kwargs.get("documents")
-        try:
-            document_count = len(documents)
-        except TypeError:
-            document_count = 0
-        started_ns = perf_counter_ns()
-        response = await self._inner.rerank(*args, **kwargs)
-        if document_count:
-            self._engine.record_rerank(
-                {
-                    "document_count": document_count,
-                    "latency_ms": max(
-                        0.0, (perf_counter_ns() - started_ns) / 1_000_000
-                    ),
-                }
-            )
-        return response
-
-    def __getattr__(self, name: str) -> Any:
-        """透传 provider 其余属性。"""
-
-        return getattr(self._inner, name)
+        return vectors
 
 
 class _WorkerEngine:
@@ -254,10 +279,12 @@ class _WorkerEngine:
         self._llm_observations: list[dict[str, int]] | None = None
         self._embedding_observations: list[dict[str, Any]] | None = None
         self._rerank_observations: list[dict[str, Any]] | None = None
+        self._failed_error_details: dict[str, Any] | None = None
 
     async def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         """校验协议 envelope 并分发单条命令。"""
 
+        self._failed_error_details = None
         if set(request) != {"request_id", "command", "payload"}:
             raise ValueError("request must contain exactly request_id/command/payload")
         _required_int(request.get("request_id"), "request_id", minimum=1)
@@ -288,6 +315,8 @@ class _WorkerEngine:
             "add_batch_size",
             "app_id",
             "drain_timeout_seconds",
+            "embedding_dimension",
+            "embedding_provider",
             "project_id",
             "root_marker",
             "search_method",
@@ -313,6 +342,14 @@ class _WorkerEngine:
                 "drain_timeout_seconds",
                 positive=True,
             ),
+            "embedding_dimension": _required_int(
+                payload.get("embedding_dimension"),
+                "embedding_dimension",
+                minimum=1,
+            ),
+            "embedding_provider": _required_text(
+                payload.get("embedding_provider"), "embedding_provider"
+            ),
             "project_id": _required_text(payload.get("project_id"), "project_id"),
             "search_method": _required_text(
                 payload.get("search_method"), "search_method"
@@ -322,6 +359,12 @@ class _WorkerEngine:
             raise ValueError("EverOS product profile requires add_batch_size=25")
         if self.config["search_method"] != "hybrid":
             raise ValueError("EverOS product profile requires hybrid search")
+        if self.config["embedding_provider"] != "sentence-transformers-local":
+            raise ValueError(
+                "EverOS controlled profile requires sentence-transformers-local"
+            )
+
+        self._install_controlled_embedding_provider()
 
         from everos.entrypoints.api.app import create_app
 
@@ -357,6 +400,34 @@ class _WorkerEngine:
             "worker_schema_version": EVEROS_WORKER_SCHEMA_VERSION,
         }
 
+    def _install_controlled_embedding_provider(self) -> None:
+        """在 product lifespan 前注入 upstream 协议兼容的本地 provider。"""
+
+        import everos.component.embedding.accessor as embedding_accessor
+        from everos.component.embedding.capability import EmbeddingCapability
+
+        if embedding_accessor._capability is not None:
+            raise RuntimeError(
+                "EverOS embedding capability initialized before controlled provider"
+            )
+        model_path = Path(
+            _required_text(
+                os.environ.get("EVEROS_LOCAL_EMBEDDING_MODEL_PATH"),
+                "EVEROS_LOCAL_EMBEDDING_MODEL_PATH",
+            )
+        ).resolve()
+        if not model_path.is_dir():
+            raise RuntimeError(
+                f"EverOS local embedding model directory missing: {model_path}"
+            )
+        embedding_accessor._capability = EmbeddingCapability(
+            provider=_LocalSentenceTransformerEmbeddingProvider(
+                model_path=model_path,
+                dimension=self.config["embedding_dimension"],
+                engine=self,
+            )
+        )
+
     def _install_observers(self) -> None:
         """包装 product 单例，不修改任何算法返回值或调用参数。"""
 
@@ -375,21 +446,16 @@ class _WorkerEngine:
             raise RuntimeError("EverOS LLM lifespan did not initialize its client")
         capability = embedding_accessor.get_embedding_capability()
         provider = capability.provider
-        if provider is None:
+        if not isinstance(provider, _LocalSentenceTransformerEmbeddingProvider):
             raise RuntimeError("EverOS HYBRID profile requires embedding capability")
-        client = getattr(provider, "_client", None)
-        endpoint = getattr(client, "embeddings", None)
-        if endpoint is None:
-            raise RuntimeError("EverOS embedding provider has no observable endpoint")
         rerank_capability = rerank_accessor.get_rerank_capability()
         rerank_provider = rerank_capability.provider
+        if rerank_provider is not None:
+            raise RuntimeError(
+                "EverOS controlled profile requires rerank capability to stay disabled"
+            )
 
         llm_accessor._llm_client = _ObservedLLMClient(llm_client, self)
-        client.embeddings = _ObservedEmbeddingsEndpoint(endpoint, self)
-        if rerank_provider is not None:
-            rerank_accessor._capability = rerank_capability.__class__(
-                provider=_ObservedRerankProvider(rerank_provider, self)
-            )
 
     def _require_ready(self) -> None:
         """拒绝初始化前或 shutdown 后的业务命令。"""
@@ -436,11 +502,23 @@ class _WorkerEngine:
         return llm, embedding, rerank
 
     def discard_observations(self) -> None:
-        """失败 operation 不向父进程冒充成功 usage。"""
+        """保存失败 operation 已完成调用，供父进程 attempt ledger 使用。"""
 
+        self._failed_error_details = {
+            "llm_observations": list(self._llm_observations or []),
+            "embedding_observations": list(self._embedding_observations or []),
+            "rerank_observations": list(self._rerank_observations or []),
+        }
         self._llm_observations = None
         self._embedding_observations = None
         self._rerank_observations = None
+
+    def pop_failed_error_details(self) -> dict[str, Any] | None:
+        """返回并清除最近失败命令的公开调用观测。"""
+
+        details = self._failed_error_details
+        self._failed_error_details = None
+        return details
 
     def record_llm(self, observation: dict[str, int]) -> None:
         """记录一次真实 LLM response usage。"""
@@ -887,6 +965,9 @@ def main() -> int:
                     "error_type": exc.__class__.__name__,
                     "error": _sanitize_error(str(exc)),
                 }
+                error_details = engine.pop_failed_error_details()
+                if error_details is not None:
+                    response["error_details"] = error_details
             protocol.write(
                 json.dumps(response, ensure_ascii=False, sort_keys=True) + "\n"
             )

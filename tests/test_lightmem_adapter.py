@@ -65,6 +65,7 @@ from memory_benchmark.methods.registry import (
     MethodBuildContext,
     _build_lightmem_system,
     get_method_registration,
+    resolve_method_profile,
 )
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
@@ -163,21 +164,34 @@ def test_lightmem_config_manifest_includes_lifecycle_profile_and_adapter_version
 
 
 def test_lightmem_toml_profiles_declare_online_soft_lifecycle_explicitly() -> None:
-    """smoke/official_full TOML profile 都应显式声明 online_soft 与 hybrid messages_use。"""
+    """smoke/official-full 应从同一 method section 解析 lifecycle 与 role 参数。"""
 
-    toml_path = (
-        load_path_settings().project_root / "configs" / "methods" / "lightmem.toml"
+    project_root = load_path_settings().project_root
+    smoke_resolved = resolve_method_profile(
+        "lightmem",
+        "smoke",
+        project_root,
     )
+    official_resolved = resolve_method_profile(
+        "lightmem",
+        "official-full",
+        project_root,
+    )
+    smoke = smoke_resolved.config
+    official_full = official_resolved.config
 
-    smoke = load_typed_profile(toml_path, "smoke", LightMemConfig)
-    official_full = load_typed_profile(toml_path, "official_full", LightMemConfig)
-
+    assert isinstance(smoke, LightMemConfig)
+    assert isinstance(official_full, LightMemConfig)
+    assert smoke_resolved.section_name == official_resolved.section_name == "method"
     assert smoke.lifecycle_profile == "online_soft"
     assert official_full.lifecycle_profile == "online_soft"
     assert smoke.missing_timestamp_policy == "preserve_none"
     assert official_full.missing_timestamp_policy == "preserve_none"
     assert smoke.messages_use == "hybrid"
     assert official_full.messages_use == "hybrid"
+    assert smoke_resolved.method_config_manifest == (
+        official_resolved.method_config_manifest
+    )
 
 
 def test_lightmem_source_identity_covers_official_core_files() -> None:

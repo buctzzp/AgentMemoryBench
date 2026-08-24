@@ -10,6 +10,7 @@ embedding 通过 stub ``get_embedding`` 返回固定向量。
 from __future__ import annotations
 
 from dataclasses import asdict
+import json
 import math
 from pathlib import Path
 import tempfile
@@ -47,6 +48,11 @@ from memory_benchmark.methods.memoryos_adapter import (
     clean_memoryos_conversation_state,
 )
 from memory_benchmark.methods.registry import MethodBuildContext, _build_memoryos_system
+from memory_benchmark.observability.efficiency import (
+    EfficiencyCollector,
+    EfficiencyStage,
+    EmbeddingCallObservation,
+)
 from memory_benchmark.runners.event_stream import (
     GranularityAggregator,
     build_turn_events,
@@ -185,6 +191,83 @@ def _build_system(tmp_path: Path, **kwargs: object) -> MemoryOS:
         storage_root=tmp_path,
         **kwargs,
     )
+
+
+def test_product_embedding_observer_counts_real_encode_once_and_preserves_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """只记真实 cache-miss encode，并保留 build/retrieval 阶段。"""
+
+    class FakeTokenizer:
+        """模拟 SentenceTransformer 实际 tokenizer 截断。"""
+
+        def encode(self, text: str, **kwargs: object) -> list[int]:
+            """按空格返回确定 token ids。"""
+
+            values = list(range(len(text.split()) + 2))
+            max_length = kwargs.get("max_length")
+            if isinstance(max_length, int):
+                values = values[:max_length]
+            return values
+
+    class FakeSentenceTransformer:
+        """记录真实 encode 次数的本地模型替身。"""
+
+        def __init__(self) -> None:
+            """初始化 tokenizer 与截断长度。"""
+
+            self.tokenizer = FakeTokenizer()
+            self.max_seq_length = 4
+            self.calls: list[tuple[str, ...]] = []
+
+        def encode(self, texts: list[str], **kwargs: object) -> np.ndarray:
+            """返回固定向量并保留调用证据。"""
+
+            self.calls.append(tuple(texts))
+            return np.array([[0.1, 0.2, 0.3]], dtype="float32")
+
+    collector = EfficiencyCollector(run_id="memoryos-embedding-observer", enabled=True)
+    system = _build_system(tmp_path, efficiency_collector=collector)
+    classes = memoryos_adapter_module._load_memoryos_pypi_classes(load_path_settings())
+    utils_module = classes["utils"]
+    model = FakeSentenceTransformer()
+    model_name = system.config.embedding_model_name
+    model_key = json.dumps({"model_name": model_name}, sort_keys=True)
+    monkeypatch.setattr(utils_module, "_model_cache", {model_key: model})
+    monkeypatch.setattr(utils_module, "_embedding_cache", {})
+
+    with collector.conversation_scope("conv-build") as build_scope:
+        first = utils_module.get_embedding("one two three four five", model_name=model_name)
+        second = utils_module.get_embedding("one two three four five", model_name=model_name)
+        collector.record_memory_build_total_latency(latency_ms=1.0)
+
+    with collector.question_scope("conv-build", "q1") as query_scope:
+        with collector.operation_stage(EfficiencyStage.RETRIEVAL):
+            utils_module.get_embedding("new query", model_name=model_name)
+        collector.record_retrieval_result(
+            latency_ms=1.0,
+            injected_memory_context_tokens=0,
+        )
+        collector.record_answer_generation(latency_ms=1.0)
+
+    assert np.array_equal(first, second)
+    assert model.calls == [
+        ("one two three four five",),
+        ("new query",),
+    ]
+    build_embeddings = [
+        item for item in build_scope.records if isinstance(item, EmbeddingCallObservation)
+    ]
+    query_embeddings = [
+        item for item in query_scope.records if isinstance(item, EmbeddingCallObservation)
+    ]
+    assert [(item.stage, item.input_tokens) for item in build_embeddings] == [
+        (EfficiencyStage.MEMORY_BUILD, 4)
+    ]
+    assert [(item.stage, item.input_tokens) for item in query_embeddings] == [
+        (EfficiencyStage.RETRIEVAL, 4)
+    ]
 
 
 def _drive_native_ingest(

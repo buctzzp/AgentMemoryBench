@@ -492,6 +492,7 @@ def test_mem0_profiles_separate_smoke_and_official_full_parameters() -> None:
     assert smoke.max_workers == 1
     assert smoke.ingestion_chunk_size == 1
     assert smoke.infer is True
+    assert smoke.rerank is False
     assert smoke.api_timeout_seconds == 60.0
     assert smoke.api_max_retries == 8
 
@@ -504,6 +505,7 @@ def test_mem0_profiles_separate_smoke_and_official_full_parameters() -> None:
     assert full.max_workers == 10
     assert full.ingestion_chunk_size == 1
     assert full.infer is True
+    assert full.rerank is False
     assert full.api_timeout_seconds == 60.0
     assert full.api_max_retries == 8
 
@@ -531,6 +533,21 @@ def test_mem0_config_rejects_invalid_api_retry_settings() -> None:
             top_k=200,
             max_workers=1,
             api_max_retries=-1,
+        )
+
+
+def test_mem0_config_rejects_unobserved_reranker_before_runtime() -> None:
+    """reranker 未纳入观测前不得仅依赖默认 false 隐式关闭。"""
+
+    with pytest.raises(ConfigurationError, match="complete token/latency observation"):
+        Mem0Config(
+            extraction_model="gpt-4o-mini",
+            embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+            embedding_dimensions=384,
+            reader_model="gpt-4o-mini",
+            top_k=20,
+            max_workers=1,
+            rerank=True,
         )
 
 
@@ -1776,6 +1793,7 @@ def test_get_answer_searches_only_question_conversation_and_calls_reader() -> No
             "query": question.text,
             "filters": {"run_id": "conv-1"},
             "top_k": 20,
+            "rerank": False,
         }
     ]
     assert prediction.question_id == "conv-1:q1"
@@ -1818,6 +1836,7 @@ def test_mem0_retrieve_returns_answer_prompt() -> None:
             "query": question.text,
             "filters": {"run_id": "conv-1"},
             "top_k": config.top_k,
+            "rerank": False,
         }
     ]
     assert reader.calls == []

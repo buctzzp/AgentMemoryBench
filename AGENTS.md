@@ -36,13 +36,20 @@
   作为补充复现，不能混入主表；judge 仍走 benchmark 统一配置。参考 method 代码只借格式
   或构造作者校准，禁止暗中给主配置引入某 method 的专属优势。
 - **method 配置不再按 `native/unified` 强铺双轨**（2026-07-17 改判）：每个 method
-  一个 TOML，`smoke`/`official_full` 是跨五 benchmark 固定的主配置；作者确实跑过的
-  benchmark 才增加稀疏 `author_<benchmark>` section。CLI 只选择 section，不逐项传参或
-  暗中按 benchmark 自动切换。answer 配置选择的是填好全部变量、可直接调用 LLM 的完整
+  一个 TOML；2026-08-24 起 method 主算法参数进一步与 API runtime/execution scope 分离，
+  不再把通用 timeout/retry/workers 因 `smoke`/`official_full` 复制两份。作者确实跑过的
+  benchmark 才增加稀疏 `author_<benchmark>` section。CLI 只选择显式 profile，不逐项传算法
+  参数或暗中按 benchmark 自动切换。answer 配置选择的是填好全部变量、可直接调用 LLM 的完整
   builder，不是模板文件。现行政策见
   `docs/reference/method-toml-and-answer-builder-policy.md`；旧 `config_track` 只作历史产物
   兼容，迁移排在首个作者校准/真实效果 full run 前。对 retrieve 与答题耦合的 method
   （如 MemoryOS `get_response`），仍须忠实抽出 `formatted_memory` 与公开 builder 变量。
+- **Phase 1 controlled embedding**（2026-08-24 改判）：所有实际消费 embedding、且可经
+  upstream 公开 seam 无损替换的方法，主比较统一 `all-MiniLM-L6-v2`/384；manifest/resume
+  必须锁 provider/model/revision/dimension/normalization/instruction/distance/tokenizer，变更即
+  全量重建。不消费 embedding 的产品 profile 记 N/A，禁止为了“十家统一”填一个运行时未使用
+  的模型；product-default/author 配置只作显式补充校准。省略第三方 SDK 参数不等于显式 None，
+  必须沿到最终 product object/payload 才能裁定。
 - **API runtime 分 profile**（2026-07-27 用户改口，2026-08-21 模型更新）：新 `smoke` 与
   独立 `predict pilot` 使用限时免费 `opencodego/ox-alpha-free` 做流通、并发下界与调用拓扑
   验证；`pilot` 复用 TOML `[smoke]` 参数但保留一个完整 isolation、全部问题和独立 manifest/
@@ -136,7 +143,8 @@
   和纯观测插桩。每处改动必须在对应 workstream 记录文件、位置和理由，可回溯。
 - 私有数据（gold answers、evidence、judge labels）绝不可达 method。
 - 未经用户显式确认（预算、规模、run_id），不得调用真实 API；smoke 必须使用
-  官方 method 参数，成本控制只通过 conversation/question/turn 规模裁剪。
+  当前已裁定的固定 method 主配置（包括上文 controlled embedding 政策），不得
+  为了省钱临时改算法参数；成本控制只通过 conversation/question/turn 规模裁剪。
 - 不创建 method × benchmark 专用 runner；不合并不同 dataset variant 的 run。
 - `outputs/` 是实验资产，`outputs/memoryos-locomo-full-20260603/` 受保护；
   `data/`、`models/`、`outputs/`、`third_party/benchmarks/` 不入 git。

@@ -20,7 +20,7 @@
 | 本地路径 | `third_party/methods/letta` |
 | adapter | `src/memory_benchmark/methods/letta_adapter.py` |
 | worker | `src/memory_benchmark/methods/letta_worker.py` |
-| adapter version | `letta-sleeptime-product-v2` |
+| adapter version | `letta-sleeptime-product-v3` |
 
 active Letta Code `v0.30.1` 是完整 agent harness，与本项目要复现的 legacy MemGPT/Letta V1
 sleeptime-memory 产品链属于 `ALGORITHM_VARIANT`，不能静默替换。Phase 1 五 benchmark 在
@@ -34,7 +34,7 @@ product entry      direct SyncServer + managers + AgentLoop（不启动 HTTP hos
 agent              每个 conversation subject 一个 standalone sleeptime_agent
 core blocks        human(limit=10000) + summary(limit=1000)
 tools              memory_finish_edits / memory_insert / memory_replace / memory_rethink
-embedding          None
+embedding          framework controlled None（official SDK 省略该参数，不等于推荐 None）
 raw vector copy    disabled（skip_vector_storage=True）
 input granularity  session；session 内最多 10 message 一批；不跨 session
 readout            query-independent 全部 attached core blocks
@@ -62,8 +62,11 @@ stdio 依赖隔离层，算法仍直接调用同一产品内核，不是 HTTP/cl
 ```
 
 显式跳过 provider model sync，避免 prepare 阶段联网。subject 首次出现时创建
-`AgentType.sleeptime_agent`、两块 core memory 与唯一 initializer passage；
-`embedding_config=None` 且 initializer embedding 实测为 None。
+`AgentType.sleeptime_agent`、两块 core memory 与唯一 initializer passage。current local profile
+显式使用 `embedding_config=None`，initializer embedding 实测为 None。这不是 official SDK 的
+显式推荐值：SDK 创建 agent 时省略 embedding，由服务端默认 handle 决定；本项目因
+`skip_vector_storage=True` 且 readout 只读 core blocks，才将 no-embedding 锁成可复现的受控
+配置。它不参加 MiniLM controlled embedding 比较，资格为 N/A。
 
 ### 2.2 Ingest
 
@@ -129,8 +132,9 @@ odd tail 均原序保留，不补 placeholder。检索是 query-independent evol
   保持原样。尾部 place/time 原文保留，严格 marker 防止重复前缀；100k noise 的时间为 None。
 - **BEAM**：使用 benchmark canonical turn identity；10m orphan/mismatch 原样保留，不按 raw
   id 或位置重配；跨 batch 时间不排序。
-- **HaluMem**：session 顺序交错运行；private memory point 不进 build。extraction N/A，
-  current-state update 与 QA valid，memory-type composite N/A。
+- **HaluMem**：session 顺序交错运行；private memory point 不进 build。每个 session 在首次 build
+  前持久化 attached core-block baseline，全部 terminal build batch 后再次读取相同 agent 的完整
+  blocks，按稳定 block ID 只报告新增/改写后的非空 current value。
 
 完整异常矩阵、反例和 smoke 形状见
 [五格安全档案](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-five-benchmark-safety-dossier.md)。
@@ -141,10 +145,10 @@ odd tail 均原序保留，不补 placeholder。检索是 query-independent evol
 | --- | --- | --- |
 | 五格 Recall/Precision/F1@k | N/A | 演化 block 不能无损映射到 source gold unit |
 | LongMemEval NDCG / stable ranking | N/A | 全 block readout 不是 query rank |
-| HaluMem extraction | N/A | 无 product-level session-local delta |
+| HaluMem extraction | valid | attached core blocks 的稳定 ID before/after delta；不回显 raw session |
 | HaluMem update | valid | 官方评当前 readout 是否正确替换旧事实，不要求 source lineage |
 | HaluMem QA | valid | framework answer builder 消费当前 blocks |
-| HaluMem memory type | N/A | composite 依赖 extraction，block label 也不等于三类 gold type |
+| HaluMem memory type | valid | 复用 extraction/update 的 evaluator-private gold type；不要求 block label 仿造三类 taxonomy |
 
 逐题 evidence 固定为 semantic provenance N/A、granularity none、stable ranking N/A。该 evidence
 只否定 qrel/rank 指标；不能连坐否定 HaluMem current-state update。
@@ -156,8 +160,10 @@ block、archive 与 operation journal 身份，不含 absolute path、API key �
 
 每个 build batch 采用两阶段 journal：调用前写 pending，terminal/usage/steps 验收后写
 completed。completed replay 跳过产品写；pending 表示可能半写，禁止直接重放，必须先走
-conversation namespace clean retry。clean 会验证真实 owner 集，再删除 agent、独占 archive、
-orphan blocks并反查 subject 已消失；成功后才删 sidecar。
+conversation namespace clean retry。HaluMem 另有 session journal：在首个 batch 前原子保存
+输入摘要和 block baseline，全部 batch completed 后保存 delta 文本；因此“产品已完成、结果落盘前
+崩溃”的重放仍从原 baseline 与当前 blocks 恢复同一报告。clean 会验证真实 owner 集，再删除
+agent、独占 archive、orphan blocks并反查 subject 已消失；成功后才删 sidecar。
 
 正常 cleanup 关闭 worker/DB并删除 owned container，保留 labeled PostgreSQL volume 供同 run
 resume。named volume 是本机外部状态：跨机器只复制 outputs 不足以 resume；缺失时 identity
@@ -180,6 +186,15 @@ resume。named volume 是本机外部状态：跨机器只复制 outputs 不足�
 两 profile 的 model/provider/transport 与 wrapper/source hash 均进入 manifest/resume identity；
 分数不可直接混比。
 
+### 6.1 `embedding=None` 的适用边界
+
+official `ai-memory-sdk v0.2.0` 明确推荐默认 `skip_vector_storage=True`，因此 raw messages 不写
+archival passages；但它的 agent create 只是省略 embedding 参数，服务端可以补默认 embedding。
+framework 显式 None 是 local direct-core profile 的额外受控选择。当前核心学习由 sleeptime LLM
+tools 改写 blocks，retrieve 也不调用 passage search，所以它没有改变本 profile 的算法输出面。
+若以后启用 `skip_vector_storage=False` 或 archival semantic search，必须建立独立 variant、配置
+embedding、全量重建并重开 metric/observability；不得直接修改 current profile。
+
 ## 7. 当前验收状态
 
 零 API 产品链与 current 真实链都已通过。current
@@ -189,8 +204,10 @@ resume。named volume 是本机外部状态：跨机器只复制 outputs 不足�
 11 个 owned volume 与 superseded 19 个保留 volume 分账，owned container 残留为 0。公开和历史
 Letta artifact/log 对 API key、base URL、私有 workspace URL 的命中均为 0。
 
-五格 retrieval qrel/rank、HaluMem extraction/memory-type 继续诚实 N/A；HaluMem update/QA
-valid。冻结只证明 current product pipeline 与评测可达，不代表 smoke 分数具有排名意义。
+五格 retrieval qrel/rank 继续诚实 N/A；HaluMem extraction/update/QA/memory-type 均有 evaluator
+资格。原 v2 真实 smoke 只证明既有 product pipeline；`letta-sleeptime-product-v3` 的 session
+delta 已过零 API 强反例，但旧 artifact 不能重标，下一次真实运行必须新建 run 并全量重建。
+冻结与资格都不代表极小 smoke 分数具有排名意义。
 
 ## 8. 证据入口
 

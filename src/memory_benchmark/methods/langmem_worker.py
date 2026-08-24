@@ -23,8 +23,8 @@ import traceback
 from typing import Any
 
 
-LANGMEM_ADAPTER_VERSION = "langmem-background-product-v1"
-LANGMEM_WORKER_STATE_SCHEMA_VERSION = "langmem-worker-state-v1"
+LANGMEM_ADAPTER_VERSION = "langmem-background-product-v2"
+LANGMEM_WORKER_STATE_SCHEMA_VERSION = "langmem-worker-state-v2"
 _NAMESPACE_PREFIX = "memories"
 _MAX_NAMESPACE_ITEMS = 1_000_000
 _ALLOWED_ROLES = frozenset({"user", "assistant"})
@@ -195,6 +195,7 @@ def _validate_operation(value: Any) -> dict[str, Any]:
     """校验已完成 operation journal 记录。"""
 
     expected = {
+        "changed_memories",
         "changed_memory_keys",
         "embedding_observations",
         "input_digest",
@@ -208,11 +209,22 @@ def _validate_operation(value: Any) -> dict[str, Any]:
         isinstance(item, str) and item.strip() for item in changed
     ):
         raise ValueError("changed_memory_keys must be a list of non-blank strings")
+    changed_memories = value.get("changed_memories")
+    if not isinstance(changed_memories, list):
+        raise ValueError("changed_memories must be a list")
+    normalized_changed_memories = [
+        _validate_entry(item) for item in changed_memories
+    ]
+    if [item["key"] for item in normalized_changed_memories] != changed:
+        raise ValueError(
+            "changed_memories must match changed_memory_keys in product order"
+        )
     llm = value.get("llm_observations")
     embedding = value.get("embedding_observations")
     if not isinstance(llm, list) or not isinstance(embedding, list):
         raise ValueError("operation observations must be lists")
     return {
+        "changed_memories": normalized_changed_memories,
         "changed_memory_keys": list(changed),
         "embedding_observations": [
             _validate_embedding_observation(item) for item in embedding
@@ -314,6 +326,7 @@ class _WorkerEngine:
         self.loaded_namespaces: set[str] = set()
         self._llm_observations: list[dict[str, int]] | None = None
         self._embedding_observations: list[dict[str, Any]] | None = None
+        self._failed_error_details: dict[str, Any] | None = None
         self._observation_lock = threading.Lock()
         self._unscoped_embedding_calls = 0
         self._closed = False
@@ -321,6 +334,7 @@ class _WorkerEngine:
     async def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         """路由一条已解析 JSON-lines 请求。"""
 
+        self._failed_error_details = None
         command = _required_text(request.get("command"), "command")
         payload = request.get("payload")
         if not isinstance(payload, dict):
@@ -660,12 +674,37 @@ class _WorkerEngine:
             self._embedding_observations = None
         return llm, embedding
 
-    def _discard_observations(self) -> None:
-        """失败 operation 不向上层冒充成功 observation。"""
+    def _discard_observations(
+        self,
+    ) -> tuple[list[dict[str, int]], list[dict[str, Any]]]:
+        """弹出失败 operation 已完成的调用，供 attempt ledger 使用。"""
 
         with self._observation_lock:
+            llm = list(self._llm_observations or [])
+            embedding = list(self._embedding_observations or [])
             self._llm_observations = None
             self._embedding_observations = None
+        return llm, embedding
+
+    def _set_failed_observations(
+        self,
+        *,
+        llm: list[dict[str, int]],
+        embedding: list[dict[str, Any]],
+    ) -> None:
+        """保存当前命令失败前已拿到的公开 usage/latency。"""
+
+        self._failed_error_details = {
+            "llm_observations": [dict(item) for item in llm],
+            "embedding_observations": [dict(item) for item in embedding],
+        }
+
+    def pop_failed_error_details(self) -> dict[str, Any] | None:
+        """返回并清除最近一次失败命令的结构化观测。"""
+
+        details = self._failed_error_details
+        self._failed_error_details = None
+        return details
 
     def _record_llm_observation(self, observation: dict[str, int]) -> None:
         """追加一次 exact LLM usage；非业务 scope 调用视为错误。"""
@@ -705,6 +744,8 @@ class _WorkerEngine:
             return {**deepcopy(completed), **rehydration, "reused_operation": True}
 
         before_entries = await self._snapshot_entries(namespace_id)
+        llm_observations: list[dict[str, int]] = []
+        embedding_observations: list[dict[str, Any]] = []
         self._begin_observations()
         try:
             changed = await self.manager.ainvoke(
@@ -723,7 +764,21 @@ class _WorkerEngine:
                     raise RuntimeError("LangMem manager changed-memory item is malformed")
                 changed_keys.append(_required_text(item.get("key"), "changed.key"))
             entries = await self._snapshot_entries(namespace_id)
+            entries_by_key = {entry["key"]: entry for entry in entries}
+            if len(set(changed_keys)) != len(changed_keys):
+                raise RuntimeError("LangMem manager returned duplicate changed-memory keys")
+            missing_changed_keys = [
+                key for key in changed_keys if key not in entries_by_key
+            ]
+            if missing_changed_keys:
+                raise RuntimeError(
+                    "LangMem changed-memory keys are absent from the current product "
+                    f"store: {missing_changed_keys}"
+                )
             operation = {
+                "changed_memories": [
+                    deepcopy(entries_by_key[key]) for key in changed_keys
+                ],
                 "changed_memory_keys": changed_keys,
                 "embedding_observations": embedding_observations,
                 "input_digest": digest,
@@ -741,7 +796,11 @@ class _WorkerEngine:
             _validate_state(next_state, expected_namespace_id=namespace_id)
             _atomic_write_json(self._state_path(namespace_id), next_state)
         except BaseException:
-            self._discard_observations()
+            buffered_llm, buffered_embedding = self._discard_observations()
+            self._set_failed_observations(
+                llm=llm_observations or buffered_llm,
+                embedding=embedding_observations or buffered_embedding,
+            )
             await self._replace_entries(namespace_id, before_entries)
             raise
         return {**deepcopy(operation), **rehydration, "reused_operation": False}
@@ -753,20 +812,29 @@ class _WorkerEngine:
         query = _required_text(payload.get("query"), "query")
         limit = _required_int(payload.get("limit"), "limit", minimum=1)
         rehydration = await self._ensure_namespace_loaded(namespace_id)
+        llm_observations: list[dict[str, int]] = []
+        embedding_observations: list[dict[str, Any]] = []
         self._begin_observations()
         try:
             started_ns = perf_counter_ns()
             items = await self.manager.asearch(
                 query=query,
                 limit=limit,
-                config=self._config_for_namespace(namespace_id),
+                config={
+                    **self._config_for_namespace(namespace_id),
+                    "callbacks": [self.usage_callback],
+                },
             )
             latency_ms = max(0.0, (perf_counter_ns() - started_ns) / 1_000_000)
             llm_observations, embedding_observations = self._finish_observations()
             if llm_observations:
                 raise RuntimeError("LangMem product asearch unexpectedly called an LLM")
         except BaseException:
-            self._discard_observations()
+            buffered_llm, buffered_embedding = self._discard_observations()
+            self._set_failed_observations(
+                llm=llm_observations or buffered_llm,
+                embedding=embedding_observations or buffered_embedding,
+            )
             raise
         normalized_items: list[dict[str, Any]] = []
         for item in items:
@@ -903,6 +971,9 @@ def main() -> int:
                     "error_type": exc.__class__.__name__,
                     "error": _sanitize_error(str(exc)),
                 }
+                error_details = engine.pop_failed_error_details()
+                if error_details is not None:
+                    response["error_details"] = error_details
             protocol.write(json.dumps(response, ensure_ascii=False, sort_keys=True) + "\n")
             protocol.flush()
             if should_stop:

@@ -7,7 +7,7 @@ API key、method 实例、benchmark 白名单或运行状态。
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 import hashlib
 from pathlib import Path
 from typing import Any
@@ -15,13 +15,15 @@ from typing import Any
 from memory_benchmark.config import (
     OpenAISettings,
     PathSettings,
+    RunComposition,
     load_path_settings,
+    load_run_composition,
 )
 from memory_benchmark.config.profiles import (
     FRAMEWORK_PROFILE_KEYS,
+    ProfileSection,
     build_typed_profile,
     load_profile_section,
-    load_typed_profile,
 )
 from memory_benchmark.core import (
     ConfigurationError,
@@ -46,7 +48,6 @@ from .run_identity import BuildIdentityDeclaration, EmbeddingIdentity
 from .everos_adapter import (
     EVEROS_EMBEDDING_MODEL_ID,
     EVEROS_LLM_MODEL_ID,
-    EVEROS_RERANKER_MODEL_ID,
     EverOS,
     EverOSConfig,
     build_everos_source_identity,
@@ -170,6 +171,8 @@ class ResolvedMethodProfile:
     section_name: str
     answer_builder: str
     config: Any
+    composition: RunComposition
+    method_config_manifest: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         """拒绝空白 builder 和与 section 不一致的强类型配置。"""
@@ -186,6 +189,17 @@ class ResolvedMethodProfile:
             raise ConfigurationError(
                 "Resolved method profile config.profile_name must equal its TOML section: "
                 f"{config_profile_name!r} != {self.section_name!r}"
+            )
+        if not isinstance(self.composition, RunComposition):
+            raise ConfigurationError(
+                "Resolved method profile composition must be RunComposition"
+            )
+        if self.method_config_manifest is not None and not isinstance(
+            self.method_config_manifest,
+            dict,
+        ):
+            raise ConfigurationError(
+                "Resolved method profile method_config_manifest must be a dict or None"
             )
 
 
@@ -266,6 +280,15 @@ class MethodRegistration:
         Callable[[dict[str, Any]], BuildIdentityDeclaration] | None
     ) = None
     variant_validator: Callable[[str, str], None] | None = None
+    max_parallel_workers: int = 10
+
+    def __post_init__(self) -> None:
+        """校验 registration 的执行能力声明。"""
+
+        if type(self.max_parallel_workers) is not int or self.max_parallel_workers < 1:
+            raise ConfigurationError(
+                "MethodRegistration.max_parallel_workers must be a positive integer"
+            )
 
     @property
     def profile_names(self) -> frozenset[str]:
@@ -385,6 +408,7 @@ def _build_letta_system(context: MethodBuildContext) -> MemoryProvider:
         storage_root=context.storage_root,
         openai_settings=context.openai_settings,
         efficiency_collector=context.efficiency_collector,
+        session_memory_report=context.benchmark_name == "halumem",
         benchmark_name=context.benchmark_name,
         diagnostic_log_path=context.diagnostic_log_path,
     )
@@ -403,6 +427,7 @@ def _build_langmem_system(context: MethodBuildContext) -> MemoryProvider:
         storage_root=context.storage_root,
         openai_settings=context.openai_settings,
         efficiency_collector=context.efficiency_collector,
+        session_memory_report=context.benchmark_name == "halumem",
         benchmark_name=context.benchmark_name,
         diagnostic_log_path=context.diagnostic_log_path,
     )
@@ -469,7 +494,7 @@ def _everos_max_workers(config: Any) -> int:
 def _everos_efficiency_model_inventory(
     config: Any,
 ) -> tuple[ModelDescriptor, ...]:
-    """返回 EverOS build LLM、embedding 与声明性 reranker 身份。"""
+    """返回 EverOS build LLM 与实际消费的本地 embedding 身份。"""
 
     if not isinstance(config, EverOSConfig):
         raise ConfigurationError(
@@ -487,16 +512,10 @@ def _everos_efficiency_model_inventory(
             model_id=EVEROS_EMBEDDING_MODEL_ID,
             model_name=config.embedding_model,
             model_role="embedding",
-            execution_mode="api",
+            execution_mode="local",
+            revision_or_path=config.embedding_model,
             embedding_dimension=config.embedding_dimension,
             tokenizer_name=config.embedding_model,
-        ),
-        ModelDescriptor(
-            model_id=EVEROS_RERANKER_MODEL_ID,
-            model_name=config.rerank_model,
-            model_role="reranker",
-            execution_mode="api",
-            tokenizer_name=config.rerank_model,
         ),
     )
 
@@ -520,7 +539,8 @@ def _everos_efficiency_instrumentation_identity(
         "llm_tokenizer": config.llm_model,
         "embedding_tokenizer": config.embedding_model,
         "method_source_sha256": source_identity.get("source_sha256"),
-        "exact_api_usage": "product-response-proxy-v1",
+        "exact_api_usage": "llm-product-response-proxy-v1",
+        "embedding_observation": "local-tokenizer+wall-clock-v1",
         "async_scope_bridge": "exact-drain-buffered-replay-v1",
     }
 
@@ -558,30 +578,28 @@ def _clean_everos_failed_ingest_state(
 def _everos_build_identity(
     config_manifest: dict[str, Any],
 ) -> BuildIdentityDeclaration:
-    """解析 EverOS Qwen embedding、OpenAI-compatible transport 与 LanceDB build。"""
+    """解析 EverOS controlled MiniLM、本地 provider 与 LanceDB build。"""
 
     provider = _manifest_text(config_manifest, "embedding_provider")
     model = _manifest_text(config_manifest, "embedding_model")
     dimension = _manifest_dimension(config_manifest, "embedding_dimension")
-    if provider in {
-        "deepinfra-openai-compatible",
-        "openrouter-openai-compatible",
-    } and model == "Qwen/Qwen3-Embedding-4B" and dimension == 1024:
+    model_key = "" if model is None else model.strip().split("/")[-1].lower()
+    if (
+        provider == "sentence-transformers-local"
+        and model_key == "all-minilm-l6-v2"
+        and dimension == 384
+    ):
         return BuildIdentityDeclaration(
             implementation_variant="product",
-            embedding_profile=(
-                "product_default_v1"
-                if provider == "deepinfra-openai-compatible"
-                else "product_canonical_required_config_v1"
-            ),
+            embedding_profile="controlled_embedding_v1",
             historical_controlled_build_equivalent_to_current_main=False,
             embedding=EmbeddingIdentity(
                 provider=provider,
                 model=model,
                 dimension=dimension,
                 revision=None,
-                revision_status="provider_managed_unpinned",
-                normalization=None,
+                revision_status="local_unpinned",
+                normalization="model-internal-l2",
                 instruction=None,
                 distance="lancedb-l2",
                 identity_status="declared",
@@ -947,6 +965,7 @@ def _build_memos_system(context: MethodBuildContext) -> MemoryProvider:
         storage_root=context.storage_root,
         openai_settings=context.openai_settings,
         efficiency_collector=context.efficiency_collector,
+        session_memory_report=context.benchmark_name == "halumem",
         benchmark_name=context.benchmark_name,
     )
 
@@ -1615,7 +1634,8 @@ def _memoryos_efficiency_instrumentation_identity(
         "wrapper_path": wrapper_relative_path.as_posix(),
         "wrapper_sha256": _sha256_file(path_settings.project_root / wrapper_relative_path),
         "llm_tokenizer": config.llm_model,
-        "embedding_tokenizer": None,
+        "embedding_tokenizer": config.embedding_model_name,
+        "embedding_observer": "vendored-get-embedding-success-hook-v1",
         "method_source_sha256": source_identity.get("source_sha256"),
     }
 
@@ -1677,18 +1697,28 @@ def _pending_build_identity(
 
 
 def _letta_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityDeclaration:
-    """声明 Letta 主产品轨没有 embedding；v1 schema 暂以 pending 表达 N/A。
-
-    track identity v1 尚无 ``embedding not_applicable`` 枚举。这里保留所有
-    concrete embedding 字段为 null，拒绝用虚构模型或维度填空；稳定 manifest
-    同时由 Letta config 的 ``embedding_provider=null`` 明示产品事实。
-    """
+    """声明 Letta current core-block profile 的 embedding 不适用。"""
 
     if config_manifest.get("embedding_provider") is not None:
         raise ConfigurationError(
             "Letta sleeptime core-block profile must not declare an embedding provider"
         )
-    return _pending_build_identity(provider=None, model=None, dimension=None)
+    return BuildIdentityDeclaration(
+        implementation_variant="product",
+        embedding_profile="not_applicable_v1",
+        historical_controlled_build_equivalent_to_current_main=False,
+        embedding=EmbeddingIdentity(
+            provider=None,
+            model=None,
+            dimension=None,
+            revision=None,
+            revision_status="not_applicable",
+            normalization=None,
+            instruction=None,
+            distance=None,
+            identity_status="not_applicable",
+        ),
+    )
 
 
 def _langmem_build_identity(
@@ -1917,11 +1947,10 @@ def _simplemem_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityD
 
 
 _MAIN_PROFILE_SECTIONS = (
-    ("smoke", "smoke"),
-    ("pilot", "smoke"),
-    ("official-full", "official_full"),
+    ("smoke", "method"),
+    ("pilot", "method"),
+    ("official-full", "method"),
 )
-
 
 _REGISTRATIONS = {
     "amem": MethodRegistration(
@@ -2147,6 +2176,7 @@ _REGISTRATIONS = {
         supports_shared_instance_parallelism=False,
         clean_failed_ingest_state=_clean_letta_failed_ingest_state,
         build_identity_resolver=_letta_build_identity,
+        max_parallel_workers=1,
     ),
     "langmem": MethodRegistration(
         name="langmem",
@@ -2214,6 +2244,7 @@ _REGISTRATIONS = {
         supports_shared_instance_parallelism=False,
         clean_failed_ingest_state=_clean_memos_failed_ingest_state,
         build_identity_resolver=_memos_build_identity,
+        max_parallel_workers=1,
     ),
     "simplemem": MethodRegistration(
         name="simplemem",
@@ -2330,6 +2361,112 @@ def resolve_registered_build_identity(
     return registration.build_identity_resolver(config_manifest)
 
 
+def _legacy_main_section_name(profile_name: str) -> str | None:
+    """返回单一 `[method]` 迁移前的主 section 名；非主 profile 返回 None。"""
+
+    normalized = profile_name.strip().lower()
+    if normalized in {"smoke", "pilot"}:
+        return "smoke"
+    if normalized in {"official-full", "official_full"}:
+        return "official_full"
+    return None
+
+
+def _load_registered_method_section(
+    *,
+    registration: MethodRegistration,
+    profile_name: str,
+    profile_path: Path,
+) -> tuple[ProfileSection, bool]:
+    """读取 current 单一 section，或严格回退到迁移前 legacy section。
+
+    返回值第二项只在实际读取 `[method]` 时为 True。回退仅用于旧 fixture/旧 checkout
+    兼容；current TOML 一旦存在 `[method]` 就不会再读取旧双 section。
+    """
+
+    requested = registration.resolve_profile_section(profile_name)
+    try:
+        section = load_profile_section(profile_path, requested)
+        return section, requested == "method"
+    except ConfigurationError as exc:
+        if requested != "method" or "Missing profile section 'method'" not in str(exc):
+            raise
+        legacy_name = _legacy_main_section_name(profile_name)
+        if legacy_name is None:
+            raise
+        return load_profile_section(profile_path, legacy_name), False
+
+
+def _framework_owned_config_bindings(
+    *,
+    config_type: type[Any],
+    composition: RunComposition,
+) -> dict[str, Any]:
+    """为 legacy adapter dataclass 注入 runtime/execution 所有字段。
+
+    method TOML 不再重复这些值；在十家 adapter dataclass 完成逐家 schema 瘦身前，
+    组合根仍以显式字段名做兼容绑定。只注入目标 dataclass 真实声明的字段，未知字段
+    继续由 `build_typed_profile` fail-fast。
+    """
+
+    declared = {field.name for field in fields(config_type) if field.init}
+    runtime = composition.runtime
+    execution = composition.execution
+    candidates: dict[str, Any] = {
+        "llm_model": runtime.model,
+        "extraction_model": runtime.model,
+        "reader_model": runtime.model,
+        "api_timeout_seconds": runtime.timeout_seconds,
+        "api_max_retries": runtime.max_retries,
+        "api_retry_wait_seconds": runtime.retry_wait_seconds,
+        "api_retry_backoff_multiplier": runtime.retry_backoff_multiplier,
+        "api_retry_max_wait_seconds": runtime.retry_max_wait_seconds,
+        "structured_output_mode": runtime.structured_output_mode,
+        "max_workers": composition.resolved_max_workers,
+        "worker_request_timeout_seconds": execution.worker_request_timeout_seconds,
+        "drain_timeout_seconds": execution.drain_timeout_seconds,
+        "task_timeout_seconds": execution.task_timeout_seconds,
+        "postgres_startup_timeout_seconds": (
+            execution.service_startup_timeout_seconds
+        ),
+        "suppress_official_stdout": execution.suppress_method_stdout,
+    }
+    return {key: value for key, value in candidates.items() if key in declared}
+
+
+def _build_current_method_config(
+    *,
+    section: ProfileSection,
+    registration: MethodRegistration,
+    composition: RunComposition,
+) -> tuple[Any, dict[str, Any]]:
+    """把单一 method 参数与 framework bindings 组合成现有 adapter config。"""
+
+    bindings = _framework_owned_config_bindings(
+        config_type=registration.config_type,
+        composition=composition,
+    )
+    overlap = sorted(set(section.values).intersection(bindings))
+    if overlap:
+        raise ConfigurationError(
+            "Single-source method section must not redeclare framework-owned key(s): "
+            + ", ".join(overlap)
+        )
+    merged = ProfileSection(
+        source_path=section.source_path,
+        name=section.name,
+        values={**section.values, **bindings},
+    )
+    config = build_typed_profile(merged, registration.config_type)
+    manifest = config.to_manifest()
+    if not isinstance(manifest, dict):
+        raise ConfigurationError("method config to_manifest() must return a dict")
+    method_manifest = {
+        key: value for key, value in manifest.items() if key not in bindings
+    }
+    return config, method_manifest
+
+
 def load_method_profile(
     method_name: str,
     profile_name: str,
@@ -2348,12 +2485,29 @@ def load_method_profile(
 
     registration = get_method_registration(method_name)
     root = load_path_settings(project_root).project_root
-    section_name = registration.resolve_profile_section(profile_name)
-    return load_typed_profile(
-        root / registration.profile_relative_path,
-        section_name,
-        registration.config_type,
+    profile_path = root / registration.profile_relative_path
+    section, current_single_source = _load_registered_method_section(
+        registration=registration,
+        profile_name=profile_name,
+        profile_path=profile_path,
     )
+    if not current_single_source:
+        return build_typed_profile(
+            section,
+            registration.config_type,
+            reserved_keys=FRAMEWORK_PROFILE_KEYS,
+        )
+    composition = load_run_composition(
+        project_root=root,
+        profile_name=profile_name,
+        method_max_workers_cap=registration.max_parallel_workers,
+    )
+    config, _ = _build_current_method_config(
+        section=section,
+        registration=registration,
+        composition=composition,
+    )
+    return config
 
 
 def resolve_method_profile(
@@ -2370,12 +2524,17 @@ def resolve_method_profile(
 
     registration = get_method_registration(method_name)
     root = load_path_settings(project_root).project_root
-    section_name = registration.resolve_profile_section(profile_name)
-    section = load_profile_section(
-        root / registration.profile_relative_path,
-        section_name,
+    profile_path = root / registration.profile_relative_path
+    section, current_single_source = _load_registered_method_section(
+        registration=registration,
+        profile_name=profile_name,
+        profile_path=profile_path,
     )
-    answer_builder = section.values.get("answer_builder")
+    section_name = section.name
+    answer_builder = section.values.get(
+        "answer_builder",
+        "benchmark" if current_single_source else None,
+    )
     if type(answer_builder) is not str or not answer_builder.strip():
         raise ConfigurationError(
             f"Profile '{section_name}' in {section.source_path} must declare a "
@@ -2385,16 +2544,36 @@ def resolve_method_profile(
         raise ConfigurationError(
             f"Profile '{section_name}' answer_builder must not contain outer whitespace"
         )
-    config = build_typed_profile(
-        section,
-        registration.config_type,
-        reserved_keys=FRAMEWORK_PROFILE_KEYS,
+    composition = load_run_composition(
+        project_root=root,
+        profile_name=profile_name,
+        method_max_workers_cap=registration.max_parallel_workers,
     )
+    method_config_manifest: dict[str, Any] | None = None
+    if current_single_source:
+        if "answer_builder" in section.values:
+            raise ConfigurationError(
+                "Main [method] section must not declare answer_builder; benchmark "
+                "evaluation owns the main builder"
+            )
+        config, method_config_manifest = _build_current_method_config(
+            section=section,
+            registration=registration,
+            composition=composition,
+        )
+    else:
+        config = build_typed_profile(
+            section,
+            registration.config_type,
+            reserved_keys=FRAMEWORK_PROFILE_KEYS,
+        )
     return ResolvedMethodProfile(
         public_name=profile_name,
         section_name=section_name,
         answer_builder=answer_builder,
         config=config,
+        composition=composition,
+        method_config_manifest=method_config_manifest,
     )
 
 

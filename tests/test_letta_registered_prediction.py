@@ -249,7 +249,7 @@ def test_letta_registered_prediction_runs_five_benchmarks_through_generic_runner
     assert manifest["method"]["provenance_granularity"] == "none"
     assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"
     config = manifest["method"]["config"]
-    assert config["adapter_version"] == "letta-sleeptime-product-v2"
+    assert config["adapter_version"] == "letta-sleeptime-product-v3"
     assert config["product_contract"] == "ai-memory-sdk-v0.2.0"
     assert config["embedding_provider"] is None
     assert config["build_llm_response_contract"] == (
@@ -269,10 +269,10 @@ def test_letta_registered_prediction_runs_five_benchmarks_through_generic_runner
     assert "evidence" not in public_questions[0]
 
 
-def test_letta_halumem_operation_runner_keeps_update_and_qa_but_extraction_na(
+def test_letta_halumem_operation_runner_reports_core_block_delta_contract(
     tmp_path: Path,
 ) -> None:
-    """真实 operation runner 应保留 current-state update/QA，并让 extraction N/A。"""
+    """真实 operation runner 应产生可评 extraction report，并保留 update/QA。"""
 
     _RegisteredLetta.instances.clear()
     _RegisteredFakeRuntime.instances.clear()
@@ -296,6 +296,7 @@ def test_letta_halumem_operation_runner_keeps_update_and_qa_but_extraction_na(
             provider="opencodego",
             judge_transport="chat_completions",
         ),
+        session_memory_report=True,
         benchmark_name="halumem",
     )
     question = Question(
@@ -375,9 +376,10 @@ def test_letta_halumem_operation_runner_keeps_update_and_qa_but_extraction_na(
     assert summary.completed_questions == 1
     assert provider.prepare_calls == 1
     assert len(runtime.ingest_calls) == 1
-    assert len(runtime.read_calls) == 2
+    assert len(runtime.read_calls) == 4
     assert runtime.close_calls == 1
-    assert session_reports[0]["status"] == "n/a"
+    assert session_reports[0]["status"] == "ok"
+    assert session_reports[0]["memories"] == []
     assert update_probes[0]["memories_from_system"] == [
         '<memory_block label="human" description="human details">Human memory.</memory_block>',
         '<memory_block label="summary" description="running summary">Summary memory.</memory_block>',
@@ -402,7 +404,7 @@ def _install_offline_stack(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: OpenAISettings(
+        lambda project_root, api_provider=None, expected_model=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
             model="ox-alpha-free",

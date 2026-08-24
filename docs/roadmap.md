@@ -1,6 +1,6 @@
 # 项目路线图
 
-更新日期：2026-08-21。本文件是唯一方向文档：Phase 1 目标、workstream 索引与
+更新日期：2026-08-24。本文件是唯一方向文档：Phase 1 目标、workstream 索引与
 全局约束。逐任务状态见各 workstream README；2026-06 的历史阶段记录（Phase E-S）
 已归档到 `archive/status/2026-07-04-current-roadmap.md` 与
 `archive/status/2026-07-04-task-ledger.md`。
@@ -61,7 +61,10 @@ LangMem 以 async background manager 产品链完成 20 份真实 run、47 quest
 W1/W2 与 artifact/效率/隐私/state 机器门，冻结为 `method-frozen-v1`。EverOS 以 v1.2.3
 official lifespan typed-product 链完成 18 份 fresh v6 run、35 question、全部可行 variant 的
 W1/W2 与 artifact/效率/隐私/state 门，冻结为 `method-frozen-v1`；MemBench 100k 因 source time
-缺失且产品会把 timestamp 写入 Episode，诚实 unsupported。旧
+缺失且产品会把 timestamp 写入 Episode，诚实 unsupported。2026-08-24 EverOS 主 build identity
+升级为 v7 controlled MiniLM-384；旧 v6 证据保留为历史冻结资产，v7 已过 patch 重放、本地模型、
+schema 与 official lifespan 零 API门，但须在 ws05 M5 后用新 run-id 重建，不能借旧 smoke
+续跑或重标。旧
 Letta/Graphiti 403 run 只保留作失败阶段证据，不冒充可 resume smoke。
 效果参数、作者 builder、真实 resume 与 full 成本 pilot 仍待后续。真实 API
 一律继续由用户确认预算、规模与 run_id。首批 25 格完成后已做一次有边界的
@@ -84,6 +87,11 @@ provider v3 + 通用 prediction，registry 已完成责任审计。M1 全程零�
 stdout/stderr 与 JSON-lines worker stderr 脱敏落盘；该批当时的无 API 全量为 2243 passed，
 后续 legacy 退役与契约门增删后的 current baseline 以上文 2200 passed 为准。
 
+2026-08-24 用户在扩大 ws05 pilot 前再次暂停真实 API，先治理配置所有权、controlled embedding、
+模型调用/失败成本观测与 HaluMem session extraction 资格。当前施工入口为
+[ws05 runtime 配置与观测支线](workstreams/ws05-experiment-reporting/branches/runtime-config-and-observability/README.md)；
+旧“Mem0 + MemoryOS 第一扩大波”不再是恢复动作。
+
 ## Workstream 索引
 
 | ID | 名称 | 状态 | 优先级 | 说明 |
@@ -99,7 +107,7 @@ stdout/stderr 与 JSON-lines worker stderr 脱敏落盘；该批当时的无 API
 | [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | done | P0 | 5×10 smoke matrix 与 A-Mem B5/GRID 精确 closure 均关闭；无在途施工 |
 | [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | done | P0 | M1-A→E 已关闭：依赖方向、TOML profile、worker transport、prediction 拆责与 legacy 退役 |
 | [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | done | P0 | isolated heartbeat 与第三方输出治理已关闭；完整诊断进 method.log |
-| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | in-progress | P0 | ox-alpha-free 兼容/效率资格门与受控矩阵 pilot；正式 full 仍待预算批准 |
+| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | in-progress | P0 | pilot 暂停；先关闭配置/embedding/效率/HaluMem extraction 前置门，正式 full 仍待预算批准 |
 | [ws06](workstreams/ws06-tests-restructure/README.md) | tests-restructure | open | P2 | tests 分组重组、大文件拆分、过时断言排查 |
 
 新 workstream 的建立与命名规则见 `AGENTS.md` "文档规则"。
@@ -108,12 +116,13 @@ stdout/stderr 与 JSON-lines worker stderr 脱敏落盘；该批当时的无 API
 
 - **预算强约束**：全量实验必须先有成本估算表并经导师/用户批准；当前阶段一切
   真实 run 均为极小规模。任何真实 run 需用户确认预算、规模与 run_id。
-- smoke 使用官方 method 参数；成本控制只通过数据规模裁剪，不降 `top_k` 等参数。
-  超参数一律用 method 官方【repo/产品默认】（非 benchmark 专用调参），跨全部
-  benchmark 同一套、不 per-benchmark 调优；embedding 同样按每个 method 的 vendored
-  product default 锁 provider/model/revision/dimension/normalization/instruction/distance，shared
-  backbone 只作兼容 method 的 controlled 补充轨；**paper 声明 ≠ repo 默认时优先 repo
-  默认 + 显式记录差异**（政策全文与理由见
+- smoke 使用同一 method 主参数；成本控制只通过数据规模裁剪，不降 `top_k` 等算法参数。
+  超参数采用作者公开产品接口的固定主配置，跨全部 benchmark 同一套、不 per-benchmark 调优；
+  作者确有一手 benchmark 配置时才另建稀疏校准。embedding 的 Phase 1 主比较自 2026-08-24
+  改为：所有实际消费 embedding 且公开接口兼容的方法统一 MiniLM-384 controlled identity，
+  完整锁 provider/model/revision/dimension/normalization/instruction/distance；不消费 embedding
+  的 profile 记 N/A，不能为“十家同名”伪造配置。product default 保留为补充校准；
+  **paper 声明 ≠ repo 默认时仍须显式记录差异**（政策全文与理由见
   `workstreams/ws02.5-method-interface-audit/README.md` "超参数政策"）。
 - 不合并不同 dataset variant 的 run；不创建 method × benchmark 专用 runner。
 - 真实费用按实际 API 服务商（ohmygpt）价格离线计算，不绑定 OpenAI 官方价。

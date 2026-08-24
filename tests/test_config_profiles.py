@@ -26,6 +26,7 @@ from memory_benchmark.config.settings import (
 from memory_benchmark.core import ConfigurationError
 from memory_benchmark.methods.mem0_adapter import Mem0Config
 from memory_benchmark.methods.memoryos_adapter import MemoryOSPaperConfig
+from memory_benchmark.methods.registry import resolve_method_profile
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -513,15 +514,19 @@ def test_formal_and_author_profiles_use_primary_provider(profile_name: str) -> N
 
 
 def test_load_typed_profile_builds_memoryos_official_full_profile_from_project_toml() -> None:
-    """项目内的 MemoryOS official_full profile 应加载为固定论文参数。"""
+    """公开 official-full 应把单一 method 参数与正式 runtime/execution 组合。"""
 
-    config = load_typed_profile(
-        PROJECT_ROOT / "configs" / "methods" / "memoryos.toml",
-        "official_full",
-        MemoryOSPaperConfig,
+    resolved = resolve_method_profile(
+        "memoryos",
+        "official-full",
+        PROJECT_ROOT,
     )
+    config = resolved.config
 
-    assert config.profile_name == "official_full"
+    assert isinstance(config, MemoryOSPaperConfig)
+    assert resolved.public_name == "official-full"
+    assert resolved.section_name == "method"
+    assert config.profile_name == "method"
     assert config.short_term_capacity == 10
     assert config.mid_term_capacity == 2000
     assert config.top_k_sessions == 5
@@ -531,29 +536,30 @@ def test_load_typed_profile_builds_memoryos_official_full_profile_from_project_t
 
 
 def test_load_typed_profile_builds_matching_memoryos_smoke_and_official_profiles() -> None:
-    """MemoryOS 两 profile 只允许 budget LLM、并发与 profile 身份不同。"""
+    """MemoryOS 两公开 profile 共享 method 参数，只组合不同 runtime/execution。"""
 
-    toml_path = PROJECT_ROOT / "configs" / "methods" / "memoryos.toml"
-    smoke = load_typed_profile(toml_path, "smoke", MemoryOSPaperConfig)
-    official_full = load_typed_profile(toml_path, "official_full", MemoryOSPaperConfig)
+    smoke_resolved = resolve_method_profile("memoryos", "smoke", PROJECT_ROOT)
+    official_resolved = resolve_method_profile(
+        "memoryos",
+        "official-full",
+        PROJECT_ROOT,
+    )
+    smoke = smoke_resolved.config
+    official_full = official_resolved.config
 
-    assert smoke.profile_name == "smoke"
-    assert official_full.profile_name == "official_full"
+    assert isinstance(smoke, MemoryOSPaperConfig)
+    assert isinstance(official_full, MemoryOSPaperConfig)
+    assert smoke_resolved.section_name == official_resolved.section_name == "method"
+    assert smoke.profile_name == official_full.profile_name == "method"
     assert smoke.llm_model == "ox-alpha-free"
     assert official_full.llm_model == "gpt-4o-mini"
     assert smoke.embedding_model_name == "sentence-transformers/all-MiniLM-L6-v2"
     assert official_full.embedding_model_name == "sentence-transformers/all-MiniLM-L6-v2"
     assert smoke.longmemeval_prompt_profile == "memoryos-pypi-retrieve-v1"
     assert official_full.longmemeval_prompt_profile == "memoryos-pypi-retrieve-v1"
-    assert {
-        key: value
-        for key, value in smoke.to_manifest().items()
-        if key not in {"profile_name", "max_workers", "llm_model"}
-    } == {
-        key: value
-        for key, value in official_full.to_manifest().items()
-        if key not in {"profile_name", "max_workers", "llm_model"}
-    }
+    assert smoke_resolved.method_config_manifest == (
+        official_resolved.method_config_manifest
+    )
 
 
 def test_load_path_settings_exposes_phase_e_project_roots() -> None:

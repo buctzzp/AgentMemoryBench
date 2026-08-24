@@ -254,6 +254,9 @@ def test_prediction_manifest_records_enabled_observability_identity(tmp_path) ->
 
     assert manifest["efficiency_observability"] == {
         "enabled": True,
+        "failed_attempt_ledger_contract": (
+            "append-only-caught-scope-completed-calls-v1"
+        ),
         "model_inventory": [descriptor.to_dict() for descriptor in _inventory()],
         "instrumentation_identity": {
             "collector_schema": 1,

@@ -228,12 +228,13 @@ def test_everos_registered_prediction_runs_all_five_benchmarks(
     assert manifest["method"]["provenance_granularity"] == "none"
     assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"
     config = manifest["method"]["config"]
-    assert config["adapter_version"] == "everos-product-chat-v6"
+    assert config["adapter_version"] == "everos-product-chat-v7"
     assert config["product_surface"] == (
         "create_app-lifespan+typed-memorize-search-get"
     )
     assert config["search_method"] == "hybrid"
-    assert config["embedding_dimension"] == 1024
+    assert config["embedding_dimension"] == 384
+    assert config["embedding_provider"] == "sentence-transformers-local"
     assert predictions[0]["answer"] == "framework fake answer"
     assert [item["item_id"] for item in prompts[0]["retrieved_items"]] == [
         "episode-1"
@@ -484,7 +485,7 @@ def _install_offline_stack(
     monkeypatch.setattr(
         run_prediction_module,
         "load_openai_settings",
-        lambda project_root, api_provider=None: OpenAISettings(
+        lambda project_root, api_provider=None, expected_model=None: OpenAISettings(
             api_key="sk-test",
             base_url="https://example.invalid/v1",
             model="ox-alpha-free",

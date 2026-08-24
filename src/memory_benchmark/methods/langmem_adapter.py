@@ -31,11 +31,14 @@ from memory_benchmark.core.provider_protocol import (
     RetrievalResult,
     RetrievedItem,
     SessionBatch,
+    SessionMemoryReport,
+    SessionRef,
 )
 from memory_benchmark.methods.image_text import turn_text_with_images
 from memory_benchmark.methods.worker_transport import (
     JsonLinesWorkerTransport,
     WORKER_TRANSPORT_LOGICAL_PATH,
+    WorkerCommandError,
 )
 from memory_benchmark.observability.efficiency import (
     EfficiencyCollector,
@@ -44,7 +47,7 @@ from memory_benchmark.observability.efficiency import (
 )
 
 
-LANGMEM_ADAPTER_VERSION = "langmem-background-product-v1"
+LANGMEM_ADAPTER_VERSION = "langmem-background-product-v2"
 LANGMEM_METHOD_DIRECTORY = "langmem"
 LANGMEM_UPSTREAM_URL = "https://github.com/langchain-ai/langmem.git"
 LANGMEM_COMMIT = "56d85939d80bb731bd5e237567148d817d7bfd16"
@@ -59,7 +62,7 @@ LANGMEM_WORKER_LOGICAL_PATH = "src/memory_benchmark/methods/langmem_worker.py"
 LANGMEM_BOOTSTRAP_LOGICAL_PATH = "scripts/bootstrap_langmem_runtime.sh"
 LANGMEM_REQUIREMENTS_LOGICAL_PATH = "scripts/requirements/langmem-runtime.txt"
 LANGMEM_SOURCE_MODE = "vendored-langmem-plus-isolated-product-wrapper"
-LANGMEM_NAMESPACE_ALGORITHM = "sha256(langmem-background-product-v1|isolation_key)[:32]"
+LANGMEM_NAMESPACE_ALGORITHM = "sha256(langmem-background-product-v2|isolation_key)[:32]"
 LANGMEM_BUILD_LLM_RESPONSE_CONTRACT = (
     "provider-aware-v2:"
     "opencodego=chat_completions+model_aware_reasoning;"
@@ -472,6 +475,7 @@ class LangMem(MemoryProvider):
         storage_root: Path,
         openai_settings: OpenAISettings,
         efficiency_collector: EfficiencyCollector | None = None,
+        session_memory_report: bool = False,
         benchmark_name: str | None = None,
         diagnostic_log_path: Path | None = None,
         runtime_factory: RuntimeFactory | None = None,
@@ -488,11 +492,15 @@ class LangMem(MemoryProvider):
         self.storage_root = storage_root
         self.openai_settings = openai_settings
         self.efficiency_collector = efficiency_collector
+        if not isinstance(session_memory_report, bool):
+            raise ConfigurationError("LangMem session_memory_report must be bool")
+        self.session_memory_report = session_memory_report
         self.benchmark_name = benchmark_name
         self.diagnostic_log_path = diagnostic_log_path
         self._runtime_factory = runtime_factory or LangMemRuntime
         self._runtime: LangMemRuntimeProtocol | None = None
         self._observed_operation_ids: set[str] = set()
+        self._session_report_memories: dict[tuple[str, str | None], list[str]] = {}
         self._cleaned = False
 
     def prepare(self, run_context: Any) -> None:
@@ -507,6 +515,10 @@ class LangMem(MemoryProvider):
         if not isinstance(unit, SessionBatch):
             raise ConfigurationError("LangMem provider only accepts SessionBatch")
         if not unit.events:
+            if self.session_memory_report:
+                self._session_report_memories[
+                    (unit.isolation_key, unit.session_id)
+                ] = []
             return IngestResult(
                 unit_ref=unit.ref,
                 metadata={
@@ -523,12 +535,19 @@ class LangMem(MemoryProvider):
             messages=messages,
             max_steps=self.config.max_steps,
         )
-        result = self._require_runtime().ingest(
-            namespace_id=namespace_id,
-            operation_id=operation_id,
-            messages=messages,
-            max_steps=self.config.max_steps,
-        )
+        try:
+            result = self._require_runtime().ingest(
+                namespace_id=namespace_id,
+                operation_id=operation_id,
+                messages=messages,
+                max_steps=self.config.max_steps,
+            )
+        except WorkerCommandError as exc:
+            self._record_failed_worker_observations(
+                exc.details,
+                stage=EfficiencyStage.MEMORY_BUILD,
+            )
+            raise
         self._record_operation_observations(operation_id, result)
         changed_keys = _required_text_list(
             result.get("changed_memory_keys"),
@@ -537,6 +556,17 @@ class LangMem(MemoryProvider):
         memory_count = _required_non_negative_int(
             result.get("memory_count"), "memory_count"
         )
+        if self.session_memory_report:
+            changed_memories = _required_changed_memories(
+                result.get("changed_memories"),
+                expected_keys=changed_keys,
+            )
+            self._session_report_memories[
+                (unit.isolation_key, unit.session_id)
+            ] = [
+                _format_langmem_session_memory(item["value"])
+                for item in changed_memories
+            ]
         return IngestResult(
             unit_ref=unit.ref,
             metadata={
@@ -550,6 +580,25 @@ class LangMem(MemoryProvider):
                 "changed_memory_count": len(changed_keys),
                 "memory_count": memory_count,
                 **_rehydration_metadata(result),
+            },
+        )
+
+    def end_session(self, ref: SessionRef) -> SessionMemoryReport | None:
+        """报告该 session 事务实际创建或改写后的 current product memories。"""
+
+        if not self.session_memory_report:
+            return None
+        memories = self._session_report_memories.pop(
+            (ref.isolation_key, ref.session_id),
+            [],
+        )
+        return SessionMemoryReport(
+            session_ref=ref,
+            memories=memories,
+            metadata={
+                "method": "langmem",
+                "memory_unit": "current_changed_product_memory",
+                "changed_memory_count": len(memories),
             },
         )
 
@@ -641,16 +690,59 @@ class LangMem(MemoryProvider):
                 _record_embedding_observation(collector, observation)
         self._observed_operation_ids.add(operation_id)
 
+    def _record_failed_worker_observations(
+        self,
+        details: dict[str, Any] | None,
+        *,
+        stage: EfficiencyStage,
+    ) -> None:
+        """把失败 worker command 已完成的调用交给当前失败 scope。"""
+
+        if details is None or self.efficiency_collector is None:
+            return
+        if set(details) != {"llm_observations", "embedding_observations"}:
+            raise ConfigurationError(
+                "LangMem worker failure observation fields are malformed"
+            )
+        llm = _validated_observations(details["llm_observations"], "llm")
+        embedding = _validated_observations(
+            details["embedding_observations"], "embedding"
+        )
+        with self.efficiency_collector.operation_stage(stage):
+            for observation in llm:
+                self.efficiency_collector.record_llm_call(
+                    model_id=LANGMEM_LLM_MODEL_ID,
+                    input_tokens=_required_non_negative_int(
+                        observation.get("input_tokens"), "input_tokens"
+                    ),
+                    output_tokens=_required_non_negative_int(
+                        observation.get("output_tokens"), "output_tokens"
+                    ),
+                    token_measurement_source=MeasurementSource.API_USAGE,
+                )
+            for observation in embedding:
+                _record_embedding_observation(
+                    self.efficiency_collector,
+                    observation,
+                )
+
     def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """调用 product asearch 并保留原 rank、score 与零命中。"""
 
         namespace_id = _namespace_id(query.isolation_key)
         started_ns = perf_counter_ns()
-        result = self._require_runtime().retrieve(
-            namespace_id=namespace_id,
-            query=query.query_text,
-            limit=query.top_k,
-        )
+        try:
+            result = self._require_runtime().retrieve(
+                namespace_id=namespace_id,
+                query=query.query_text,
+                limit=query.top_k,
+            )
+        except WorkerCommandError as exc:
+            self._record_failed_worker_observations(
+                exc.details,
+                stage=EfficiencyStage.RETRIEVAL,
+            )
+            raise
         total_latency_ms = max(0.0, (perf_counter_ns() - started_ns) / 1_000_000)
         embedding = _validated_observations(
             result.get("embedding_observations"), "embedding"
@@ -891,6 +983,55 @@ def _format_langmem_items(items: tuple[RetrievedItem, ...]) -> str:
         )
         for rank, item in enumerate(items, start=1)
     )
+
+
+def _required_changed_memories(
+    value: Any,
+    *,
+    expected_keys: list[str],
+) -> list[dict[str, Any]]:
+    """校验 worker 返回的 current changed-memory 快照与 key 顺序一致。"""
+
+    if not isinstance(value, list):
+        raise ConfigurationError("LangMem changed_memories must be a list")
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict) or set(item) != {"key", "value"}:
+            raise ConfigurationError(
+                f"LangMem changed_memories[{index}] must contain exactly key/value"
+            )
+        key = _required_text(item.get("key"), f"changed_memories[{index}].key")
+        current_value = item.get("value")
+        if not isinstance(current_value, dict):
+            raise ConfigurationError(
+                f"LangMem changed_memories[{index}].value must be an object"
+            )
+        try:
+            json.dumps(current_value, ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationError(
+                f"LangMem changed_memories[{index}].value must be JSON serializable"
+            ) from exc
+        normalized.append({"key": key, "value": current_value})
+    if [item["key"] for item in normalized] != expected_keys:
+        raise ConfigurationError(
+            "LangMem changed_memories must match changed_memory_keys in product order"
+        )
+    return normalized
+
+
+def _format_langmem_session_memory(value: dict[str, Any]) -> str:
+    """把 current product value 转为 HaluMem judge 可消费的确定性文本。"""
+
+    raw_content = value.get("content", value)
+    if isinstance(raw_content, dict):
+        content = raw_content.get("content")
+        if isinstance(content, str) and content.strip():
+            return content
+        return json.dumps(raw_content, ensure_ascii=False, sort_keys=True)
+    if isinstance(raw_content, str) and raw_content.strip():
+        return raw_content
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
 def _langmem_retrieval_evidence() -> RetrievalEvidence:

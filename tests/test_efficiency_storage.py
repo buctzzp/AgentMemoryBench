@@ -11,6 +11,7 @@ from memory_benchmark.observability.efficiency import (
     ConversationEfficiencyObservation,
     EfficiencyArtifactStore,
     EfficiencyStage,
+    FailedEfficiencyAttempt,
     LLMCallObservation,
     MeasurementSource,
     ModelDescriptor,
@@ -75,12 +76,18 @@ def test_experiment_paths_expose_prediction_and_evaluator_efficiency_artifacts(
     assert paths.prediction_efficiency_observations_path.name == (
         "efficiency_observations.prediction.jsonl"
     )
+    assert paths.prediction_failed_efficiency_attempts_path.name == (
+        "efficiency_attempts.prediction.jsonl"
+    )
     assert paths.evaluator_model_inventory_path("locomo_judge_accuracy").name == (
         "model_inventory.locomo_judge_accuracy.json"
     )
     assert paths.evaluator_efficiency_observations_path(
         "locomo_judge_accuracy"
     ).name == "efficiency_observations.locomo_judge_accuracy.jsonl"
+    assert paths.evaluator_failed_efficiency_attempts_path(
+        "locomo_judge_accuracy"
+    ).name == "efficiency_attempts.locomo_judge_accuracy.jsonl"
 
 
 def test_evaluator_efficiency_path_rejects_path_escape(tmp_path) -> None:
@@ -233,6 +240,69 @@ def test_store_round_trips_llm_observation_enum_fields(tmp_path) -> None:
     assert isinstance(record, LLMCallObservation)
     assert record.stage is EfficiencyStage.ANSWER
     assert record.token_measurement_source is MeasurementSource.API_USAGE
+
+
+def test_store_appends_failed_attempts_without_merging_retries(tmp_path) -> None:
+    """失败成本账应逐次追加，并严格保留同一调用在不同 retry 中的重复花费。"""
+
+    paths = ExperimentPaths.create(tmp_path / "run")
+    store = EfficiencyArtifactStore.for_prediction(paths)
+    call = LLMCallObservation(
+        observation_id="same-call-id",
+        stage=EfficiencyStage.MEMORY_BUILD,
+        model_id="build-llm",
+        input_tokens=9,
+        output_tokens=2,
+        token_measurement_source=MeasurementSource.API_USAGE,
+        conversation_id="conv-1",
+    )
+    for index in range(2):
+        store.append_failed_attempt(
+            FailedEfficiencyAttempt(
+                attempt_id=f"attempt-{index}",
+                collector_session_id="collector-session",
+                attempt_index=index,
+                scope_type="conversation",
+                conversation_id="conv-1",
+                question_id=None,
+                scope_discriminator=None,
+                error_type="RuntimeError",
+                calls=(call,),
+            )
+        )
+
+    records = store.read_failed_attempts()
+    assert [record["attempt_id"] for record in records] == [
+        "attempt-0",
+        "attempt-1",
+    ]
+    assert [record["calls"][0]["observation_id"] for record in records] == [
+        "same-call-id",
+        "same-call-id",
+    ]
+
+
+def test_store_rejects_duplicate_failed_attempt_id(tmp_path) -> None:
+    """append-only ledger 不得静默重复同一 attempt identity。"""
+
+    store = EfficiencyArtifactStore.for_prediction(
+        ExperimentPaths.create(tmp_path / "run")
+    )
+    attempt = FailedEfficiencyAttempt(
+        attempt_id="attempt-1",
+        collector_session_id="collector-session",
+        attempt_index=0,
+        scope_type="conversation",
+        conversation_id="conv-1",
+        question_id=None,
+        scope_discriminator=None,
+        error_type="RuntimeError",
+        calls=(),
+    )
+    store.append_failed_attempt(attempt)
+
+    with pytest.raises(ConfigurationError, match="duplicate attempt_id"):
+        store.append_failed_attempt(attempt)
 
 
 def test_store_rejects_unknown_observation_type(tmp_path) -> None:
