@@ -8,23 +8,23 @@ created: 2026-07-05
 
 ## Codex 恢复胶囊（2026-08-24）
 
-- **当前目标**：真实 pilot 暂停；先关闭 method 配置所有权、controlled embedding、模型调用
-  观测与 HaluMem session extraction 的共同前置门。
+- **当前目标**：真实 pilot 暂停；在已关闭配置所有权/观测门之后，逐家闭合 method 参数值与
+  作者 prompt provenance，防止用 demo/default 配置关闭论文完整算法阶段。
 - **当前批次**：
   [runtime 配置与观测 M0-M5](branches/runtime-config-and-observability/plan.md) 已完成无 API验收；
-  真实 pilot 继续暂停，等待用户审读重建矩阵并重新批准规模/run-id。
-- **当前判据**：[M0 裁决](branches/runtime-config-and-observability/notes/2026-08-24-m0-ruling.md)；
-  method/API runtime/benchmark/execution 四层所有权不得混写；MiniLM-384 只统一实际消费
-  embedding 且公开接口兼容的方法，Letta current core-block profile 为 N/A。
+  当前转入 [ws05.1 method profile provenance](../ws05.1-method-profile-provenance/README.md)，
+  先做第三方框架配置策略对照，再按 LightMem → A-Mem → 其余八家串行推进。
+- **当前判据**：[ws05.1 spec](../ws05.1-method-profile-provenance/spec.md)；参数类型不是语义，
+  paper/author-reported/current-product/framework-main 四种身份必须分栏；method 官方 judge 只盘点，
+  未经 metric tier 裁决不得暗换 benchmark 主 judge。
 - **现场证据**：十家 method 主 TOML 已单源化，runtime/execution composition 进入严格 resume
   identity；Letta embedding=N/A，EverOS v7 controlled MiniLM 的 patch 重放、本地模型、六表
   schema 与 official lifespan 零 API门均通过。M2/M3/M4/M5 证据见支线 notes；最终全量为
   `2259 passed, 3 deselected, 25 warnings, 29 subtests passed`，扩大 pilot 尚未恢复。
 - **禁止事项**：本支线 M5 完成且用户重新批准规模/run_id 前，不恢复真实 pilot；不得改写旧
   artifact、把旧 embedding build 重标为新 controlled identity，或用 lineage 伪造 metric 资格。
-- **当前动作**：交用户审读
-  [M5 重建矩阵](branches/runtime-config-and-observability/notes/2026-08-24-m5-no-api-acceptance.md)；
-  用户重新批准前不创建任何真实 API run。
+- **当前动作**：先完成 ws05.1 M0 十家资产模板与 M0.5 第三方框架配置策略对照，再进入 M1
+  LightMem；用户重新批准前不创建任何真实 API run。
 
 ## 目标
 
@@ -50,6 +50,11 @@ created: 2026-07-05
   [runtime config/observability](branches/runtime-config-and-observability/README.md)：主比较统一
   MiniLM-384 仅覆盖真实消费 embedding 的兼容方法；Letta official SDK 的“省略 embedding”与
   framework 显式 `None` 已拆开记账；效率失败成本与四家 HaluMem extraction 候选进入 M2/M3。
+- 2026-08-24：上述支线完成后，用户追加“参数值与作者 prompt provenance”门。现有十家主
+  TOML 已完成所有权单源化，但不等于每个开关/高影响数值都已证明符合完整算法；
+  `prompts/author/` 目前只有三家代码资产，也不等于其余七家没有官方评测 prompt。ws05.1 将
+  逐家复用已有 integration/note 后补 current-source 一手证据，避免重复调查；真实 pilot 继续
+  暂停。
 - 2026-08-21：新增 `RunScope.PILOT`。它复用 TOML `[smoke]` 的 method 参数与 ox runtime，
   但保留一个完整 isolation 及全部问题、写独立 `pilot/` 目录并进入 manifest identity。
   LoCoMo/LME/BEAM/HaluMem 各取第一完整 conversation/instance/conversation/UUID；MemBench

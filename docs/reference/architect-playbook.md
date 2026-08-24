@@ -126,6 +126,12 @@
     provider registry 或环境补齐。必须沿到最终 product object/请求 payload 才能写“未使用”。
     controlled 统一也只覆盖算法实际消费且公开 seam 兼容的组件；给 N/A 方法填一个同名模型只会
     制造虚假公平。Letta `skip_vector_storage=True` 与显式 `embedding_config=None` 是本条判例。
+30. **constructor default 不等于完整算法，也不等于作者实验值**：参数审计按 paper identity、
+    author-reported effective config、current product default 与 framework main identity 四栏取证。
+    论文主流程/消融中的组件若在代码里被做成开关，不能仅因通用默认关闭就删掉；反过来也不能
+    看到 bool 就全部开启。沿到最终调用分支，并对关键开关或高影响数值做零 API mutation。
+    官方 benchmark 的专调值只进入显式 `author_<benchmark>`；主配置保持跨 benchmark 固定。
+    LightMem `pre_compress=False` 的库默认与论文/LoCoMo/LME 实验 `True` 的分叉是本条首个判例。
 
 完整历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

@@ -1,6 +1,6 @@
 # Method TOML 配置与 answer prompt 构造政策
 
-> **现行长期政策（2026-07-17 建立，2026-08-24 配置所有权修订）。**本文取代
+> **现行长期政策（2026-07-17 建立，2026-08-24 配置所有权与参数 provenance 修订）。**本文取代
 > `dual-track-config-policy.md` 作为 method 参数选择与 answer prompt 构造的事实源。
 > 旧 `config_track=unified/native` 实现和既有产物继续如实保留历史身份，但不再代表目标
 > 配置模型。
@@ -54,6 +54,45 @@ answer_builder = "<method>_longmemeval_official"
 6. 通用 `api_timeout_seconds`、`api_max_retries`、credential/base URL 与 runner `max_workers`
    不属于 method 算法参数。作者未暴露的内部 LLM temperature/max-token 常量也不为对称性强行
    变成配置；作者明确暴露且影响算法时才保留，默认锁 upstream 值。
+
+### 1.1 参数值不是由“类型”裁定
+
+不能用“布尔开关重点审、数值参数沿用默认”替代参数语义审计。凡会改变下列任一事实的参数，
+无论类型是 bool、enum、number 还是 string，都属于 method identity，必须显式冻结并进入
+manifest/resume：
+
+- 是否执行抽取、压缩、分段、总结、更新、删除、反思或 rerank 阶段；
+- 写入 memory 的内容、数量、粒度、lineage 或生命周期；
+- retrieval candidate、排序、返回深度或 metric 资格；
+- 修改后是否必须重建 method state。
+
+参数值按三个不同问题取证，不能拿一种“默认值”同时回答：
+
+1. **完整算法是什么**：读与当前代码版本相符的论文正文、附录、伪代码和消融实验，并追到
+   current source 的有效调用分支。论文主流程中的组件若只在代码里作为开关暴露，不能仅因
+   constructor 默认关闭就把它从完整算法中删掉。
+2. **作者报告结果实际用了什么**：读匹配 commit/tag 的官方 benchmark harness、最终配置、
+   启动命令、环境覆盖与公开日志/artifact；最终 effective value 高于配置类的声明默认。值只
+   进入对应稀疏 `author_<benchmark>`，不得按 benchmark 暗换主配置。
+3. **当前通用产品默认是什么**：读 README、config schema、constructor/factory 默认和最终
+   product object/payload。只有没有更强官方覆盖、确认不是 demo/成本保护/兼容默认，且不会
+   关闭命名算法阶段时，才可把 repo default 作为主配置候选。
+
+README/example、release note/model card、官方 issue/PR/作者回复可用于消解矛盾；第三方复现只能
+作为明确标注的辅助证据。关键开关或高影响数值还应做零 API mutation：翻转值后观察实际调用
+阶段、payload/state 或 identity 是否变化，防止把 dead config 当算法能力。即便选定值等于
+upstream 默认，也要在 TOML 与 manifest 中显式记录，避免依赖升级后静默漂移。
+
+多方法第三方框架的配置可用来比较工程策略：它们可能选择真正的跨 benchmark 全局值、完全
+沿用 repo default、逐 benchmark 调参，或通过 env/CLI 形成不可见混合。比较时必须追到最终
+effective payload；这类证据能帮助设计 framework main profile，却不能替代 method 官方 harness
+为 `author_<benchmark>` 提供 provenance。
+
+LightMem `pre_compress` 是现行判例：通用 schema 默认 `False`，但论文完整流程包含预压缩，
+官方 LoCoMo/LongMemEval 脚本与 README runnable example 均显式设为 `True`，current adapter
+也能追到真实预压缩分支。因此主 profile 显式锁 `True`；不能用库的易用性默认覆盖实验身份。
+十家逐项取证与进度入口见
+[`ws05.1 method profile provenance`](../workstreams/ws05.1-method-profile-provenance/README.md)。
 
 ## 2. 运行选择
 
@@ -173,3 +212,7 @@ answer/judge decode 与 prompt 归 benchmark evaluation。把字段移出 method
    对应 author section。Phase 1 不做五个 benchmark 各自 sweep，也不追求 smoke 分数最优。
    新 `author_<benchmark>` section 必须同时注册经过最终消息 parity 验收的完整 builder；名字
    未注册或变量链未闭合时在 API/runtime 前 fail-fast。
+6. **2026-08-24 参数 provenance 门**：扩大 pilot 前由 ws05.1 逐家核对完整算法阶段、官方
+   benchmark effective config、完整 answer builder 与 method harness judge 资产。该任务是
+   语义冻结，不做参数 sweep、不调用真实 API；未闭合的作者配置不得用现有 prompt 文件名冒充
+   可运行 profile。

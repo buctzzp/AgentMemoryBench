@@ -91,6 +91,12 @@ stdout/stderr 与 JSON-lines worker stderr 脱敏落盘；该批当时的无 API
 模型调用/失败成本观测与 HaluMem session extraction 资格。当前施工入口为
 [ws05 runtime 配置与观测支线](workstreams/ws05-experiment-reporting/branches/runtime-config-and-observability/README.md)；
 旧“Mem0 + MemoryOS 第一扩大波”不再是恢复动作。
+该支线 M0-M5 无 API门关闭后，用户进一步要求在 pilot 前逐家核实参数**值**与作者 prompt
+provenance：论文完整算法、官方 benchmark effective config、current product default 与主表固定
+配置不得混为一谈；缺失的独立官方评测仓库要主动定位，实在不可得才标 unavailable。当前执行入口
+为 [ws05.1 method profile provenance](workstreams/ws05.1-method-profile-provenance/README.md)。该任务
+先比较 `第三方框架参考/` 中多方法框架究竟采用 repo default、跨 benchmark 固定配置还是逐格
+调参，再逐家回到官方论文/仓库作最终裁定；真实 pilot 继续暂停。
 
 ## Workstream 索引
 
@@ -107,7 +113,8 @@ stdout/stderr 与 JSON-lines worker stderr 脱敏落盘；该批当时的无 API
 | [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | done | P0 | 5×10 smoke matrix 与 A-Mem B5/GRID 精确 closure 均关闭；无在途施工 |
 | [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | done | P0 | M1-A→E 已关闭：依赖方向、TOML profile、worker transport、prediction 拆责与 legacy 退役 |
 | [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | done | P0 | isolated heartbeat 与第三方输出治理已关闭；完整诊断进 method.log |
-| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | in-progress | P0 | pilot 暂停；先关闭配置/embedding/效率/HaluMem extraction 前置门，正式 full 仍待预算批准 |
+| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | in-progress | P0 | pilot 暂停；当前由 ws05.1 逐家冻结 prompt/参数 provenance，正式 full 仍待预算批准 |
+| [ws05.1](workstreams/ws05.1-method-profile-provenance/README.md) | method-profile-provenance | in-progress | P1 | ws05 当前子任务：十家作者 prompt、官方 benchmark 参数与跨五格主配置逐家语义冻结；零 API |
 | [ws06](workstreams/ws06-tests-restructure/README.md) | tests-restructure | open | P2 | tests 分组重组、大文件拆分、过时断言排查 |
 
 新 workstream 的建立与命名规则见 `AGENTS.md` "文档规则"。
