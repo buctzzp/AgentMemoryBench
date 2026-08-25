@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, fields
+from functools import partial
 import hashlib
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,6 @@ from memory_benchmark.observability.efficiency import (
 from .amem_adapter import (
     AMem,
     AMemConfig,
-    build_amem_source_identity,
     clean_amem_conversation_state,
 )
 from .run_identity import BuildIdentityDeclaration, EmbeddingIdentity
@@ -50,7 +50,6 @@ from .everos_adapter import (
     EVEROS_LLM_MODEL_ID,
     EverOS,
     EverOSConfig,
-    build_everos_source_identity,
     clean_everos_conversation_state,
     validate_everos_variant,
 )
@@ -60,14 +59,12 @@ from .graphiti_adapter import (
     GRAPHITI_LLM_MODEL_ID,
     GraphitiConfig,
     GraphitiOSS,
-    build_graphiti_source_identity,
     clean_graphiti_conversation_state,
     validate_graphiti_variant,
 )
 from .lightmem_adapter import (
     LightMem,
     LightMemConfig,
-    build_lightmem_source_identity,
     clean_lightmem_conversation_state,
 )
 from .letta_adapter import (
@@ -75,7 +72,6 @@ from .letta_adapter import (
     LETTA_LLM_MODEL_ID,
     Letta,
     LettaConfig,
-    build_letta_source_identity,
     clean_letta_conversation_state,
 )
 from .langmem_adapter import (
@@ -84,32 +80,29 @@ from .langmem_adapter import (
     LANGMEM_LLM_MODEL_ID,
     LangMem,
     LangMemConfig,
-    build_langmem_source_identity,
     clean_langmem_conversation_state,
 )
-from .mem0_adapter import Mem0, Mem0Config, build_mem0_source_identity
+from .mem0_adapter import Mem0, Mem0Config
 from .memos_adapter import (
     MEMOS_EMBEDDING_MODEL_ID,
     MEMOS_LLM_MODEL_ID,
     MEMOS_RERANKER_MODEL_ID,
     MemOS,
     MemOSConfig,
-    build_memos_source_identity,
     clean_memos_conversation_state,
 )
 from .memoryos_adapter import (
     MemoryOS,
-    MemoryOSPaperConfig,
-    build_memoryos_source_identity,
+    MemoryOSConfig,
     clean_memoryos_conversation_state,
 )
 from .simplemem_adapter import (
     SIMPLEMEM_LLM_MODEL_ID,
     SimpleMem,
     SimpleMemConfig,
-    build_simplemem_source_identity,
     clean_simplemem_conversation_state,
 )
+from .source_closure import build_registered_method_source_identity
 
 
 _OPENAI_TRANSPORT_SUPPORT_PATH = Path(
@@ -241,6 +234,8 @@ class MethodRegistration:
             artifact 回读。
         variant_validator: 可选 method × benchmark × concrete variant 预运行校验；
             必须在 output/runtime/API 构造前调用，用于拒绝无法诚实表达的组合。
+        max_parallel_workers: 产品或 adapter 的可选硬并发上限；``None`` 表示能力层
+            不设上限。execution profile 默认值与机器资源预算不得塞进本字段。
     """
 
     name: str
@@ -280,14 +275,18 @@ class MethodRegistration:
         Callable[[dict[str, Any]], BuildIdentityDeclaration] | None
     ) = None
     variant_validator: Callable[[str, str], None] | None = None
-    max_parallel_workers: int = 10
+    max_parallel_workers: int | None = None
 
     def __post_init__(self) -> None:
         """校验 registration 的执行能力声明。"""
 
-        if type(self.max_parallel_workers) is not int or self.max_parallel_workers < 1:
+        if self.max_parallel_workers is not None and (
+            type(self.max_parallel_workers) is not int
+            or self.max_parallel_workers < 1
+        ):
             raise ConfigurationError(
-                "MethodRegistration.max_parallel_workers must be a positive integer"
+                "MethodRegistration.max_parallel_workers must be None or a "
+                "positive integer"
             )
 
     @property
@@ -578,7 +577,7 @@ def _clean_everos_failed_ingest_state(
 def _everos_build_identity(
     config_manifest: dict[str, Any],
 ) -> BuildIdentityDeclaration:
-    """解析 EverOS controlled MiniLM、本地 provider 与 LanceDB build。"""
+    """解析 EverOS controlled MiniLM、本地 provider 与 LanceDB cosine build。"""
 
     provider = _manifest_text(config_manifest, "embedding_provider")
     model = _manifest_text(config_manifest, "embedding_model")
@@ -598,10 +597,10 @@ def _everos_build_identity(
                 model=model,
                 dimension=dimension,
                 revision=None,
-                revision_status="local_unpinned",
-                normalization="model-internal-l2",
+                revision_status="local_content_locked",
+                normalization="model_pipeline_l2",
                 instruction=None,
-                distance="lancedb-l2",
+                distance="lancedb-cosine",
                 identity_status="declared",
             ),
         )
@@ -742,8 +741,8 @@ def _graphiti_build_identity(
                 model=model,
                 dimension=dimension,
                 revision=None,
-                revision_status="local_unpinned",
-                normalization="l2-normalized",
+                revision_status="local_content_locked",
+                normalization="model_pipeline_l2+explicit_l2",
                 instruction=None,
                 distance="falkordb-cosine",
                 identity_status="declared",
@@ -1066,7 +1065,12 @@ def _clean_memos_failed_ingest_state(
         raise ConfigurationError("MemOS clean hook failed to build MemOS adapter")
     run_id = context.storage_root.parent.name
     isolation_key = f"{run_id}_{conversation.conversation_id}"
-    clean_memos_conversation_state(provider=system, isolation_key=isolation_key)
+    try:
+        clean_memos_conversation_state(provider=system, isolation_key=isolation_key)
+    finally:
+        # MemOS provider 不再共享进程级 owner；clean hook 自己构造的 runtime
+        # 必须在 namespace 验空后由同一 provider 收敛，不能等根 provider 接管。
+        system.cleanup()
 
 
 def _memos_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityDeclaration:
@@ -1091,7 +1095,7 @@ def _memos_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityDecla
                 model=model,
                 dimension=dimension,
                 revision=None,
-                revision_status="local_unpinned",
+                revision_status="local_content_locked",
                 # current `SenTranEmbedder.embed()` 调 `model.encode()` 时不传
                 # `normalize_embeddings`，MemOS 自身不做归一化；受控 MiniLM 模型
                 # 目录的 `modules.json` 带 `2_Normalize`，故 L2 由模型 pipeline
@@ -1459,8 +1463,8 @@ def _separable_retrieval_contract(config: Any) -> RetrievalObservationContract:
 def _build_memoryos_system(context: MethodBuildContext) -> MemoryProvider:
     """根据统一 build context 构造 MemoryOS adapter，并恢复已完成 conversation。"""
 
-    if not isinstance(context.config, MemoryOSPaperConfig):
-        raise ConfigurationError("MemoryOS factory requires MemoryOSPaperConfig")
+    if not isinstance(context.config, MemoryOSConfig):
+        raise ConfigurationError("MemoryOS factory requires MemoryOSConfig")
     if context.openai_settings is None:
         raise ConfigurationError("MemoryOS factory requires OpenAI settings")
     system = MemoryOS(
@@ -1578,25 +1582,25 @@ def _resolve_clean_retry_storage_root(
 def _memoryos_model_name(config: Any) -> str:
     """从 MemoryOS 强类型配置读取回答模型名。"""
 
-    if not isinstance(config, MemoryOSPaperConfig):
-        raise ConfigurationError("MemoryOS model getter requires MemoryOSPaperConfig")
+    if not isinstance(config, MemoryOSConfig):
+        raise ConfigurationError("MemoryOS model getter requires MemoryOSConfig")
     return config.llm_model
 
 
 def _memoryos_max_workers(config: Any) -> int:
     """从 MemoryOS 强类型配置读取 conversation 并发数。"""
 
-    if not isinstance(config, MemoryOSPaperConfig):
-        raise ConfigurationError("MemoryOS worker getter requires MemoryOSPaperConfig")
+    if not isinstance(config, MemoryOSConfig):
+        raise ConfigurationError("MemoryOS worker getter requires MemoryOSConfig")
     return config.max_workers
 
 
 def _memoryos_efficiency_model_inventory(config: Any) -> tuple[ModelDescriptor, ...]:
     """返回 MemoryOS efficiency observation 会引用的模型身份。"""
 
-    if not isinstance(config, MemoryOSPaperConfig):
+    if not isinstance(config, MemoryOSConfig):
         raise ConfigurationError(
-            "MemoryOS model inventory getter requires MemoryOSPaperConfig"
+            "MemoryOS model inventory getter requires MemoryOSConfig"
         )
     return (
         ModelDescriptor(
@@ -1623,9 +1627,9 @@ def _memoryos_efficiency_instrumentation_identity(
 ) -> dict[str, object]:
     """返回 MemoryOS 观测 wrapper 身份，不包含 secret。"""
 
-    if not isinstance(config, MemoryOSPaperConfig):
+    if not isinstance(config, MemoryOSConfig):
         raise ConfigurationError(
-            "MemoryOS instrumentation identity getter requires MemoryOSPaperConfig"
+            "MemoryOS instrumentation identity getter requires MemoryOSConfig"
         )
     wrapper_relative_path = Path("src/memory_benchmark/methods/memoryos_adapter.py")
     return {
@@ -1646,9 +1650,9 @@ def _estimate_memoryos_update_batches(
 ) -> int:
     """估算单个 conversation 在 MemoryOS add 阶段的 update batch 数。"""
 
-    if not isinstance(config, MemoryOSPaperConfig):
+    if not isinstance(config, MemoryOSConfig):
         raise ConfigurationError(
-            "MemoryOS workload estimator requires MemoryOSPaperConfig"
+            "MemoryOS workload estimator requires MemoryOSConfig"
         )
     return MemoryOS.estimate_add_workload(
         conversation,
@@ -1746,8 +1750,8 @@ def _langmem_build_identity(
                 model=model,
                 dimension=dimension,
                 revision=None,
-                revision_status="local_unpinned",
-                normalization="external_l2",
+                revision_status="local_content_locked",
+                normalization="model_pipeline_l2+explicit_l2",
                 instruction=None,
                 distance="langgraph-inmemory-cosine",
                 identity_status="declared",
@@ -1778,8 +1782,12 @@ def _mem0_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityDeclar
                 model=model,
                 dimension=dimension,
                 revision=None,
-                revision_status="local_unpinned",
-                normalization=None,
+                revision_status=(
+                    "local_content_locked"
+                    if model is not None and model.startswith("models/")
+                    else "local_unpinned"
+                ),
+                normalization="model_pipeline_l2",
                 instruction=None,
                 distance="qdrant-cosine",
                 identity_status="declared",
@@ -1831,8 +1839,8 @@ def _lightmem_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityDe
                 model=model,
                 dimension=dimension,
                 revision=None,
-                revision_status="local_unpinned",
-                normalization=None,
+                revision_status="local_content_locked",
+                normalization="model_pipeline_l2",
                 instruction=None,
                 distance="qdrant-cosine",
                 identity_status="declared",
@@ -1858,17 +1866,28 @@ def _memoryos_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityDe
             f"variant, got engine={engine!r}"
         )
     if engine == "memoryos-pypi" and model_key == "all-minilm-l6-v2":
+        is_controlled_local = model is not None and model.startswith("models/")
         return BuildIdentityDeclaration(
             implementation_variant="product",
-            embedding_profile="product_default_v1",
-            historical_controlled_build_equivalent_to_current_main=True,
+            embedding_profile=(
+                "controlled_embedding_v1"
+                if is_controlled_local
+                else "product_default_v1"
+            ),
+            historical_controlled_build_equivalent_to_current_main=(
+                not is_controlled_local
+            ),
             embedding=EmbeddingIdentity(
                 provider="sentence-transformers",
                 model=model,
                 dimension=384,
                 revision=None,
-                revision_status="local_unpinned",
-                normalization="external_l2",
+                revision_status=(
+                    "local_content_locked"
+                    if is_controlled_local
+                    else "local_unpinned"
+                ),
+                normalization="model_pipeline_l2+product_l2",
                 instruction=None,
                 distance="faiss-inner-product",
                 identity_status="declared",
@@ -1888,18 +1907,32 @@ def _amem_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityDeclar
     model = _manifest_text(config_manifest, "embedding_model")
     model_key = "" if model is None else model.strip().split("/")[-1].lower()
     if provider == "sentence-transformers" and model_key == "all-minilm-l6-v2":
+        is_controlled_local = model is not None and model.startswith("models/")
         return BuildIdentityDeclaration(
             implementation_variant="product",
-            embedding_profile="product_default_v1",
-            historical_controlled_build_equivalent_to_current_main=True,
+            embedding_profile=(
+                "controlled_embedding_v1"
+                if is_controlled_local
+                else "product_default_v1"
+            ),
+            historical_controlled_build_equivalent_to_current_main=(
+                not is_controlled_local
+            ),
             embedding=EmbeddingIdentity(
                 provider=provider,
                 model=model,
                 dimension=384,
                 revision=None,
-                revision_status="local_unpinned",
-                normalization="none",
+                revision_status=(
+                    "local_content_locked"
+                    if is_controlled_local
+                    else "local_unpinned"
+                ),
+                normalization="model_pipeline_l2",
                 instruction=None,
+                # 产品显式安装 SentenceTransformerEmbeddingFunction；Chroma 1.5.9
+                # 会用该 embedding function 的 default_space()，因此是 cosine，
+                # 不是无 embedding function 时的 fallback L2。
                 distance="chroma-cosine",
                 identity_status="declared",
             ),
@@ -1932,8 +1965,8 @@ def _simplemem_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityD
                 model=model,
                 dimension=dimension,
                 revision=None,
-                revision_status="local_unpinned",
-                normalization="internal_l2",
+                revision_status="local_content_locked",
+                normalization="model_pipeline_l2+explicit_l2",
                 instruction=None,
                 distance="lancedb-l2",
                 identity_status="declared",
@@ -1967,7 +2000,7 @@ _REGISTRATIONS = {
         config_type=AMemConfig,
         requires_api=True,
         system_factory=_build_amem_system,
-        source_identity_factory=build_amem_source_identity,
+        source_identity_factory=partial(build_registered_method_source_identity, "amem"),
         model_name_getter=_amem_model_name,
         max_workers_getter=_amem_max_workers,
         display_name="A-Mem",
@@ -1998,7 +2031,7 @@ _REGISTRATIONS = {
         config_type=EverOSConfig,
         requires_api=True,
         system_factory=_build_everos_system,
-        source_identity_factory=build_everos_source_identity,
+        source_identity_factory=partial(build_registered_method_source_identity, "everos"),
         model_name_getter=_everos_model_name,
         max_workers_getter=_everos_max_workers,
         display_name="EverOS",
@@ -2031,7 +2064,7 @@ _REGISTRATIONS = {
         config_type=GraphitiConfig,
         requires_api=True,
         system_factory=_build_graphiti_system,
-        source_identity_factory=build_graphiti_source_identity,
+        source_identity_factory=partial(build_registered_method_source_identity, "graphiti"),
         model_name_getter=_graphiti_model_name,
         max_workers_getter=_graphiti_max_workers,
         display_name="Graphiti OSS",
@@ -2064,7 +2097,7 @@ _REGISTRATIONS = {
         config_type=Mem0Config,
         requires_api=True,
         system_factory=_build_mem0_system,
-        source_identity_factory=build_mem0_source_identity,
+        source_identity_factory=partial(build_registered_method_source_identity, "mem0"),
         model_name_getter=_mem0_model_name,
         max_workers_getter=_mem0_max_workers,
         display_name="Mem0",
@@ -2096,7 +2129,7 @@ _REGISTRATIONS = {
         config_type=LightMemConfig,
         requires_api=True,
         system_factory=_build_lightmem_system,
-        source_identity_factory=build_lightmem_source_identity,
+        source_identity_factory=partial(build_registered_method_source_identity, "lightmem"),
         model_name_getter=_lightmem_model_name,
         max_workers_getter=_lightmem_max_workers,
         display_name="LightMem",
@@ -2124,10 +2157,10 @@ _REGISTRATIONS = {
         ),
         profile_sections=_MAIN_PROFILE_SECTIONS,
         profile_relative_path=Path("configs/methods/memoryos.toml"),
-        config_type=MemoryOSPaperConfig,
+        config_type=MemoryOSConfig,
         requires_api=True,
         system_factory=_build_memoryos_system,
-        source_identity_factory=build_memoryos_source_identity,
+        source_identity_factory=partial(build_registered_method_source_identity, "memoryos"),
         model_name_getter=_memoryos_model_name,
         max_workers_getter=_memoryos_max_workers,
         display_name="MemoryOS",
@@ -2159,7 +2192,7 @@ _REGISTRATIONS = {
         config_type=LettaConfig,
         requires_api=True,
         system_factory=_build_letta_system,
-        source_identity_factory=build_letta_source_identity,
+        source_identity_factory=partial(build_registered_method_source_identity, "letta"),
         model_name_getter=_letta_model_name,
         max_workers_getter=_letta_max_workers,
         display_name="Letta/MemGPT",
@@ -2167,7 +2200,7 @@ _REGISTRATIONS = {
         consume_granularity_resolver=_session_consume_granularity,
         provenance_granularity="none",
         retrieval_evidence_contract_version="v1",
-        allow_smoke_worker_override=False,
+        allow_smoke_worker_override=True,
         efficiency_model_inventory_getter=_letta_efficiency_model_inventory,
         efficiency_instrumentation_identity_getter=(
             _letta_efficiency_instrumentation_identity
@@ -2176,7 +2209,6 @@ _REGISTRATIONS = {
         supports_shared_instance_parallelism=False,
         clean_failed_ingest_state=_clean_letta_failed_ingest_state,
         build_identity_resolver=_letta_build_identity,
-        max_parallel_workers=1,
     ),
     "langmem": MethodRegistration(
         name="langmem",
@@ -2192,7 +2224,7 @@ _REGISTRATIONS = {
         config_type=LangMemConfig,
         requires_api=True,
         system_factory=_build_langmem_system,
-        source_identity_factory=build_langmem_source_identity,
+        source_identity_factory=partial(build_registered_method_source_identity, "langmem"),
         model_name_getter=_langmem_model_name,
         max_workers_getter=_langmem_max_workers,
         display_name="LangMem",
@@ -2224,7 +2256,7 @@ _REGISTRATIONS = {
         config_type=MemOSConfig,
         requires_api=True,
         system_factory=_build_memos_system,
-        source_identity_factory=build_memos_source_identity,
+        source_identity_factory=partial(build_registered_method_source_identity, "memos"),
         model_name_getter=_memos_model_name,
         max_workers_getter=_memos_max_workers,
         display_name="MemOS",
@@ -2232,10 +2264,9 @@ _REGISTRATIONS = {
         consume_granularity_resolver=_session_consume_granularity,
         provenance_granularity="none",
         retrieval_evidence_contract_version="v1",
-        # runner 的 isolated worker 只能隔离 provider 对象；MemOSRuntimeOwner
-        # 仍会按同一 config 复用进程级 runtime/embedder。真实 LME W2 已触发
-        # tokenizer `Already borrowed`，故必须在 runtime/API 启动前拒绝覆盖。
-        allow_smoke_worker_override=False,
+        # 每个 isolated worker 拥有独立 runtime/embedder；并发数由统一
+        # execution/resource policy 控制，不在 method 注册里硬编码 W2 天花板。
+        allow_smoke_worker_override=True,
         efficiency_model_inventory_getter=_memos_efficiency_model_inventory,
         efficiency_instrumentation_identity_getter=(
             _memos_efficiency_instrumentation_identity
@@ -2244,7 +2275,6 @@ _REGISTRATIONS = {
         supports_shared_instance_parallelism=False,
         clean_failed_ingest_state=_clean_memos_failed_ingest_state,
         build_identity_resolver=_memos_build_identity,
-        max_parallel_workers=1,
     ),
     "simplemem": MethodRegistration(
         name="simplemem",
@@ -2260,7 +2290,7 @@ _REGISTRATIONS = {
         config_type=SimpleMemConfig,
         requires_api=True,
         system_factory=_build_simplemem_system,
-        source_identity_factory=build_simplemem_source_identity,
+        source_identity_factory=partial(build_registered_method_source_identity, "simplemem"),
         model_name_getter=_simplemem_model_name,
         max_workers_getter=_simplemem_max_workers,
         display_name="SimpleMem",

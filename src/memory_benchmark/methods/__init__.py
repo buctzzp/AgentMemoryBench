@@ -19,7 +19,7 @@ from .memos_adapter import MemOS, MemOSConfig, build_memos_source_identity
 from .memoryos_adapter import (
     MemoryOS,
     MemoryOSAddEstimate,
-    MemoryOSPaperConfig,
+    MemoryOSConfig,
     build_memoryos_source_identity,
 )
 from .simplemem_adapter import (
@@ -62,7 +62,7 @@ __all__ = [
     "build_memos_source_identity",
     "MemoryOS",
     "MemoryOSAddEstimate",
-    "MemoryOSPaperConfig",
+    "MemoryOSConfig",
     "build_memoryos_source_identity",
     "SimpleMem",
     "SimpleMemConfig",

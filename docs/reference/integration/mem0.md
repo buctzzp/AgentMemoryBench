@@ -5,8 +5,8 @@
 > 当前新 smoke/ws05 pilot 使用 `opencodego/ox-alpha-free`；冻结 B11 仍是当时
 > `gpt-4o-mini` 历史证据，不跨模型比较。现行运行身份见
 > [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
-> 2026-08-14 M1-B 后，新 run 由 `mem0.toml` profile 与 `answer_builder` 选择，并写
-> `MethodRunIdentity v1`；下文 native/unified 只描述旧 artifact 的历史真实身份。
+> 新 run 由 `mem0.toml` profile 与 `answer_builder` 选择；2026-08-25 M11 后写
+> `MethodRunIdentity v2`，v1 只读且不 resume；下文 native/unified 只描述旧 artifact 的历史真实身份。
 > 现行冻结证据与声明缺口见
 > `../../workstreams/ws02.7-method-track/branches/method-recertification/mem0/notes/mem0-frozen-v2.md`；
 > `../../workstreams/ws02.7-method-track/notes/mem0-frozen-v1.md` 保留为历史快照。
@@ -22,6 +22,48 @@
 - native 格：**locomo、longmemeval、beam**（来源=`memory-benchmarks` 当前 eval
   harness；旧论文 LoCoMo 的双 user_id/正反 role/双路检索是独立 implementation
   variant，不是可由 `author_locomo` TOML 单独表达的“配置校准”，不替代当前产品路径）
+
+## Profile provenance 与算法机制卡（2026-08-25）
+
+完整一手证据见
+[`mem0-profile-provenance.md`](../../workstreams/ws05.1-method-profile-provenance/notes/mem0-profile-provenance.md)。
+后续回答“Mem0 的算法机制/参数为什么这样设”时先读本节；只有 source/version、最终 payload 或
+作者复现值发生变化时才重查上游，避免重复读论文。
+
+### 四种身份不可揉成“官方 Mem0”
+
+| identity | 核心机制/拓扑 | 当前裁决 |
+| --- | --- | --- |
+| paper（arXiv:2504.19413v1） | summary + recent `m=10` → fact extraction → 每 fact 取相似记忆 `s=10` → LLM `ADD/UPDATE/DELETE/NOOP`；GPT-4o-mini，适用处 temp=0 | 论文身份，不等于 current OSS |
+| old paper-era LoCoMo harness | hosted v2、user-only instruction、双 namespace、正反 role、双路检索合并 | 有明确设计理由的 `IMPLEMENTATION_VARIANT`，不能压成 TOML bool |
+| current vendored product | Mem0 2.0.4：raw recent 10 + existing top-10 → additive extraction → batch embedding → MD5 exact dedup → entity linking；query 为 vector/BM25/entity hybrid | framework 当前 product，和 paper four-op 是 `ALGORITHM_VARIANT` |
+| current `memory-benchmarks` | `4b61c5d…`；LoCoMo turn、LME/BEAM positional pair、单 namespace，answer/judge 拓扑各异 | harness 文件已锁；其 runtime branch 不可重建，不能宣称完整 parity |
+
+Mem0g 是论文的独立 relation-triplet/Neo4j graph 变体；current OSS entity linking/boost 不是 Mem0g。
+current upstream 已到 package 2.0.19/`39bc0233…`，相对 vendored 2.0.4 有源码与失败语义漂移，
+M11 已裁定不把 source upgrade 夹带进配置/identity 清理；以后升级仍须独立算法审计。
+
+### 当前主配置的真实含义
+
+- MiniLM/384：Phase 1 controlled embedding，不是论文/产品默认 embedding 复现。
+- `infer=true`：进入 current V3 additive extraction，是有效核心开关。
+- query `top_k=20`：公开 readout 深度；不等于 paper `s=10`，也不等于 add 阶段硬编码 top-10。
+- `rerank=false`：current product 默认；true 在观测闭合前 fail-fast。
+- 原 `ingestion_chunk_size=1` 已于 ws05.1 M11 退出：它从未控制真实写入 topology。新 run 的
+  turn/pair/session 粒度继续由 benchmark registry + adapter 的显式 identity 记录；旧 artifact
+  只读回放，不重写历史 manifest。
+- build temperature=.1、search threshold=.1、source-time instruction 都会影响 effective identity；
+  前两者当前来自 wrapper/product source而非 TOML，M11 显式登记，不借机调优。
+
+`src/memory_benchmark/prompts/author/mem0.py` 目前只是三家 official template/static profile 资产。
+新 registered run 只开放 benchmark builder；LoCoMo/LME/BEAM 的 author profile 都是
+`AUTHOR_NOT_READY`。M11 核查后这些轴仍未同时闭合，故没有注册空壳 author profile；以后逐格校准
+时再完成 cutoff/order、变量、最终 messages、decode 与 parser。
+
+M11 还把 main embedding 从 Hub-style 名称收敛为内容锁定的项目本地 MiniLM，并用 149-file
+`mem0-product-main-v2` 组件闭包锁 current product、lockfile、adapter 与可见 author assets。新 run
+使用 identity v2/fresh-state；历史 artifact 不因可能同源的权重而重标。完整收据见
+[M11 implementation](../../workstreams/ws05.1-method-profile-provenance/notes/m11-effective-config-source-embedding-implementation.md)。
 
 ## 0. 接口调用面
 
@@ -128,9 +170,9 @@ message role/content 与检索请求 top-k，不改 Mem0 V3 extraction/update/de
 
 ## B1-B11 当前结论
 
-- **B1 ✅ 来源/接口**：使用 vendored OSS `Memory.add/search`；上游压缩包无可追 commit，
-  以 package 2.0.4 + 146 文件 content hash 锁定，并把 5×10 后 upstream drift 对比列为
-  声明缺口。
+- **B1 ✅ 来源/接口**：使用 vendored OSS `Memory.add/search`；历史 package 2.0.4 + 146-file
+  `debda89e…` 收据继续解释旧 artifact。2026-08-25 已对比 upstream 2.0.19/`39bc0233…`，确认不是
+  无害版本漂移；M11 保留 2.0.4 current source，并让新 run 改用 149-file 组件闭包，二者不混写。
 - **B2 ✅ 注入粒度**：LoCoMo/MemBench=turn，BEAM=pair，LongMemEval/HaluMem=
   framework session；LongMemEval 在 adapter 内按位置两 turn chunk，HaluMem 整 session。
   HaluMem 的 memory-point 复用 `end_session` 返回的 `add().results`。
@@ -165,10 +207,10 @@ message role/content 与检索请求 top-k，不改 Mem0 V3 extraction/update/de
   状态机：失败原子写 `failed_ingest` 及精确 stage，默认 resume 跳过，显式 retry 无 hook
   fail-closed、有 hook 则先清 namespace 恰一次再从 session 1 重建；partial operation
   artifacts 不落盘。首次模型下载仍需新机器预热预检。
-- **B9 ✅ 当前 smoke build 已真实复证；性能主配置待裁**：2026-07-09 shared MiniLM 配置/产物与
+- **B9 ✅ 当前 smoke build 已真实复证；主配置身份已澄清、作者效果校准待 M11**：2026-07-09 shared MiniLM 配置/产物与
   2026-07-16 product-default 审计都保留为真实历史。现行政策把 embedding 作为 TOML 普通
-  build 字段：5×10 smoke 保持当前 MiniLM，不提前烧 OpenAI embedding；真实效果实验前再裁
-  `official_full` 是否采用 `text-embedding-3-small`/1536/Qdrant cosine。若切换，托管权重
+  build 字段：Phase 1 主比较保持 controlled MiniLM；product-default/author identity 只能作为
+  显式补充配置，不能由 `official_full` 名字暗切 `text-embedding-3-small`/1536。若切换，托管权重
   revision 只能声明 `provider_managed_unpinned`，并须全量重建、重开 B8+/B11、由用户确认
   预算/规模/run_id。官方 0.1 相关性门槛导致空检索仍属于方法语义，不当作框架故障。
 - **B10 ✅ current 主配置 truthful；M1-B 新运行迁移已关闭，author 校准待性能阶段**：旧 native 注册 LoCoMo、LongMemEval、
@@ -186,7 +228,10 @@ message role/content 与检索请求 top-k，不改 Mem0 V3 extraction/update/de
   `mem0-frozen-v2.md`。
 
 ## 特殊情况
-1. Mem0 是当前唯一混合隔离方法，不能把 worker 内逻辑隔离误写成全局纯逻辑隔离。
+1. Mem0 当前实现为混合隔离：worker 间是独立 backend/state root，worker 内再用
+   `run_id` 逻辑 namespace。它不是全局纯逻辑隔离，也不是当前唯一拥有逻辑 namespace
+   的 method：LangMem、Letta 与 MemOS 分别有 store namespace、subject 与 cube/user namespace，
+   但它们的 runtime ownership 与并行资格不同，不得仅凭“有 id”推导共享实例线程安全。
 2. `method-frozen-v2` 允许携带声明缺口，不等于这些缺口消失；解冻边界与效果阶段前置项以
    current frozen note §7-§8 为准。
 3. `ADD_ONLY_MUTATION_PROVEN` 只回答旧 memory 是否被改写/删除；它不替代 semantic

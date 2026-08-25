@@ -485,12 +485,11 @@ def test_mem0_profiles_separate_smoke_and_official_full_parameters() -> None:
 
     assert smoke.extraction_model == "ox-alpha-free"
     assert smoke.reader_model == "ox-alpha-free"
-    assert smoke.embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
+    assert smoke.embedding_model == "models/all-MiniLM-L6-v2"
     assert smoke.embedding_dimensions == 384
     assert smoke.embedding_provider == "huggingface"
     assert smoke.top_k == 20
     assert smoke.max_workers == 1
-    assert smoke.ingestion_chunk_size == 1
     assert smoke.infer is True
     assert smoke.rerank is False
     assert smoke.api_timeout_seconds == 60.0
@@ -498,12 +497,11 @@ def test_mem0_profiles_separate_smoke_and_official_full_parameters() -> None:
 
     assert full.extraction_model == "gpt-4o-mini"
     assert full.reader_model == "gpt-4o-mini"
-    assert full.embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
+    assert full.embedding_model == "models/all-MiniLM-L6-v2"
     assert full.embedding_dimensions == 384
     assert full.embedding_provider == "huggingface"
     assert full.top_k == 20
     assert full.max_workers == 10
-    assert full.ingestion_chunk_size == 1
     assert full.infer is True
     assert full.rerank is False
     assert full.api_timeout_seconds == 60.0
@@ -2250,6 +2248,7 @@ def test_production_config_injects_openai_and_local_storage_without_secrets_in_m
         config=config,
         openai_settings=settings,
         storage_root=tmp_path,
+        project_root=Path(__file__).resolve().parents[1],
     )
     manifest = config.to_manifest()
 
@@ -2257,8 +2256,8 @@ def test_production_config_injects_openai_and_local_storage_without_secrets_in_m
     assert backend_config["llm"]["config"]["openai_base_url"] == settings.base_url
     # embedder 归一化为本地 huggingface provider，不带 api_key/openai_base_url。
     assert backend_config["embedder"]["provider"] == "huggingface"
-    assert backend_config["embedder"]["config"]["model"] == (
-        "sentence-transformers/all-MiniLM-L6-v2"
+    assert backend_config["embedder"]["config"]["model"] == str(
+        (Path(__file__).resolve().parents[1] / "models/all-MiniLM-L6-v2").resolve()
     )
     assert backend_config["embedder"]["config"]["embedding_dims"] == 384
     assert "api_key" not in backend_config["embedder"]["config"]
@@ -2285,6 +2284,7 @@ def test_mem0_ox_backend_config_injects_low_reasoning_only() -> None:
         config=Mem0Config.smoke(),
         openai_settings=settings,
         storage_root="/tmp/mem0-ox-unit",
+        project_root=Path(__file__).resolve().parents[1],
     )
 
     assert backend_config["llm"]["config"]["reasoning_effort"] == "low"

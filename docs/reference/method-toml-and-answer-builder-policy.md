@@ -49,7 +49,8 @@ answer_builder = "<method>_longmemeval_official"
    execution 的组合由强类型 composition root 完成，并完整进入 manifest，不靠 TOML 复制。
 5. embedding model、dimension、normalization、retrieval depth、chunk、update、summary 等若为
    upstream 公开算法旋钮，属于 method 配置。Phase 1 主比较对所有实际消费 embedding 且接口
-   兼容的方法统一 `all-MiniLM-L6-v2`/384；完整 identity 与重建门必填。不消费 embedding 的
+   兼容的方法统一 `all-MiniLM-L6-v2`/384；完整 identity 必须锁本地模型 bytes、tokenizer、
+   pipeline/runtime 与最终 distance/normalization，变更即重建。不消费 embedding 的
    profile 记 N/A，product default/author 配置只作显式补充校准。
 6. 通用 `api_timeout_seconds`、`api_max_retries`、credential/base URL 与 runner `max_workers`
    不属于 method 算法参数。作者未暴露的内部 LLM temperature/max-token 常量也不为对称性强行
@@ -205,8 +206,9 @@ answer/judge decode 与 prompt 归 benchmark evaluation。把字段移出 method
 
 ## 5. 与旧 `config_track` 的关系
 
-- **2026-08-14 起的新 run 已完成迁移**：由公开 TOML profile 名、实际 section、
-  `answer_builder` 和当前 build/embedding 组成 `MethodRunIdentity v1`；这些字段与解析后的
+- **2026-08-25 起的新 run 使用 v2**：由公开 TOML profile 名、实际 section、
+  `answer_builder`、当前 build/embedding 与 embedding artifact 组成 `MethodRunIdentity v2`；
+  v1 继续只读且与 v2 严格不 resume。这些字段与解析后的
   method config、API runtime 一同严格参与 resume。
 - 分层输出路径现在是 `.../{smoke|formal}/{profile}/{run_id}`。旧目录中的
   `unified/native` segment 不移动、不重命名，新 run 也不会探测或复用旧路径。
@@ -224,9 +226,9 @@ answer/judge decode 与 prompt 归 benchmark evaluation。把字段移出 method
 1. **现在已完成**：政策落盘；不改既有实验史，不触发真实 API。
 2. **2026-08-14 状态**：MemBench canonical split、RetrievalEvidence 与 5×10 主 smoke
    均已关闭。旧“当前主线”只属历史，不再作为恢复动作。
-3. **2026-08-14 ws03 M1-B 已完成（迁移基线）**：十家 `smoke/official_full` section 均显式声明
+3. **2026-08-14 ws03 M1-B 已完成（历史迁移基线）**：十家 `smoke/official_full` section 均显式声明
    `answer_builder="benchmark"`；新 loader/registry 把 framework envelope 与 method dataclass
-   严格分离；新 manifest/resume/output identity 已切换至 `MethodRunIdentity v1`；旧 artifact
+   严格分离；当时 manifest/resume/output identity 切换至 `MethodRunIdentity v1`；旧 artifact
    只读回读保持。当前只注册 `benchmark` builder，不凭已有 prompt 文件虚构任何作者 profile。
 4. **2026-08-24 ws05 再迁移**：开始把上述两份重复 section 收敛为一份 method 主参数，
    runtime/execution 独立组合；旧 section 与 artifact 只读兼容，完成前不得删旧 parser。
@@ -238,3 +240,7 @@ answer/judge decode 与 prompt 归 benchmark evaluation。把字段移出 method
    benchmark effective config、完整 answer builder 与 method harness judge 资产。该任务是
    语义冻结，不做参数 sweep、不调用真实 API；未闭合的作者配置不得用现有 prompt 文件名冒充
    可运行 profile。
+7. **2026-08-25 M11 身份闭合**：九家 controlled embedding consumer 使用同一项目本地 MiniLM
+   内容收据，Letta 为 N/A；十家 new run 使用分组件 source closure v2。没有一格满足完整 author
+   ready 门，因此本批零 author section。详细重建矩阵见
+   [`M11 implementation`](../workstreams/ws05.1-method-profile-provenance/notes/m11-effective-config-source-embedding-implementation.md)。

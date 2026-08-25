@@ -32,7 +32,7 @@ from memory_benchmark.core import (
 )
 from memory_benchmark.methods import registry as method_registry_module
 from memory_benchmark.methods import load_method_profile
-from memory_benchmark.methods.everos_adapter import EverOS
+from memory_benchmark.methods.everos_adapter import EVEROS_ADAPTER_VERSION, EverOS
 from memory_benchmark.observability import RunContext
 from memory_benchmark.prompts.benchmarks.halumem import (
     build_halumem_unified_answer_prompt,
@@ -228,13 +228,14 @@ def test_everos_registered_prediction_runs_all_five_benchmarks(
     assert manifest["method"]["provenance_granularity"] == "none"
     assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"
     config = manifest["method"]["config"]
-    assert config["adapter_version"] == "everos-product-chat-v7"
+    assert config["adapter_version"] == EVEROS_ADAPTER_VERSION
     assert config["product_surface"] == (
         "create_app-lifespan+typed-memorize-search-get"
     )
     assert config["search_method"] == "hybrid"
     assert config["embedding_dimension"] == 384
     assert config["embedding_provider"] == "sentence-transformers-local"
+    assert config["ome_strategy_profile"]["extract_user_profile"] is False
     assert predictions[0]["answer"] == "framework fake answer"
     assert [item["item_id"] for item in prompts[0]["retrieved_items"]] == [
         "episode-1"

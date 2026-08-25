@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
@@ -15,6 +16,7 @@ from memory_benchmark.benchmark_adapters.contracts import RunScope
 from memory_benchmark.benchmark_adapters.halumem import (
     build_halumem_unified_answer_prompt,
 )
+from memory_benchmark.config import load_path_settings
 from memory_benchmark.core import Conversation, Dataset, GoldAnswerInfo, Question, Session, Turn
 from memory_benchmark.core.exceptions import ConfigurationError
 from memory_benchmark.core.validators import validate_no_private_keys
@@ -39,6 +41,7 @@ from memory_benchmark.observability.efficiency import (
     RetrievalObservationContract,
 )
 from memory_benchmark.readers.answer import FakeAnswerLLMClient, FrameworkAnswerReader
+from memory_benchmark.methods.registry import MethodBuildContext
 from memory_benchmark.runners.operation_level import (
     _update_probe_record,
     run_operation_level_predictions,
@@ -194,6 +197,47 @@ class SelfRecordingOperationProvider(OperationFakeProvider):
         return result
 
 
+class ParallelOperationProvider(OperationFakeProvider):
+    """用 barrier 证明两个 UUID 确实位于不同 worker 并发执行。"""
+
+    def __init__(self, *, barrier: Barrier, storage_root: Path) -> None:
+        """保存 worker root，并让每个 provider 的首次 ingest 同步会合。"""
+
+        super().__init__()
+        self.barrier = barrier
+        self.storage_root = storage_root
+        self._entered = False
+
+    def ingest(self, unit: SessionBatch) -> IngestResult:
+        """首次 ingest 等待另一个 worker；串行伪并发会在这里超时。"""
+
+        if not self._entered:
+            self._entered = True
+            self.barrier.wait(timeout=5)
+        return super().ingest(unit)
+
+
+class LaterUuidFailureProvider(ParallelOperationProvider):
+    """让 worker_0 的第二个 UUID 失败，验证已提交 UUID 不被回滚。"""
+
+    def ingest(self, unit: SessionBatch) -> IngestResult:
+        """完成并发会合后，仅拒绝稳定映射到 worker_0 的 s3。"""
+
+        if unit.session_id == "s3":
+            raise RuntimeError("synthetic later UUID failure")
+        return super().ingest(unit)
+
+
+class CleanupFailingParallelProvider(ParallelOperationProvider):
+    """business UUID 成功后在 lane cleanup 失败的 fake provider。"""
+
+    def cleanup(self) -> None:
+        """记录 cleanup 后抛错，模拟 runtime 关闭失败。"""
+
+        super().cleanup()
+        raise RuntimeError(f"cleanup failed for {self.storage_root.name}")
+
+
 def _operation_dataset(*, include_generated_question: bool = True) -> Dataset:
     """构造覆盖 update、QA、generated session 和累积状态的 HaluMem 数据集。"""
 
@@ -341,6 +385,57 @@ def _operation_dataset(*, include_generated_question: bool = True) -> Dataset:
     )
 
 
+def _parallel_uuid_operation_dataset(count: int = 2) -> Dataset:
+    """构造多个互不相关 UUID，每个内部仍保持 session→QA 顺序。"""
+
+    conversations: list[Conversation] = []
+    for index in range(1, count + 1):
+        conversation_id = f"halu-user-{index}"
+        session_id = f"s{index}"
+        question_id = f"{conversation_id}:{session_id}:q1"
+        conversations.append(
+            Conversation(
+                conversation_id=conversation_id,
+                sessions=[
+                    Session(
+                        session_id=session_id,
+                        turns=[
+                            Turn(
+                                f"{session_id}:t1",
+                                "user",
+                                f"fact-{index}",
+                                normalized_role="user",
+                            )
+                        ],
+                        private_metadata={
+                            "is_generated_qa_session": False,
+                            "memory_points": [],
+                        },
+                    )
+                ],
+                questions=[
+                    Question(
+                        question_id=question_id,
+                        conversation_id=conversation_id,
+                        text=f"question-{index}",
+                    )
+                ],
+                gold_answers={
+                    question_id: GoldAnswerInfo(
+                        question_id=question_id,
+                        answer=f"answer-{index}",
+                        metadata={"session_id": session_id},
+                    )
+                },
+            )
+        )
+    return Dataset(
+        dataset_name="halumem",
+        conversations=conversations,
+        metadata={"variant": "medium", "run_scope": "smoke"},
+    )
+
+
 def _context(tmp_path: Path, *, resume: bool = False) -> RunContext:
     """创建 operation-level 测试 run context。"""
 
@@ -477,6 +572,254 @@ def test_operation_level_runner_drives_three_stages_and_writes_artifacts(
     assert manifest["method"]["prompt_track"] == "unified"
     # 未传 contract version 时 manifest 不盖章（本 fake 非注册 method）。
     assert "retrieval_evidence_contract_version" not in manifest["method"]
+
+
+def test_operation_level_w2_parallelizes_uuid_not_sessions_and_resumes_stably(
+    tmp_path: Path,
+) -> None:
+    """W2 只并行 UUID；每个 lane 独占 runtime 并稳定复用于逻辑隔离 UUID。"""
+
+    context = _context(tmp_path)
+    barrier = Barrier(2)
+    providers: list[ParallelOperationProvider] = []
+
+    def factory(build_context: MethodBuildContext) -> MemoryProvider:
+        """按 runner 传入的 worker root 构造独立 fake provider。"""
+
+        provider = ParallelOperationProvider(
+            barrier=barrier,
+            storage_root=build_context.storage_root,
+        )
+        providers.append(provider)
+        return provider
+
+    build_context = MethodBuildContext(
+        config=object(),
+        openai_settings=None,
+        path_settings=load_path_settings(),
+        storage_root=context.method_state_dir,
+        benchmark_name="halumem",
+    )
+    summary = run_operation_level_predictions(
+        dataset=_parallel_uuid_operation_dataset(count=3),
+        provider=None,
+        run_context=context,
+        policy=PredictionRunPolicy(max_workers=2, progress_enabled=False),
+        method_manifest={"adapter": "parallel-fake-v3"},
+        benchmark_variant="medium",
+        run_scope=RunScope.SMOKE,
+        answer_reader=_reader(),
+        unified_prompt_builder=build_halumem_unified_answer_prompt,
+        protocol_version="v3",
+        provenance_granularity="turn",
+        provider_factory=factory,
+        build_context_template=build_context,
+        consume_granularity="session",
+    )
+
+    assert summary.completed_conversations == 3
+    assert summary.completed_questions == 3
+    assert len(providers) == 2
+    assert {provider.storage_root.name for provider in providers} == {
+        "worker_0",
+        "worker_1",
+    }
+    assert all(
+        [call[0] for call in provider.calls].count("cleanup") == 1
+        for provider in providers
+    )
+    paths = ExperimentPaths.create(context.run_dir)
+    status = json.loads(paths.conversation_status_path.read_text(encoding="utf-8"))
+    assert status["halu-user-1"]["worker_idx"] == 0
+    assert status["halu-user-2"]["worker_idx"] == 1
+    assert status["halu-user-3"]["worker_idx"] == 0
+    reports = read_jsonl(paths.session_memory_reports_path)
+    assert [record["session_ref"]["session_id"] for record in reports] == [
+        "s1",
+        "s2",
+        "s3",
+    ]
+    worker_zero = next(
+        provider for provider in providers if provider.storage_root.name == "worker_0"
+    )
+    assert len(worker_zero.prepare_contexts) == 1
+    assert [call[0] for call in worker_zero.calls].count("end_conversation") == 2
+
+    before_resume = len(providers)
+    resumed = run_operation_level_predictions(
+        dataset=_parallel_uuid_operation_dataset(count=3),
+        provider=None,
+        run_context=_context(tmp_path, resume=True),
+        policy=PredictionRunPolicy(
+            max_workers=2,
+            resume=True,
+            progress_enabled=False,
+        ),
+        method_manifest={"adapter": "parallel-fake-v3"},
+        benchmark_variant="medium",
+        run_scope=RunScope.SMOKE,
+        answer_reader=_reader(),
+        unified_prompt_builder=build_halumem_unified_answer_prompt,
+        protocol_version="v3",
+        provenance_granularity="turn",
+        provider_factory=factory,
+        build_context_template=build_context,
+        consume_granularity="session",
+    )
+    assert resumed.completed_conversations == 3
+    assert len(providers) == before_resume
+
+
+def test_operation_level_worker_request_is_not_capped_at_two(
+    tmp_path: Path,
+) -> None:
+    """W16 请求遇到四个 UUID 应真实启动四条 lane，而不是被截成 W2。"""
+
+    context = _context(tmp_path)
+    barrier = Barrier(4)
+    providers: list[ParallelOperationProvider] = []
+
+    def factory(build_context: MethodBuildContext) -> MemoryProvider:
+        """记录每条实际 worker lane 的独立 provider。"""
+
+        provider = ParallelOperationProvider(
+            barrier=barrier,
+            storage_root=build_context.storage_root,
+        )
+        providers.append(provider)
+        return provider
+
+    summary = run_operation_level_predictions(
+        dataset=_parallel_uuid_operation_dataset(count=4),
+        provider=None,
+        run_context=context,
+        policy=PredictionRunPolicy(max_workers=16, progress_enabled=False),
+        method_manifest={"adapter": "parallel-four-lane-fake-v3"},
+        benchmark_variant="medium",
+        run_scope=RunScope.SMOKE,
+        answer_reader=_reader(),
+        unified_prompt_builder=build_halumem_unified_answer_prompt,
+        protocol_version="v3",
+        provenance_granularity="turn",
+        provider_factory=factory,
+        build_context_template=MethodBuildContext(
+            config=object(),
+            openai_settings=None,
+            path_settings=load_path_settings(),
+            storage_root=context.method_state_dir,
+            benchmark_name="halumem",
+        ),
+        consume_granularity="session",
+    )
+
+    assert summary.completed_conversations == 4
+    assert {provider.storage_root.name for provider in providers} == {
+        "worker_0",
+        "worker_1",
+        "worker_2",
+        "worker_3",
+    }
+
+
+def test_operation_level_parallel_failure_preserves_prior_completed_uuids(
+    tmp_path: Path,
+) -> None:
+    """同一 lane 后续 UUID 失败时，已完成 UUID 必须保持可 resume。"""
+
+    context = _context(tmp_path)
+    barrier = Barrier(2)
+
+    def factory(build_context: MethodBuildContext) -> MemoryProvider:
+        """构造带稳定后续失败点的独立 provider。"""
+
+        return LaterUuidFailureProvider(
+            barrier=barrier,
+            storage_root=build_context.storage_root,
+        )
+
+    with pytest.raises(RuntimeError, match="synthetic later UUID failure"):
+        run_operation_level_predictions(
+            dataset=_parallel_uuid_operation_dataset(count=3),
+            provider=None,
+            run_context=context,
+            policy=PredictionRunPolicy(max_workers=2, progress_enabled=False),
+            method_manifest={"adapter": "parallel-failure-fake-v3"},
+            benchmark_variant="medium",
+            run_scope=RunScope.SMOKE,
+            answer_reader=_reader(),
+            unified_prompt_builder=build_halumem_unified_answer_prompt,
+            protocol_version="v3",
+            provenance_granularity="turn",
+            provider_factory=factory,
+            build_context_template=MethodBuildContext(
+                config=object(),
+                openai_settings=None,
+                path_settings=load_path_settings(),
+                storage_root=context.method_state_dir,
+                benchmark_name="halumem",
+            ),
+            consume_granularity="session",
+        )
+
+    paths = ExperimentPaths.create(context.run_dir)
+    status = json.loads(paths.conversation_status_path.read_text(encoding="utf-8"))
+    assert status["halu-user-1"]["status"] == "completed"
+    assert status["halu-user-2"]["status"] == "completed"
+    assert status["halu-user-3"]["status"] == "failed_ingest"
+    assert status["halu-user-3"]["worker_idx"] == 0
+    assert [
+        record["question_id"]
+        for record in read_jsonl(paths.method_predictions_path)
+    ] == [
+        "halu-user-1:s1:q1",
+        "halu-user-2:s2:q1",
+    ]
+
+
+def test_operation_level_lane_cleanup_failure_keeps_completed_uuid_statuses(
+    tmp_path: Path,
+) -> None:
+    """lane 关闭失败必须可见，但不能把完整 business batch 改写成 ingest 失败。"""
+
+    context = _context(tmp_path)
+    barrier = Barrier(2)
+
+    def factory(build_context: MethodBuildContext) -> MemoryProvider:
+        """构造只在 lifecycle cleanup 失败的独立 provider。"""
+
+        return CleanupFailingParallelProvider(
+            barrier=barrier,
+            storage_root=build_context.storage_root,
+        )
+
+    with pytest.raises(RuntimeError, match="cleanup failed for worker_"):
+        run_operation_level_predictions(
+            dataset=_parallel_uuid_operation_dataset(count=2),
+            provider=None,
+            run_context=context,
+            policy=PredictionRunPolicy(max_workers=2, progress_enabled=False),
+            method_manifest={"adapter": "parallel-cleanup-fake-v3"},
+            benchmark_variant="medium",
+            run_scope=RunScope.SMOKE,
+            answer_reader=_reader(),
+            unified_prompt_builder=build_halumem_unified_answer_prompt,
+            protocol_version="v3",
+            provenance_granularity="turn",
+            provider_factory=factory,
+            build_context_template=MethodBuildContext(
+                config=object(),
+                openai_settings=None,
+                path_settings=load_path_settings(),
+                storage_root=context.method_state_dir,
+                benchmark_name="halumem",
+            ),
+            consume_granularity="session",
+        )
+
+    paths = ExperimentPaths.create(context.run_dir)
+    status = json.loads(paths.conversation_status_path.read_text(encoding="utf-8"))
+    assert {entry["status"] for entry in status.values()} == {"completed"}
+    assert len(read_jsonl(paths.method_predictions_path)) == 2
 
 
 def test_operation_level_runner_writes_retrieval_evidence_and_stamps_contract(

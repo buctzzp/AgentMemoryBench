@@ -3,10 +3,9 @@
 > 稳定页：只记录经架构师复核的承重结论。完整证据、争议、零 API stdout 与五格反例见
 > `docs/workstreams/ws02.7-method-track/branches/method-recertification/letta/`。
 >
-> 状态：`method-frozen-v1`。current v3 的 11 份真实 smoke、17 个 conversation/question、
-> 全部适用 evaluator、artifact/效率/隐私/外部状态机器门与最终回归均已闭合。历史首跑的
-> Docker、PostgreSQL readiness、Run lifecycle 与区域 opt-in 失败资产只作阶段证据，不混入
-> current run，也不冒充可 resume smoke。
+> 状态：v3 五格真实 smoke 与 evaluator/artifact/效率/隐私门已闭合。2026-08-25
+> 重开 conversation 并行资格：零 API 独立 container/volume/runtime identity 门已闭合，
+> 真实多 isolation sentinel 尚待新 run；历史 W1 artifact 不重标。
 
 ## 1. Source identity
 
@@ -22,10 +21,13 @@
 | worker | `src/memory_benchmark/methods/letta_worker.py` |
 | adapter version | `letta-sleeptime-product-v3` |
 
-active Letta Code `v0.30.1` 是完整 agent harness，与本项目要复现的 legacy MemGPT/Letta V1
+active Letta Code 是完整 agent harness，与本项目要复现的 legacy MemGPT/Letta V1
 sleeptime-memory 产品链属于 `ALGORITHM_VARIANT`，不能静默替换。Phase 1 五 benchmark 在
-current official repos 中都没有 harness，因此五格均为 product-faithful framework extension，
-不建立伪 `author_<benchmark>` section。
+current `letta`/`letta-evals` 中都没有 harness；但 official owner 已归档的
+`letta-leaderboard@802a794…` 存在一套 LoCoMo files/search/agent-native-answer harness。它的
+dataset revision、server defaults 与最终 search/decode payload 不完整，只能作为历史 author
+候选，当前仍不建立 `author_<benchmark>` section；其余四格为 product-faithful framework
+extension。
 
 ## 2. 运行身份
 
@@ -39,9 +41,18 @@ raw vector copy    disabled（skip_vector_storage=True）
 input granularity  session；session 内最多 10 message 一批；不跨 session
 readout            query-independent 全部 attached core blocks
 database           owned ankane/pgvector:v0.5.1 PostgreSQL volume/container
-framework workers  1（TOML、registry 与 planner 三处锁死）
+framework workers  每个 worker 独占 PostgreSQL container/volume/stdio worker；
+                   lane 内串行处理 subject 隔离的 conversation。实际数量由统一
+                   execution/resource policy 决定；W1/W10 只是 profile 默认值，
+                   显式正整数不设 method 伪上限
 answer             framework benchmark unified builder
 ```
+
+adapter 不共享 AgentLoop/stdio worker：每个 framework worker 的 storage root 参与 runtime
+identity，派生不同 container、volume 与 runtime tag；worker lane 内才复用这一套产品 runtime。
+因此 W2 只是最小独立性强反例，不是能力上限。扩大并发不会改变 sleeptime memory 算法，
+但每个 worker 都会新增 PostgreSQL/worker 资源，实际数量必须服从统一资源调度；资源不足应
+显式失败，不能静默降并发或改变 artifact 身份。
 
 依赖树与主框架冲突，因此使用 vendored `uv.lock` 的独立 Python 3.12 worker。worker 只是本机
 stdio 依赖隔离层，算法仍直接调用同一产品内核，不是 HTTP/cloud 远端服务，也不是自行重写。
@@ -199,7 +210,7 @@ embedding、全量重建并重开 metric/observability；不得直接修改 curr
 
 零 API 产品链与 current 真实链都已通过。current
 [`letta-smoke-plans-v3.json`](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-smoke-plans-v3.json)
-覆盖 LoCoMo 1、LongMemEval 2、MemBench 2、BEAM 4、HaluMem 2 个 concrete variant；全部固定 W1，
+覆盖 LoCoMo 1、LongMemEval 2、MemBench 2、BEAM 4、HaluMem 2 个 concrete variant；历史运行固定 W1，
 共 17 个 conversation/question。机器验货实数为 build LLM 45、answer 17、judge 24；current
 11 个 owned volume 与 superseded 19 个保留 volume 分账，owned container 残留为 0。公开和历史
 Letta artifact/log 对 API key、base URL、私有 workspace URL 的命中均为 0。
@@ -207,7 +218,8 @@ Letta artifact/log 对 API key、base URL、私有 workspace URL 的命中均为
 五格 retrieval qrel/rank 继续诚实 N/A；HaluMem extraction/update/QA/memory-type 均有 evaluator
 资格。原 v2 真实 smoke 只证明既有 product pipeline；`letta-sleeptime-product-v3` 的 session
 delta 已过零 API 强反例，但旧 artifact 不能重标，下一次真实运行必须新建 run 并全量重建。
-冻结与资格都不代表极小 smoke 分数具有排名意义。
+冻结与资格都不代表极小 smoke 分数具有排名意义。新并行资格必须用新 run 做至少两个
+完整 isolation 的真实 sentinel；旧 W1 state/artifact 不能因 registry 变更而重标。
 
 ## 8. 证据入口
 
@@ -218,3 +230,28 @@ delta 已过零 API 强反例，但旧 artifact 不能重标，下一次真实�
 - [11 current concrete variant machine plans](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-smoke-plans-v3.json)
 - [B11 first live attempt and R1 fixes](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-b11-first-live-attempt-r1.md)
 - [method-frozen-v1](../../workstreams/ws02.7-method-track/branches/method-recertification/letta/notes/letta-frozen-v1.md)
+
+## 9. 论文、current product 与 source drift（ws05.1 M7）
+
+MemGPT 论文的核心是有限 main context、FIFO/summary、recall 与 archival 外部 context，以及由
+agent function calls/heartbeat 主动搬运和检索记忆。current framework profile 则遵循后来的
+`ai-memory-sdk v0.2.0` memory-only 产品合同：standalone sleeptime agent 用
+`memory_replace/insert/rethink/finish` 演化有限 core blocks，再由框架只读全部 blocks。二者共享
+agent-controlled memory edit 思想，但在 recall/archival、heartbeat、compaction 与 readout 上是
+`ALGORITHM_VARIANT`，不能宣称论文逐项复现。
+
+2026-08-25 current source 事实：`letta-ai/letta` 主仓已成为 landing repository，V1 源码保存在
+`archive@56ba9c2…`；本项目声明的 20 个 vendored 文件与 archive 逐字一致。活跃
+`letta-code@6d8cfab…` 是另一产品身份。M11 已用 543-file `letta-sleeptime-main-v2` 组件闭包替代
+旧 20-file hash，覆盖完整 vendored Python tree、model runtime asset、package/lock、adapter/worker/
+transport/bootstrap；没有 vendored source 的 `ai-memory-sdk v0.2.0@4494…` 明示
+`source-unavailable`，不伪造内容 hash。compaction 仍有注释/代码冲突：
+注释称非 GPT-5 在 100% 触发，实际函数无条件返回 context window 的 90%；current effective
+identity 以 90% 为准，任何行为更改都要求重新建 memory。
+
+Letta embedding 继续严格为 N/A；它不参加九家 controlled MiniLM 比较。source closure v2 本身已使
+新 run 与旧 manifest 严格失配，旧 artifact 不改写。完整收据见
+[M11 implementation](../../workstreams/ws05.1-method-profile-provenance/notes/m11-effective-config-source-embedding-implementation.md)。
+
+完整阶段图、参数矩阵、archived LoCoMo 与 OmniMemEval/MemoryData 目标重建见
+[M7 provenance note](../../workstreams/ws05.1-method-profile-provenance/notes/letta-profile-provenance.md)。

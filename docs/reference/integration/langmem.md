@@ -14,6 +14,40 @@
   统一是 framework extension，当前不存在 author benchmark profile。
 - 完整一手命令、source hash 与差异裁决见
   [M1 ruling](../../workstreams/ws02.7-method-track/branches/method-recertification/langmem/notes/langmem-current-product-identity-m1-ruling.md)。
+- ws05.1 M11 已把本地 MiniLM 的 bytes/tokenizer/pipeline/runtime 锁进 run identity v2，并以
+  31-file `langmem-main-v2` 组件闭包覆盖 product、package/lock、adapter/worker/transport/bootstrap。
+  新 run 必须 fresh-state，旧 artifact 不改写；完整收据见
+  [M11 implementation](../../workstreams/ws05.1-method-profile-provenance/notes/m11-effective-config-source-embedding-implementation.md)。
+
+## 机制与配置 provenance（2026-08-25）
+
+- 在 official repo、README、docs、package metadata 与精确关键词检索边界内，没有找到一篇可与
+  current package 对齐的 LangMem method paper；机制最高证据是官方 conceptual guide、quickstart、
+  public factory 与匹配 commit 的实现。五个 Phase 1 benchmark 也都没有公开的完整
+  build/search/answer/judge harness，因此 author builder 是 `N/A_BY_PRODUCT_SCOPE`，不是看到目录里
+  缺文件后凭空补一个模板。
+- public `create_memory_store_manager()` 的 effective 主流程是 background collection manager：
+  insert 开、内部 update 默认开、delete 关、`query_model=None`、`query_limit=5`、`max_steps=1`、
+  `phases=[]`。update 没有 store-manager 顶层开关，但会继承 lower-level manager 的
+  `enable_updates=True`；不能因 TOML 没有 `enable_updates` 就误判为未启用。
+- `query_limit=5` 同时限制 old-memory candidate，并在 `query_model=None` 时通过
+  `query_limit // 4` 决定指数窗口数量；当前值实际只用 session 最后一条 message 生成 old-memory
+  search query，完整 session 仍进入 enrichment LLM。它是承重算法参数，不是普通 readout top-k。
+- `max_steps=1` 允许一次 structured multi-tool call；大于 1 才进入额外精炼回合。`phases=[]` 只表示
+  没有第二轮自定义 phase，不会关闭第一轮自带的 compare/update/consolidate。conceptual guide 提到
+  importance/strength/recency/frequency，但 current main 没有一套对应的 concrete ranking scorer，不能
+  把设计指导写成现行算法。
+- current remote 相对 vendored pin 的四个 commit 只改 `uv.lock`，产品 Python/README/docs/package
+  metadata 未变；这仍是 runtime dependency drift，升级留横向实施批次，不把旧 artifact 重标。
+- 第三方 MemoryData 选择逐 message 调 manager、delete 开、时间强制写入内容，目标是统一 layer API、
+  逐调用归因和可消融配置；其 Python schema 默认 MiniLM384/GPT-4o-mini/query-limit5，实际 checked-in
+  JSON 又覆盖成 OpenAI 1536/GPT-4.1-mini/query-limit40。它的优势是控制面清晰，代价是更多调用且
+  manager 看不到完整 session context。framework 主轨选择官方 delayed-processing 的 session context
+  与 public delete=false，两者服务不同 estimand，不能用“与我们不一致”直接否定前者，也不能只读
+  schema default 后误报第三方框架的 effective 参数。
+
+完整算法图、参数矩阵、搜索边界与第三方方案比较见
+[M8 provenance note](../../workstreams/ws05.1-method-profile-provenance/notes/langmem-profile-provenance.md)。
 
 ## 产品 surface
 
@@ -130,9 +164,10 @@ source semantic mapping，因此 stable ranking=valid 与 provenance=N/A 必须�
 
 ## 配置与 answer/judge
 
-- `configs/methods/langmem.toml` 只有 `smoke` 与 `official_full`：两者只切 API runtime/model
-  和 full worker 上限，五格均固定 MiniLM-384 normalized、`query_limit=5`、`max_steps=1`、
-  insert/update 开、delete 关。官方五格 harness 集为空，故没有伪造 `author_*` section。
+- `configs/methods/langmem.toml` 只有一个 `[method]`，保存算法参数；API runtime、execution 与
+  benchmark evaluation 已由各自配置层组合。五格固定 MiniLM-384 normalized、`query_limit=5`、
+  `max_steps=1`、insert/update 开、delete 关。官方五格 harness 集为空，故没有伪造
+  `author_*` section。
 - LangMem 只构建和检索 memory；answer/judge 全部走 benchmark-scoped framework builder，
   gold answer/evidence/target/memory-point label 不进入 worker payload。
 - zero hit 返回空 `items=()` 加非空 sentinel；backend/协议失败一律抛错，不降级成空记忆。
@@ -142,7 +177,8 @@ source semantic mapping，因此 stable ranking=valid 与 provenance=N/A 必须�
 原 product-v1 的 M1/M2 与 B11 已全部闭合，冻结证书见
 [LangMem method-frozen-v1](../../workstreams/ws02.7-method-track/branches/method-recertification/langmem/notes/langmem-frozen-v1.md)：
 20 份 current run、47 个 conversation/question、9 个 croppable variant 的真实 W1/W2、2 个
-HaluMem fixed W1 以及 artifact/效率/隐私/state 机器门均通过。任何 current source/`uv.lock`、
+HaluMem 历史 fixed-shape W1 以及 artifact/效率/隐私/state 机器门均通过；2026-08-25 后
+operation runner 的并行轴已改为 UUID，W1 不再是 current 能力上限。任何 current source/`uv.lock`、
 manager factory、store/ranking、message/time policy、wrapper identity 或 benchmark stable contract
 的实质漂移，都必须重开 ledger 对应门；lock-only upstream drift 先做影响审计，不机械重烧。
 

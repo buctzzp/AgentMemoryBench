@@ -29,34 +29,40 @@
 
 ## M1-M10 单 method 顺序
 
-- [ ] **M1 LightMem**：用 `pre_compress` 三证闭环校准方法；复核 LoCoMo/LME author builder、
+- [x] **M1 LightMem**：用 `pre_compress` 三证闭环校准方法；复核 LoCoMo/LME author builder、
   `messages_use`、segmentation/summary/update lifecycle 与全部高影响数值。
-- [ ] **M2 A-Mem**：优先读取独立官方评测仓库 `third_party/methods/A-mem`，补齐已知遗漏的
+- [x] **M2 A-Mem**：优先读取独立官方评测仓库 `third_party/methods/A-mem`，补齐已知遗漏的
   LoCoMo prompt、decode/parse 与 reported config；与通用产品 `third_party/A-mem` 算法身份对表。
-- [ ] **M3 Mem0**：区分 current product、current memory-benchmarks 与旧论文 harness；双 namespace/
+- [x] **M3 Mem0**：区分 current product、current memory-benchmarks 与旧论文 harness；双 namespace/
   role reversal 若属 topology variant，不压成普通 author TOML。
-- [ ] **M4 MemoryOS**：闭合官方 LoCoMo 角色扮演 builder、paper/eval/PyPI 参数矛盾与 readout-native
+- [x] **M4 MemoryOS**：闭合官方 LoCoMo 角色扮演 builder、paper/eval/PyPI 参数矛盾与 readout-native
   边界。
-- [ ] **M5 MemOS**：核官方 LoCoMo/LongMemEval harness、product typed-handler effective config 与
+- [x] **M5 MemOS**：核官方 LoCoMo/LongMemEval harness、product typed-handler effective config 与
   author batching/readout 差异。
-- [ ] **M6 SimpleMem**：核论文完整三阶段、串并行窗口语义、官方 benchmark/prompt 可得性及高影响
+- [x] **M6 SimpleMem**：核论文完整三阶段、串并行窗口语义、官方 benchmark/prompt 可得性及高影响
   window/overlap/retrieval 参数。
-- [ ] **M7 Letta/MemGPT**：锁 legacy/product 版本与官方 eval 覆盖；区分省略 embedding、core-block
+- [x] **M7 Letta/MemGPT**：锁 legacy/product 版本与官方 eval 覆盖；区分省略 embedding、core-block
   profile 和作者 prompt，不用 hosted 默认倒推。
-- [ ] **M8 LangMem**：锁官方公开 benchmark 覆盖、manager/strategy 参数、反思/update/delete 开关
+- [x] **M8 LangMem**：锁官方公开 benchmark 覆盖、manager/strategy 参数、反思/update/delete 开关
   与最终 prompt；无官方 harness 时诚实留空 author section。
-- [ ] **M9 EverOS**：对齐 current EverOS/EverAlgo/独立 evaluation config，区分 product chat、paper
+- [x] **M9 EverOS**：对齐 current EverOS/EverAlgo/独立 evaluation config，区分 product chat、paper
   identity 与 controlled embedding；找不到公开 harness 的结果不伪造。
-- [ ] **M10 Graphiti OSS**：只声明 Graphiti，不借 Zep hosted prompt/结果；核 episode extraction、
+- [x] **M10 Graphiti OSS**：只声明 Graphiti，不借 Zep hosted prompt/结果；核 episode extraction、
   graph search/rerank 参数和公开 eval 资产。
 
 ## M11 横向裁决与实现
 
-- [ ] 对十家矩阵做重复值/矛盾/缺源审查；标出 `MAIN_CONFIRMED`、`AUTHOR_READY`、`PENDING`、
+- [x] 对十家矩阵做重复值/矛盾/缺源审查；标出 `MAIN_CONFIRMED`、`AUTHOR_READY`、`PENDING`、
   `SOURCE_UNAVAILABLE`、`IMPLEMENTATION_VARIANT`。
-- [ ] 只对证据要求的字段修改 `configs/methods/*.toml` 与强类型 config；不借机调优。
-- [ ] 为 `AUTHOR_READY` 格注册完整 builder 与稀疏 profile；未知名称或变量链不完整时 pre-API
-  fail-fast。
-- [ ] method 官方 judge 只形成候选清单；未经独立 metric/tier 裁决不进入主 evaluator registry。
-- [ ] 运行定向 mutation、prompt final-message parity、manifest/resume、文档标准与无 API全量门。
-- [ ] 更新父 ws05 重建矩阵；由用户重新批准预算、规模、run_id 后才恢复 pilot。
+- [x] **M11-A 配置真值**：退出已证实的 dead/假控制面，显式锁已证实的 hidden effective 值；
+  不在本批切换 method source、search recipe 或算法 topology。
+- [x] **M11-B source/embedding identity**：用可维护的实际消费源码闭包替代脆弱少文件清单；给
+  controlled MiniLM 锁本地内容、tokenizer、dimension、normalization、instruction 与 distance，
+  identity 变化严格触发 fresh-state/resume mismatch。
+- [x] **M11-C 作者与算法分叉**：只为真正 `AUTHOR_READY` 的格注册完整 builder 与稀疏 profile；
+  `AUTHOR_NOT_READY` 不写 skeleton。EverOS agentic、A-Mem source 选择等会改变 estimand 的事项
+  单独裁决，不夹带进配置清理。
+- [x] method 官方 judge 只形成候选清单；未经独立 metric/tier 裁决不进入主 evaluator registry。
+- [x] **M11-D 验收**：运行定向 mutation、prompt final-message parity、manifest/resume、文档标准与
+  无 API全量门；旧 artifact 只读兼容与新 run 严格身份同时成立。
+- [x] 更新父 ws05 重建矩阵；由用户重新批准预算、规模、run_id 后才恢复 pilot。

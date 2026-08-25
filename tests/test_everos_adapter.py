@@ -28,6 +28,7 @@ from memory_benchmark.methods.everos_adapter import (
     EverOSRuntime,
     _namespace_id,
     _parse_timestamp_ms,
+    _render_controlled_ome_config,
     build_everos_source_identity,
     clean_everos_conversation_state,
     validate_everos_variant,
@@ -279,6 +280,13 @@ def test_everos_manifest_contains_public_identity_but_no_secret_value() -> None:
     )
     assert manifest["input_content_time_prefix"] is False
     assert manifest["product_episode_time_policy"] == "source-derived-only-v1"
+    assert manifest["ome_strategy_profile"] == {
+        "extract_atomic_facts": True,
+        "extract_foresight": False,
+        "extract_user_profile": False,
+        "reflect_episodes": False,
+        "trigger_profile_clustering": True,
+    }
     serialized = json.dumps(manifest, sort_keys=True)
     assert "sk-test" not in serialized
     assert "base_url" not in serialized
@@ -355,7 +363,9 @@ def test_everos_product_root_omits_endpoint_template_and_keeps_ome_config(
 
     assert marker["adapter_version"] == EVEROS_ADAPTER_VERSION
     assert not (product_root / "everos.toml").exists()
-    assert (product_root / "ome.toml").read_bytes() == ome_payload
+    rendered_ome = (product_root / "ome.toml").read_bytes()
+    assert rendered_ome == _render_controlled_ome_config(ome_payload)
+    assert b"[strategies.extract_user_profile]\nenabled = false" in rendered_ome
     serialized_root = "\n".join(
         path.read_text(encoding="utf-8")
         for path in product_root.iterdir()
@@ -369,6 +379,19 @@ def test_everos_product_root_omits_endpoint_template_and_keeps_ome_config(
     (product_root / "ome.toml").write_text("drift", encoding="utf-8")
     with pytest.raises(ConfigurationError, match="config drifted: ome.toml"):
         runtime._prepare_product_root("run_conv")
+
+
+def test_everos_controlled_ome_render_rejects_conflicting_upstream_default() -> None:
+    """upstream 若显式启用画像抽取，主轨不得靠重复 table 暗中覆盖。"""
+
+    with pytest.raises(ConfigurationError, match="default conflicts"):
+        _render_controlled_ome_config(
+            b"[strategies.extract_user_profile]\nenabled = true\n"
+        )
+    already_controlled = (
+        b"[strategies.extract_user_profile]\nenabled = false\n"
+    )
+    assert _render_controlled_ome_config(already_controlled) == already_controlled
 
 
 def test_everos_local_embedding_requires_its_declared_model_directory(

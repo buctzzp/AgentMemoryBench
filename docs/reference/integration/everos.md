@@ -2,8 +2,12 @@
 
 > 判据模板：`../method-integration-checklist.md` §B；勾选总表：`../integration-status.md`。
 > 当前状态：历史 **`method-frozen-v1`** 证据仍有效；18 份 v6 真实 smoke、W1/W2、artifact、
-> 隐私与产品状态门均已关闭。2026-08-24 主 build identity 已升级到 controlled MiniLM v7，
-> 零 API 产品门通过，但 v7 真实 smoke 尚待 ws05 M5 后以新 run-id 重建。冻结证书见
+> 隐私与产品状态门均已关闭。2026-08-25 主 build identity 已升级到 controlled MiniLM v8，
+> 并显式关闭不进入主表 readout 的 build-time user-profile extraction；v8 真实 smoke 尚待
+> 以新 run-id 重建。这里的 frozen 只证明
+> 产品调用、输入安全、生命周期和 artifact 合同；ws05.1 M9 新发现的 hybrid/agentic、后台 profile
+> extraction 与 source-lock coverage 已由 M11 显式裁清；agentic 仍是另一个 estimand，不混入主轨。
+> 冻结证书见
 > [`everos-frozen-v1.md`](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-frozen-v1.md)。
 
 - 主 source：官方稳定版 `EverOS v1.2.3@48fc9084888bc17100053227284f939a5aca5e91`，
@@ -14,13 +18,46 @@
 - 产品调用面：在隔离 worker 内进入官方 `create_app()` lifespan，直接调用与
   `/api/v2/memory/add|flush|search|get` 相同的 typed DTO/service。它仅省去 HTTP transport，
   不绕过 boundary、Episode、Cascade、OME、SQLite、LanceDB 或产品搜索算法。
-- adapter：`everos-product-chat-v7`；provider v3、worker protocol v3、sidecar v2、
+- adapter：`everos-product-chat-v8`；provider v3、worker protocol v4、sidecar v2、
   `consume_granularity=session`。每个
   provider 独占 Python 3.12 worker，每个 conversation 使用独立 product root；worker 进入
   official lifespan 后直接调用 typed `memorize/search/get`。
-- 官方 benchmark：current EverOS 与 EverAlgo 的公开 harness 只覆盖 LoCoMo；论文另报告
-  LongMemEval，但没有公开 loader/final payload。HaluMem、BEAM、MemBench 均为 framework
-  extension。
+- 官方 benchmark：current v1.2.3 product tree 的公开 harness 只覆盖 LoCoMo；官方历史 commit
+  `5f70b071…`/`29d555c…` 曾公开 LoCoMo、LongMemEval 与 PersonaMem evaluation，包括 LME
+  converter/final answer chain，但该历史不在 current main ancestry，也未证明是 exact paper commit。
+  HaluMem、BEAM、MemBench 均为 framework extension。
+
+## 算法机制卡与 profile 身份
+
+EverMemOS paper（arXiv `2601.02163v2`）的核心链是：semantic boundary → narrative Episode →
+Atomic Facts/Foresight → embedding/time MemScene clustering → dense+BM25/RRF scene recall → Episode
+cross-encoder rerank → LLM sufficiency → 必要时三 query rewrite。LoCoMo/LongMemEval quantitative 主表
+读取 Episodes，不读取 Profile；LoCoMo 使用 `.70/7 days`，LongMemEval 使用 `.50/30 days`，说明
+作者在同一 pipeline 下按 dialogue structure 校准 memory-organization scale。
+
+必须区分四种身份：
+
+- **paper/author reported**：Qwen3-Embedding-4B + Qwen3-Reranker-4B + agentic retrieval，按 benchmark
+  使用不同 clustering；exact paper source commit 尚不可得。
+- **official historical evaluation**：29d EverCore agentic harness，有公开 LoCoMo/LME converter、
+  method answer prompt 与 parser，但 effective clustering 是 `.65/7`，且若配置
+  `max_content_length=8000` 会逐 message 字符截断；不是 exact paper implementation。
+- **v1.2.3 product**：chat/agent、keyword/vector/hybrid/agentic、OME/Cascade、LanceDB 等通用产品
+  能力；product default 优先可部署性，不等于 paper experiment preset。
+- **framework current v8**：chat/session、batch25、controlled MiniLM384、hybrid、reranker
+  disabled、profile extraction disabled、framework unified answer。它是低依赖且可比较的 product variant，不是
+  paper-complete EverMemOS。
+
+v8 在 upstream `default_ome.toml` 上生成 run-local override，明确锁定 Atomic Facts 开、Foresight
+关、profile clustering 开、**user profile extraction 关**、Reflection 关。worker 不以 TOML 文本
+代替生效证据，而是在 official lifespan 启动后等待并读取最终 `StrategyMeta.enabled`；任一值不符即
+fail-fast。`SearchRequest(include_profile=False)` 仍锁 readout 边界，但不再被误当成 build 侧关闭证据。
+该变化会改变构建状态和 LLM 成本，因此 adapter v7→v8，旧状态不得重标或 resume。
+
+current LoCoMo official harness 还只查询 `eval_owner=speaker_a`；framework 为通用双 speaker readout
+会查询全部 owner 后稳定合并。二者各有目标：前者复现作者 intended topology，后者避免遗漏任一
+speaker partition。若建立 `author_locomo`，single-owner/multi-owner 必须进入显式 topology identity，
+不能伪装成普通 top-k 覆盖。
 
 ## 产品接口契约（参数、返回与批次）
 
@@ -120,11 +157,16 @@ anchor：它没有 source identity，只满足 EverOS Episode 边界；其他 si
   真实 tokenizer 输入量与 wall-clock latency，失败尝试进入 append-only attempt ledger。reranker
   capability 固定为 `None`；若 ambient 配置意外启用，worker 在 lazy SearchManager 构造前
   fail-fast。answer/judge 沿框架公共观测。
-- **B7 controlled embedding**：OpenCodeGo/primary 只承担 build/answer/judge LLM。v7 经 upstream
+- **B7 controlled embedding**：OpenCodeGo/primary 只承担 build/answer/judge LLM。v8 经 upstream
   `EmbeddingProvider`/`EmbeddingCapability` seam 注入本地 `all-MiniLM-L6-v2`/384；项目 patch 只让
-  provider 与六张 LanceDB schema 共读公开 dimension，默认仍为 upstream 1024。模型内 L2
-  normalize + LanceDB L2 进入 manifest，rerank 保持 disabled-zero-call。旧 v6 Qwen/1024 状态必须
+  provider 与六张 LanceDB schema 共读公开 dimension，默认仍为 upstream 1024。模型 pipeline L2
+  normalize + LanceDB cosine 进入 manifest，rerank 保持 disabled-zero-call。旧 v6 Qwen/1024 状态必须
   全量重建，不能 resume 或重标。
+- **M11 source/strategy identity**：v8 现显式锁 atomic facts on、foresight/profile extraction/
+  reflection off、profile clustering on，并在 config reloader 后读取最终 `StrategyMeta` 验真；296-file
+  `everos-api-main-v2` 闭包覆盖 product、prompt/config assets、lock、adapter/worker/patch。新 run
+  使用 identity v2/fresh-state；完整收据见
+  [M11 implementation](../../workstreams/ws05.1-method-profile-provenance/notes/m11-effective-config-source-embedding-implementation.md)。
 - **B9 artifact 边界**：v6 不再把 upstream `default.toml` 复制成 run-local `everos.toml`；产品
   继续从 vendored package 读取默认值并接受受限环境覆盖，root 只保留运行时实际 watch 的
   `ome.toml`。18 个 run 对 `.env` key/base URL 与 upstream endpoint 的精确值扫描均为零命中。
@@ -157,7 +199,12 @@ anchor：它没有 source identity，只满足 EverOS Episode 边界；其他 si
 - [method-frozen-v1 证书](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/notes/everos-frozen-v1.md)
 - [EverOS 接入支线](../../workstreams/ws02.7-method-track/branches/method-recertification/everos/README.md)
 - [ws05 M1 controlled embedding 实现](../../workstreams/ws05-experiment-reporting/branches/runtime-config-and-observability/notes/2026-08-24-m1-implementation.md)
+- [ws05.1 M9 paper/product/author profile provenance](../../workstreams/ws05.1-method-profile-provenance/notes/everos-profile-provenance.md)
 
-当前判词：`EVEROS_V7_ZERO_API_READY_FOR_M5`。v6 smoke 继续证明既有产品链、输入、产物与资格
-边界，不把极小样本分数解释成效果排名；v7 controlled build 已通过 patch 重放、本地模型、schema
-维度与 official lifespan 零 API 门，但尚不能借旧 v6 run 宣称新 embedding 实跑完成。
+当前判词：`EVEROS_V7_INTERFACE_AND_SAFETY_FROZEN / M9_EVIDENCE_COMPLETE /
+CURRENT_LOCOMO_AUTHOR_BUILDER_READY / HISTORICAL_LME_CODE_READY / PAPER_AUTHOR_REPRO_NOT_READY`。v6 smoke
+继续证明既有产品链、输入、产物与资格边界，不把极小样本分数解释成效果排名；v8 controlled build
+已通过 patch 重放、本地模型、schema 维度、effective profile 与 source closure 零 API 门；agentic
+仍是独立算法分叉，且不能借旧 v6 run 宣称新 embedding 实跑完成。
+current product LoCoMo builder 已闭合但 raw dataset revision 未锁；29d LongMemEval 只能命名为官方
+历史代码身份，不能冒充 exact paper reproduction。

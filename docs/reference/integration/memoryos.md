@@ -7,8 +7,11 @@
 > 当前新 smoke/ws05 pilot 使用 `opencodego/ox-alpha-free`；原 B11 run 的
 > `gpt-4o-mini` 身份保持历史真实，不改写、不跨模型比较。现行运行身份见
 > [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
-> 2026-08-14 M1-B 后，新 run 由 `memoryos.toml` profile 与 `answer_builder` 选择，并写
-> `MethodRunIdentity v1`；旧 readout-native/config-track run 保持历史只读身份。
+> 新 run 由 `memoryos.toml` profile 与 `answer_builder` 选择；2026-08-25 M11 后写
+> `MethodRunIdentity v2`，v1 只读且不 resume；旧 readout-native/config-track run 保持历史只读身份。
+> 2026-08-25 ws05.1 M4 已把 paper、LoCoMo `eval/`、current PyPI product 与 framework main
+> 四种身份拆开；完整证据见
+> [`memoryos-profile-provenance.md`](../../workstreams/ws05.1-method-profile-provenance/notes/memoryos-profile-provenance.md)。
 > 证据底：`ws02.7/notes/m1-memoryos-evidence.md`、
 > `ws02.7/notes/m2-memoryos-adapter.md`。
 
@@ -84,6 +87,55 @@ user knowledge、assistant knowledge 五层组装成 `RetrievalResult`。`Retrie
 只是 framework 请求深度；产品 `retrieve_context` 没有统一 page top-k，实际 ranked depth
 会在 metadata 中诚实另报。
 
+## 算法机制与 profile provenance（2026-08-25）
+
+### 快速机制卡
+
+MemoryOS 的论文核心不是普通向量库，而是四段流水线：QA page 先进入 FIFO STM；STM 满后经
+连续性、主题摘要和相似度进入 MTM segment；segment heat 达阈值后更新 LPM user profile 与
+user/assistant knowledge；query 同时读取全部 STM、MTM top segment/page 与 LPM，再交给 response
+generator。检索命中会更新 `N_visit/last_visit_time/heat`，所以 retrieval 不是无副作用纯函数。
+
+需要回答“MemoryOS 算法是什么”时先读本节；只有讨论论文/产品/eval 的精确参数、source hash 或
+作者复现时才进入 ws05.1 M4 长 note，避免重复读论文又不丢可复用机制知识。
+
+### 四种不可混写的身份
+
+| identity | 目的 | 稳定结论 |
+| --- | --- | --- |
+| paper | 定义分层算法与 reported 参数 | arXiv `2506.06326`；STM=7、heat=5、top-m=5、LoCoMo page top-k=10；MTM `200` 是 segment maximum length，不等于代码的 2000-session capacity |
+| official LoCoMo `eval/` | 复现作者仓库数字 | STM=1、MTM=2000、queue=10、heat 系数 `.8/.8/.0001`、keyword retrieval、官方 role-play answer；是专用 implementation variant |
+| current PyPI product | 通用产品接口 | STM=10、MTM=2000、queue=7、heat `1/1/1`、三路 retrieval、独立 assistant LTM；`get_response` 会把测试问答写回 |
+| framework main | 跨五 benchmark 的受控比较 | patched current product + controlled MiniLM + pure retrieval + benchmark builder；保留单侧 turn、missing time、provenance 与效率观测 |
+
+当前 product source 对齐 `BAI-LAB/MemoryOS@587ed7755c7aed179965792830ff1b5ad9a6fa92`
+并叠加四处已声明 compatibility/observer patch；vendored product hash=
+`5a9af420f01285b0b0ed2846864dbd20cfa78a61b977c2d4352eba4211ce08dd`，与 adapter 合并后=
+`7c82b26967a57715b91c968cf177f27f2161ede4d0727a5f4c783dd431b37e9b`。ChromaDB 同时改变
+candidate、keyword、heat、distance 与持久化语义，继续归为独立算法 variant，而非 storage swap。
+
+### 官方 LoCoMo exact topology 与 framework main
+
+官方的 `speaker_a→user_input`、`speaker_b→agent_response` 和 answer 端角色扮演有明确目的：适配
+MemoryOS 的双槽 QA page，不在存储文本中硬加真人前缀。framework 保留这个不变量，但没有照搬
+两个会破坏 raw-turn 保真的 exact harness 行为：official `processed` 跨 session 累积，锁定数据上
+118 次把后续 session 的 speaker_b-first turn 回填到上一 session，其中 61 次覆盖已有 assistant；
+另外 93 个单侧 page 会因 eval 的双非空门而不进入 MTM。framework 以 session 为硬边界并用空槽
+保留单侧真实 turn，不虚构内容。
+
+因此，`repo_eval_exact` 适合复现作者数字，`framework_corrected_product` 适合五格主表；二者目标
+不同，不能相互贴“错误”标签，也不能共用 manifest identity。
+
+### Author LoCoMo 状态
+
+`src/memory_benchmark/prompts/author/memoryos.py` 已通过 AST 锁住官方 final `system,user` 字符串，
+并记录 `gpt-4o-mini / temperature=.7 / max_tokens=2000`。但 helper 仍要求调用者先组装
+history/retrieval/background/assistant knowledge，缺完整 method-state→变量格式化、显式 output
+parser、`[author_locomo]` TOML 和 registry reachability；新 run 仍只接受 benchmark builder。
+
+故当前结论是 `FINAL_MESSAGE_TEMPLATE_PARITY_PASS / AUTHOR_NOT_READY`，不是可运行的完整作者
+复现配置。官方没有 LLM judge，只有本地 token-set F1；framework judge fallback 不能标成官方 judge。
+
 ## B1-B11 当前结论
 
 - **B1 来源与接口 ✅（PyPI canonical；ChromaDB=reproduction variant）**：只用产品版 `add_memory` 和拆出的纯 retrieval，不用
@@ -115,12 +167,14 @@ user knowledge、assistant knowledge 五层组装成 `RetrievalResult`。`Retrie
   `get_response` 末尾把 eval 问答写回。三路 future 吞异常的官方降级由 adapter 包装
   实际任务方法审计，metadata 写 `degraded_retrieval*`；合法空命中不误标。LLM 有
   timeout/retry/clean-retry；首次 embedding 模型下载缺显式 offline/timeout 仍是声明缺口。
-- **B9 模型/超参口径 ✅（当前 MiniLM smoke build；零重建）**：paper、eval、pypi
+- **B9 模型/超参口径 ✅（当前 MiniLM 行为不变；身份升级需重建）**：paper、eval、pypi
   默认三岔已留档，不把其中一套冒充另一套。embedding 作为 TOML 普通 build 字段；现行 PyPI
   签名默认与当前 smoke profile 同为
-  SentenceTransformer all-MiniLM-L6-v2/384、外部 L2 normalize + FAISS IP，build 字节不变，
-  无需重建；性能主配置仍在真实效果实验前通过 TOML 裁定，裸名/限定名等价须以本地模型
-  revision/hash 进 identity。
+  SentenceTransformer all-MiniLM-L6-v2/384、模型 pipeline L2 + 产品 L2 + FAISS IP。M11 将 Hub-style
+  名称改为项目本地 logical path，并把真实 bytes/tokenizer/runtime 锁进 run identity v2；即使当前
+  权重行为可能同源，也不能倒推历史 build 等价，故新 run 必须重建。12-file
+  `memoryos-pypi-main-v2` source closure 同时取代旧少文件 hash；完整收据见
+  [M11 implementation](../../workstreams/ws05.1-method-profile-provenance/notes/m11-effective-config-source-embedding-implementation.md)。
 - **B10 ✅ 历史身份可读且 M1-B 新运行迁移已关闭；author builder 待办**：LoCoMo 官方 system/user prompt 由 AST parity 锁逐字
   核对，answer=`gpt-4o-mini`, temperature=0.7, max_tokens=2000。官方无 LLM judge，
   bundle `judge_profile=None` 时回落框架默认 judge。paper build 超参只登记资产，当前

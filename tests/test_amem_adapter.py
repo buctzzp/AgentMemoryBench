@@ -52,7 +52,6 @@ def test_amem_config_rejects_invalid_retrieve_k() -> None:
             embedding_model="all-MiniLM-L6-v2",
             retrieve_k=0,
             max_workers=1,
-            use_product_layer=True,
             profile_name="bad",
         )
 
@@ -69,6 +68,16 @@ def test_amem_source_identity_covers_official_core_files() -> None:
     assert "agentic_memory/retrievers.py" in identity["files"]
     assert "README.md" in identity["files"]
     assert "agentic_memory/llm_controller.py" in identity["files"]
+
+
+def test_amem_product_embedding_function_defaults_to_cosine_without_model_load() -> None:
+    """A-Mem 安装的 Chroma embedding function 应把新 collection 锁为 cosine。"""
+
+    from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+
+    embedding_function = object.__new__(SentenceTransformerEmbeddingFunction)
+
+    assert embedding_function.default_space() == "cosine"
 
 
 def test_clean_amem_conversation_state_only_removes_target_directory(
@@ -1145,7 +1154,7 @@ def test_amem_production_runtime_receives_openai_compatible_settings(
     method = AMem(
         config=AMemConfig(
             llm_model="gpt-4o-mini",
-            embedding_model="all-MiniLM-L6-v2",
+            embedding_model="models/all-MiniLM-L6-v2",
             retrieve_k=2,
             max_workers=1,
             profile_name="smoke",
@@ -1157,7 +1166,12 @@ def test_amem_production_runtime_receives_openai_compatible_settings(
 
     method.add([_conversation_with_private_gold()])
 
-    assert created_kwargs["model_name"] == "all-MiniLM-L6-v2"
+    assert created_kwargs["model_name"] == str(
+        (
+            Path(__file__).resolve().parents[1]
+            / "models/all-MiniLM-L6-v2"
+        ).resolve()
+    )
     assert created_kwargs["llm_backend"] == "openai"
     assert created_kwargs["llm_model"] == "gpt-4o-mini"
     assert created_kwargs["api_key"] == "test-key"

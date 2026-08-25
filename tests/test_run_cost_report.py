@@ -271,6 +271,7 @@ def test_run_cost_report_reads_new_profile_identity_without_legacy_track(
                 identity_status="pending",
             ),
         ),
+        project_root=Path(__file__).resolve().parents[1],
     )
     paths.manifest_path.write_text(
         json.dumps({"method": {"run_identity": identity.to_manifest_dict()}}),

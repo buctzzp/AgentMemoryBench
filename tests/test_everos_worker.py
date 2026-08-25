@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+import memory_benchmark.methods.everos_worker as everos_worker
 from memory_benchmark.methods.everos_worker import (
     EVEROS_ADAPTER_VERSION,
     _LocalSentenceTransformerEmbeddingProvider,
@@ -678,6 +679,51 @@ def test_install_observers_rejects_ambient_reranker_capability(
         engine._install_observers()
 
     assert not isinstance(llm_accessor._llm_client, _ObservedLLMClient)  # type: ignore[attr-defined]
+
+
+def test_worker_waits_for_final_controlled_ome_strategy_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """worker 必须读取 lifespan 最终对象，不能把 root TOML 文本当成生效证据。"""
+
+    expected = {
+        "extract_atomic_facts": True,
+        "extract_foresight": False,
+        "extract_user_profile": False,
+        "reflect_episodes": False,
+        "trigger_profile_clustering": True,
+    }
+
+    class _ProfileRegistry:
+        """按名称返回最终 StrategyMeta。"""
+
+        def __init__(self, profile: dict[str, bool]) -> None:
+            """保存可变 profile。"""
+
+            self.profile = profile
+
+        def get(self, name: str) -> Any:
+            """返回带 enabled 的最小 meta。"""
+
+            return SimpleNamespace(enabled=self.profile[name])
+
+    registry = _ProfileRegistry(dict(expected))
+    engine = _WorkerEngine()
+    engine.app = SimpleNamespace(
+        state=SimpleNamespace(
+            lifespan_data={"ome": SimpleNamespace(_registry=registry)}
+        )
+    )
+    assert asyncio.run(engine._wait_for_controlled_ome_profile()) == expected
+
+    registry.profile["extract_user_profile"] = True
+    monkeypatch.setattr(everos_worker, "_OME_PROFILE_APPLY_TIMEOUT_SECONDS", 0.0)
+    with pytest.raises(RuntimeError, match="was not applied"):
+        asyncio.run(engine._wait_for_controlled_ome_profile())
+
+    registry.profile["extract_user_profile"] = "false"  # type: ignore[assignment]
+    with pytest.raises(RuntimeError, match="profile is invalid"):
+        asyncio.run(engine._wait_for_controlled_ome_profile())
 
 
 def test_initialize_enter_failure_preserves_original_error_and_never_calls_exit(

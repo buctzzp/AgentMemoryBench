@@ -6,8 +6,17 @@
 > 当前新 smoke/ws05 pilot 使用 `opencodego/ox-alpha-free`；本页既有 B11 数字与
 > token 观测仍是当时 `gpt-4o-mini` 历史 run，不改写、不跨模型比较。现行运行身份见
 > [`../api-runtime-profiles.md`](../api-runtime-profiles.md)。
+> 2026-08-24 ws05.1 M1 参数 provenance 复核：论文 v4 的完整 LightMem 流水线必须包含
+> pre-compress、topic segmentation、STM 聚合抽取与 LTM direct insert；主配置的
+> `true/true/r=0.7/th=512` 有论文支撑。原 `extract_threshold` 在 current product 中没有
+> 消费者，framework `stm_threshold` 也只记录 identity、产品仍硬编码 512。vendored core/eval
+> 基于 upstream `02e675b1…` 叠加本项目 patch，而 upstream main `b4ef1dd2…` 已改变
+> no-topic 行为。五格历史行为冻结继续有效；M11 已退出 dead config，并用完整组件闭包锁
+> manager/buffer/utils 等 current 消费者，但仍不能宣称当前 TOML 等于任一唯一 paper row。完整证据见
+> [`../../workstreams/ws05.1-method-profile-provenance/notes/lightmem-profile-provenance.md`](../../workstreams/ws05.1-method-profile-provenance/notes/lightmem-profile-provenance.md)。
 > 2026-08-14 M1-B 后，新 run 由 `lightmem.toml` 的公开 profile + section 内
-> `answer_builder` 选择，并写 `MethodRunIdentity v1`；旧 `config_track/TrackIdentity v1`
+> `answer_builder` 选择；2026-08-25 M11 后新 run 写 `MethodRunIdentity v2`，v1 与旧
+> `config_track/TrackIdentity v1`
 > run 只作历史 artifact 回读，下文 native/unified 证据均按其发生时身份理解。
 > 2026-07-17 的 method-frozen-v2 与 v6 LoCoMo smoke 仍是有效历史证据，但 v7 改变
 > 公共 readout 与 embedding observation 契约，不能沿用 v6 artifact 宣称当前版本已
@@ -214,7 +223,8 @@ prompt/API-call/segment 诊断，不返回新 `MemoryEntry` 列表；HaluMem ses
 
 ## 0.5 接口契约详解（官方 API）
 
-以下签名、字段和返回分支均按 vendored 官方实现现场核对；adapter 的实际传参另以
+以下签名、字段和返回分支均按 **02e675-derived + framework patches 的 vendored 实现**现场核对；
+它们不是 2026-08-24 upstream `main` 的无版本“当前默认”。adapter 的实际传参另以
 `src/memory_benchmark/methods/lightmem_adapter.py` 双锚，不把 docstring 中的
 “typically”当作结构事实（`third_party/methods/LightMem/src/lightmem/memory/lightmem.py:204-212,242-250`）。
 
@@ -238,7 +248,7 @@ prompt/API-call/segment 诊断，不返回新 `MemoryEntry` 列表；HaluMem ses
 | 返回分支 | 精确结构 | 键的含义 |
 |---|---|---|
 | topic segmentation 开启的常规路径，以及“尚无 segment”或“尚未触发 extraction”的早退 | `{"add_input_prompt": list, "add_output_prompt": list, "api_call_nums": int}`（`third_party/methods/LightMem/src/lightmem/memory/lightmem.py:267-271,316-318,325-327,392`） | 每个 extraction 结果的 `input_prompt` 依次追加到 `add_input_prompt`，`output_prompt` 依次追加到 `add_output_prompt`，每处理一个非空结果就把 `api_call_nums` 加一（`third_party/methods/LightMem/src/lightmem/memory/utils.py:383-403`）。**没有逐次 token 键**：token usage 只累加到实例的 `self.token_stats`（`third_party/methods/LightMem/src/lightmem/memory/utils.py:386-391`）。 |
-| `config.topic_segment == False` 的早退 | `{"triggered": True, "cut_index": len(msgs), "boundaries": [0, len(msgs)], "emitted_messages": msgs, "carryover_size": 0}`（`third_party/methods/LightMem/src/lightmem/memory/lightmem.py:300-309`） | 返回整批标准化消息及固定边界；该分支在抽取和 `MemoryEntry` 构造之前直接返回（`third_party/methods/LightMem/src/lightmem/memory/lightmem.py:300-311`）。 |
+| vendored `config.topic_segment == False` 的早退 | `{"triggered": True, "cut_index": len(msgs), "boundaries": [0, len(msgs)], "emitted_messages": msgs, "carryover_size": 0}`（当前 vendored `lightmem.py:321-330`） | 本仓 02e675-derived core 在抽取和 `MemoryEntry` 构造前直接返回。upstream `2c5abfb1…` 已改为把全部消息当一个 segment 后继续 extraction/store；主配置固定 true，但 source upgrade 必须显式复核。 |
 
 **memory-point 关键答案：没有。** 抽取结果会在函数内部转成
 `list[MemoryEntry]`（`third_party/methods/LightMem/src/lightmem/memory/lightmem.py:363-371`），
@@ -594,14 +604,21 @@ distinct raw timestamps 仍保持，repeated raw timestamps 才形成 method-der
   （`third_party/methods/LightMem/src/lightmem/memory/lightmem.py:648-710`）=
   embed → `embedding_retriever.search` → 可选 tag 过滤 → 字符串格式化,全程
   无任何 insert/update/save,唯一副作用是日志写文件（观测性,非算法状态）。
-- **B9 模型口径 ✅（当前 MiniLM smoke build；性能参数待后裁）**：证据全表
-  `ws02.7/notes/lightmem-native-config-threeway.md`。历史主/作者候选差异已实锤：
-  extract_threshold 0.5 vs 0.1、compression rate 0.7 vs 0.6(locomo)/0.8(lme)、offline
-  score 0.8 vs 0.9(locomo)。这些不是现在要为 smoke 调优的理由；当前五格继续使用已验收
-  TOML 与 local HF all-MiniLM-L6-v2/384/Qdrant cosine，零重建。本地 revision/hash 尚未 pin，
-  如实声明 `local_unpinned`。真实效果实验前再裁 `official_full` 最终数值；作者 LoCoMo/LME
-  参数只进入对应 `author_<benchmark>` section，不自动按 benchmark 切换。repo schema 顶层
-  `text_embedder=None` 且 compressor/topic 默认 OFF 的事实继续保留，不能把不可运行默认当权威。
+- **B9 模型/参数口径 ✅（行为与 provenance 已闭合）**：当前五格使用 local HF
+  all-MiniLM-L6-v2/384/Qdrant cosine；主算法固定 pre-compress/topic/flat、`r=.7`、真实
+  STM 512、hybrid、online-soft。2026-08-24 三层复核已撤回旧表述中
+  “`extract_threshold` 0.5 vs 0.1 是有效算法差异”：该字段只有 schema/harness/framework
+  pass-through，current product 无消费者，是 `DEAD_CONFIG`，已在 ws05.1 M11 退出新配置与
+  identity；论文 `th` 指 STM capacity，而产品
+  构造硬编码 512。`offline_update_score_threshold` 在 main online-soft 下同样 dormant，只在
+  LoCoMo consolidated author topology 生效。论文/官方脚本还报告多组 `(r,th)`，不能压成一个
+  自动 `author_<benchmark>`；current LME script 省略 compression rate 后实际继承 .8，LoCoMo
+  script 写 .6，二者又都受 product STM=512 约束，不能直接冒充 paper tables。现行
+  smoke/frozen artifacts 不改写。ws05.1 M11 已把 dead identity 退出、九家共享 MiniLM
+  锁为 content/tokenizer/runtime identity，并以 70-file `lightmem-main-v2` 组件闭包替代旧少文件
+  hash；LoCoMo/LME author row 因完整 source/data/final-message/decode/parser 尚未同时闭合，仍不注册。
+  新 run 必须 fresh-state，旧 artifact 只按原 manifest 回读。完整收据见
+  [M11 implementation](../../workstreams/ws05.1-method-profile-provenance/notes/m11-effective-config-source-embedding-implementation.md)。
 - **B10 ✅（当前主 TOML truthful；author builder 按政策延后）**：历史 M0 R1/R2 已让
   manifest 显式写 `native_scope=readout_only`、实际 embedding、answer/judge model source，
   严格参与 evaluate/resume，旧产物身份可信。M1-B 已让 `smoke/official_full` 显式声明

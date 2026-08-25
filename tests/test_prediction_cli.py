@@ -369,7 +369,6 @@ def test_resolve_mem0_profile_reads_real_values_from_toml(
         reader_model = "gpt-4o-mini"
         top_k = 17
         max_workers = 1
-        ingestion_chunk_size = 1
         infer = true
 
         [official_full]
@@ -379,7 +378,6 @@ def test_resolve_mem0_profile_reads_real_values_from_toml(
         reader_model = "gpt-4o-mini"
         top_k = 200
         max_workers = 10
-        ingestion_chunk_size = 1
         infer = true
         """,
         encoding="utf-8",
@@ -518,8 +516,8 @@ def test_smoke_dataset_can_select_two_independent_conversations() -> None:
     assert smoke_dataset.metadata["smoke_conversation_limit"] == 2
 
 
-def test_smoke_concurrency_override_is_bounded_and_does_not_change_full() -> None:
-    """smoke 允许最多十个 worker，official-full 必须继续使用官方十并发。"""
+def test_smoke_concurrency_override_is_positive_and_does_not_change_full() -> None:
+    """smoke 显式 worker 无伪上限；official-full 仍使用其配置默认值。"""
 
     smoke = Mem0Config.smoke()
     full = Mem0Config.official_full()
@@ -527,29 +525,46 @@ def test_smoke_concurrency_override_is_bounded_and_does_not_change_full() -> Non
     assert resolve_prediction_max_workers(smoke, smoke_max_workers=None) == 1
     assert resolve_prediction_max_workers(smoke, smoke_max_workers=2) == 2
     assert resolve_prediction_max_workers(smoke, smoke_max_workers=10) == 10
+    assert resolve_prediction_max_workers(smoke, smoke_max_workers=37) == 37
     assert resolve_prediction_max_workers(full, smoke_max_workers=None) == 10
 
-    with pytest.raises(ConfigurationError, match="at most 10"):
-        resolve_prediction_max_workers(smoke, smoke_max_workers=11)
+    with pytest.raises(ConfigurationError, match="at least 1"):
+        resolve_prediction_max_workers(smoke, smoke_max_workers=0)
     with pytest.raises(ConfigurationError, match="smoke-only"):
         resolve_prediction_max_workers(full, smoke_max_workers=2)
 
 
-def test_memos_smoke_rejects_worker_override_before_runtime_loading() -> None:
-    """MemOS W2 已证不安全，registered preflight 必须拒绝覆盖。"""
+def test_memos_smoke_accepts_resource_selected_workers_before_runtime_loading() -> None:
+    """MemOS 每 worker 独立 runtime，不应把 W2/W10 写成 method 天花板。"""
 
     registration = prediction_cli.get_method_registration("memos")
 
-    with pytest.raises(
-        ConfigurationError,
-        match="MemOS does not support --workers override",
-    ):
+    assert prediction_cli._resolve_smoke_max_workers(
+        method_display_name=registration.display_name,
+        profile_name="smoke",
+        smoke_max_workers=2,
+        configured_max_workers=1,
+        allow_override=registration.allow_smoke_worker_override,
+        max_parallel_workers=registration.max_parallel_workers,
+    ) == 2
+
+    assert prediction_cli._resolve_smoke_max_workers(
+        method_display_name=registration.display_name,
+        profile_name="smoke",
+        smoke_max_workers=37,
+        configured_max_workers=1,
+        allow_override=registration.allow_smoke_worker_override,
+        max_parallel_workers=registration.max_parallel_workers,
+    ) == 37
+
+    with pytest.raises(ConfigurationError, match="supports at most 4"):
         prediction_cli._resolve_smoke_max_workers(
             method_display_name=registration.display_name,
             profile_name="smoke",
-            smoke_max_workers=2,
+            smoke_max_workers=5,
             configured_max_workers=1,
             allow_override=registration.allow_smoke_worker_override,
+            max_parallel_workers=4,
         )
 
 
@@ -845,11 +860,11 @@ def _unused_operation_level_prompt_builder(question: object, retrieval_result: o
     raise AssertionError("must not be called: runner is monkeypatched in this test")
 
 
-def test_registered_operation_level_prediction_passes_clean_failed_ingest_hook(
+def test_registered_operation_level_w2_passes_factory_context_and_clean_hook(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """operation-level registered 分支必须把 clean hook 传给 shared operation runner。
+    """operation-level W2 必须传独立 factory/context，同时保留 clean hook。
 
     HaluMem operation-level 分支走独立的 `run_operation_level_predictions()` 调用点
     （`cli/run_prediction.py`），不经过标准 `run_predictions()`。回归 R1 之前该分支
@@ -986,12 +1001,21 @@ def test_registered_operation_level_prediction_passes_clean_failed_ingest_hook(
         run_id="halumem-op-run",
         confirm_api=True,
         smoke_conversation_limit=1,
-        smoke_max_workers=None,
+        smoke_max_workers=2,
         enable_efficiency_observability=False,
     )
 
     assert result.runs[0].summary is expected_summary
-    assert runner_calls[0]["provider"] is fake_provider
+    assert runner_calls[0]["provider"] is None
+    assert runner_calls[0]["provider_factory"] is method_registration.system_factory
+    assert runner_calls[0]["build_context_template"].storage_root.name == "method_state"
+    assert runner_calls[0]["consume_granularity"] == "session"
+    assert (
+        runner_calls[0]["method_manifest"]["composition"]["execution"][
+            "resolved_max_workers"
+        ]
+        == 2
+    )
     assert runner_calls[0]["unified_prompt_builder"] is _unused_operation_level_prompt_builder
     assert runner_calls[0]["clean_failed_ingest_conversation"] is not None
 

@@ -44,7 +44,7 @@ from memory_benchmark.methods import memoryos_adapter as memoryos_adapter_module
 from memory_benchmark.methods.memoryos_adapter import (
     MEMORYOS_PROVENANCE_SIDECAR_FILENAME,
     MemoryOS,
-    MemoryOSPaperConfig,
+    MemoryOSConfig,
     clean_memoryos_conversation_state,
 )
 from memory_benchmark.methods.registry import MethodBuildContext, _build_memoryos_system
@@ -232,7 +232,12 @@ def test_product_embedding_observer_counts_real_encode_once_and_preserves_stage(
     classes = memoryos_adapter_module._load_memoryos_pypi_classes(load_path_settings())
     utils_module = classes["utils"]
     model = FakeSentenceTransformer()
-    model_name = system.config.embedding_model_name
+    model_name = str(
+        (
+            Path(__file__).resolve().parents[1]
+            / system.config.embedding_model_name
+        ).resolve()
+    )
     model_key = json.dumps({"model_name": model_name}, sort_keys=True)
     monkeypatch.setattr(utils_module, "_model_cache", {model_key: model})
     monkeypatch.setattr(utils_module, "_embedding_cache", {})
@@ -378,9 +383,9 @@ def test_memoryos_ox_transport_injects_low_reasoning_without_real_api(
 def test_default_config_uses_pypi_official_defaults() -> None:
     """默认配置应使用 memoryos-pypi 官方默认参数，而非旧 eval/ LoCoMo 调参。"""
 
-    config = MemoryOSPaperConfig()
+    config = MemoryOSConfig()
     assert config.llm_model == "gpt-4o-mini"
-    assert config.embedding_model_name == "sentence-transformers/all-MiniLM-L6-v2"
+    assert config.embedding_model_name == "models/all-MiniLM-L6-v2"
     assert config.short_term_capacity == 10
     assert config.mid_term_capacity == 2000
     assert config.long_term_knowledge_capacity == 100
@@ -394,7 +399,7 @@ def test_default_config_uses_pypi_official_defaults() -> None:
 def test_config_manifest_marks_pypi_engine_and_source_mode() -> None:
     """manifest 应标注 pypi 引擎与 wrapper source 模式。"""
 
-    config = MemoryOSPaperConfig()
+    config = MemoryOSConfig()
     manifest = config.to_manifest()
     assert manifest["adapter_version"] == "conversation-qa-v2-shared-lifecycle"
     assert manifest["source_mode"] == "memoryos-pypi-wrapper"
@@ -409,7 +414,7 @@ def test_memoryos_shared_lifecycle_identity_rejects_legacy_resume_manifest() -> 
 
     from memory_benchmark.runners.prediction import _manifests_match_for_resume
 
-    current = MemoryOSPaperConfig().to_manifest()
+    current = MemoryOSConfig().to_manifest()
     legacy = {**current, "adapter_version": "conversation-qa-v1"}
     assert _manifests_match_for_resume({"method": current}, {"method": dict(current)})
     assert not _manifests_match_for_resume({"method": legacy}, {"method": current})
@@ -436,7 +441,7 @@ def test_config_requires_positive_integers(field_name: str, value: object) -> No
     """整数字段必须满足精确整数类型约束。"""
 
     with pytest.raises(ConfigurationError, match=field_name):
-        MemoryOSPaperConfig(**{field_name: value})
+        MemoryOSConfig(**{field_name: value})
 
 
 @pytest.mark.parametrize(
@@ -457,14 +462,14 @@ def test_config_requires_unit_interval_thresholds(
     """相似度/阈值字段必须在 [0, 1]。"""
 
     with pytest.raises(ConfigurationError, match=field_name):
-        MemoryOSPaperConfig(**{field_name: value})
+        MemoryOSConfig(**{field_name: value})
 
 
 def test_config_requires_non_negative_heat_threshold() -> None:
     """mid_term_heat_threshold 不得为负。"""
 
     with pytest.raises(ConfigurationError, match="mid_term_heat_threshold"):
-        MemoryOSPaperConfig(mid_term_heat_threshold=-0.1)
+        MemoryOSConfig(mid_term_heat_threshold=-0.1)
 
 
 @pytest.mark.parametrize(
@@ -475,14 +480,13 @@ def test_config_requires_non_negative_heat_threshold() -> None:
         ("llm_model", None),
         ("embedding_model_name", ""),
         ("profile_name", None),
-        ("longmemeval_prompt_profile", ""),
     ],
 )
 def test_config_requires_non_empty_strings(field_name: str, value: object) -> None:
     """模型名与 profile 字段必须是非空字符串。"""
 
     with pytest.raises(ConfigurationError, match=field_name):
-        MemoryOSPaperConfig(**{field_name: value})
+        MemoryOSConfig(**{field_name: value})
 
 
 # ---------------------------------------------------------------------- #
@@ -652,7 +656,7 @@ def test_registry_builds_native_v3_provider(tmp_path: Path) -> None:
 
     provider = _build_memoryos_system(
         MethodBuildContext(
-            config=MemoryOSPaperConfig(),
+            config=MemoryOSConfig(),
             openai_settings=type(
                 "S",
                 (),
@@ -1052,10 +1056,10 @@ def test_estimate_add_workload_counts_pages_and_update_batches() -> None:
     """add 前应能估算 page 数和会触发的 MemoryOS 更新批次数。"""
 
     conversation = build_small_conversation()
-    default_estimate = MemoryOS.estimate_add_workload(conversation, MemoryOSPaperConfig())
+    default_estimate = MemoryOS.estimate_add_workload(conversation, MemoryOSConfig())
     small_capacity_estimate = MemoryOS.estimate_add_workload(
         conversation,
-        MemoryOSPaperConfig(short_term_capacity=1),
+        MemoryOSConfig(short_term_capacity=1),
     )
     assert default_estimate.page_count == 2
     assert default_estimate.update_batch_count == 0
@@ -1162,7 +1166,7 @@ def test_vendored_capacity_crossing_preserves_single_sided_pages_and_metadata(
     """真实 vendored STM→MTM 不得丢任一单侧 page 或 native provenance。"""
 
     _stub_pypi_embedding(monkeypatch)
-    system = _build_system(tmp_path, config=MemoryOSPaperConfig(short_term_capacity=1))
+    system = _build_system(tmp_path, config=MemoryOSConfig(short_term_capacity=1))
     backend = system._get_or_create_backend("capacity")
     backend.client.chat_completion = lambda **kwargs: "stubbed"
     backend.add_memory(

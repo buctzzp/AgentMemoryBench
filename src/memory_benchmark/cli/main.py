@@ -792,10 +792,6 @@ def _validate_smoke_axis_args(args: argparse.Namespace) -> None:
         raise MemoryBenchmarkError(
             f"{args.benchmark} does not declare a smoke policy"
         )
-    if registration.operation_level and args.workers not in {None, 1}:
-        raise MemoryBenchmarkError(
-            f"{registration.name} operation-level smoke requires --workers 1"
-        )
     if smoke_policy.shape_mode == "fixed":
         if (
             args.rounds is not None

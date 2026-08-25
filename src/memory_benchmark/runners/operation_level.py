@@ -8,9 +8,12 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from concurrent.futures import Future, ThreadPoolExecutor, wait
+from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
+from queue import Empty, Queue
+from threading import Event
 from time import perf_counter, perf_counter_ns
 from typing import Any, Callable
 
@@ -36,6 +39,7 @@ from memory_benchmark.observability.efficiency import (
     RetrievalObservationContract,
 )
 from memory_benchmark.readers.answer import FrameworkAnswerReader
+from memory_benchmark.methods.registry import MethodBuildContext
 from memory_benchmark.runners.conversation_qa import _make_public_question
 from memory_benchmark.runners.event_stream import (
     GranularityAggregator,
@@ -55,6 +59,8 @@ from memory_benchmark.runners.prediction import (
     _method_manifest_with_protocol,
     _prepare_clean_failed_ingest_retries,
     _record_framework_answer_llm_call,
+    _validate_consume_granularity,
+    _validate_protocol_version,
 )
 from memory_benchmark.storage import (
     ExperimentPaths,
@@ -68,10 +74,42 @@ from memory_benchmark.storage import (
 from memory_benchmark.utils.run_logger import RunLogger
 
 
+@dataclass(frozen=True)
+class _OperationConversationBatch:
+    """一个 UUID 完整成功后交给 coordinator 的公开结果。"""
+
+    worker_idx: int
+    conversation_id: str
+    session_reports: tuple[dict[str, Any], ...]
+    update_probes: tuple[dict[str, Any], ...]
+    predictions: tuple[dict[str, Any], ...]
+    answer_prompts: tuple[dict[str, Any], ...]
+    observations: tuple[EfficiencyObservation, ...]
+
+
+@dataclass(frozen=True)
+class _OperationConversationFailure:
+    """worker 对一个 UUID 的精确失败定位，不携带任何私有 label。"""
+
+    worker_idx: int
+    conversation_id: str
+    failure_context: dict[str, str]
+    error: BaseException
+
+
+@dataclass(frozen=True)
+class _OperationWorkerFailure:
+    """business batches 已提交后发生的 lane 级生命周期失败。"""
+
+    worker_idx: int
+    stage: str
+    error: BaseException
+
+
 def run_operation_level_predictions(
     *,
     dataset: Dataset,
-    provider: MemoryProvider,
+    provider: MemoryProvider | None,
     run_context: RunContext,
     policy: PredictionRunPolicy,
     method_manifest: dict[str, object],
@@ -90,6 +128,9 @@ def run_operation_level_predictions(
     clean_failed_ingest_conversation: (
         Callable[[Conversation, dict[str, Any]], None] | None
     ) = None,
+    provider_factory: Callable[[MethodBuildContext], MemoryProvider] | None = None,
+    build_context_template: MethodBuildContext | None = None,
+    consume_granularity: str | None = None,
 ) -> PredictionRunSummary:
     """运行 HaluMem operation-level prediction。
 
@@ -97,7 +138,7 @@ def run_operation_level_predictions(
         dataset: HaluMem adapter 生成的数据集。
         provider: 协议 v3 MemoryProvider。
         run_context: 标准输出目录上下文。
-        policy: conversation 级范围与 resume 策略。本 runner 当前只支持单 worker。
+        policy: conversation 级范围、并发与 resume 策略。
         method_manifest: method 公开 manifest。
         benchmark_variant: concrete variant 名。
         run_scope: smoke/full。
@@ -115,14 +156,26 @@ def run_operation_level_predictions(
             传入。任一 session 的 ingest/extraction/update/QA/end_conversation 抛错
             都会把该 conversation 标记为 `failed_ingest`；显式 retry 且无该 hook 时
             fail-closed，不直接从 session 1 重放。
+        provider_factory: registered 路径为每个稳定 worker lane 构造独立 provider。
+        build_context_template: registered 路径构造 `worker_<idx>` context 的模板。
+        consume_granularity: 注册级 concrete 消费粒度；根进程不构造 provider
+            时仍用于 manifest 与 worker 交叉校验。
 
     输出:
         PredictionRunSummary: 标准 prediction 摘要。
     """
 
-    if policy.max_workers != 1:
+    uses_factory_workers = provider is None
+    if uses_factory_workers and (
+        provider_factory is None or build_context_template is None
+    ):
         raise ConfigurationError(
-            "operation-level runner currently requires max_workers=1"
+            "isolated operation-level prediction requires provider_factory "
+            "and build_context_template"
+        )
+    if not uses_factory_workers and policy.max_workers > 1:
+        raise ConfigurationError(
+            "multi-worker operation-level prediction must not share one provider"
         )
     validate_dataset(dataset)
     paths = ExperimentPaths.create(run_context.run_dir)
@@ -137,6 +190,7 @@ def run_operation_level_predictions(
             retrieval_evidence_contract_version=(
                 retrieval_evidence_contract_version
             ),
+            consume_granularity=consume_granularity,
         )
         manifest = _build_operation_manifest(
             dataset=dataset,
@@ -199,100 +253,102 @@ def run_operation_level_predictions(
             logger=logger,
         )
 
-        needs_provider = any(
-            not (
-                policy.resume
-                and _conversation_state_status(
-                    conversation_status.get(conversation.conversation_id, {})
-                )
-                == _STATUS_COMPLETED
-            )
-            and not (
-                _conversation_state_status(
-                    conversation_status.get(conversation.conversation_id, {})
-                )
-                == _STATUS_FAILED_INGEST
-                and not policy.retry_failed_conversations
-            )
-            for conversation in selected_conversations
+        pending_conversations = _pending_operation_conversations(
+            selected_conversations=selected_conversations,
+            conversation_status=conversation_status,
+            policy=policy,
         )
-        if needs_provider:
+        needs_provider = bool(pending_conversations)
+        if uses_factory_workers:
+            _run_parallel_operation_conversations(
+                pending_conversations=pending_conversations,
+                selected_conversations=selected_conversations,
+                conversation_status=conversation_status,
+                prediction_records=prediction_records,
+                session_report_records=session_report_records,
+                update_probe_records=update_probe_records,
+                answer_prompt_records=answer_prompt_records,
+                provider_factory=provider_factory,
+                build_context_template=build_context_template,
+                run_context=run_context,
+                policy=policy,
+                answer_reader=answer_reader,
+                unified_prompt_builder=unified_prompt_builder,
+                efficiency_collector=efficiency_collector,
+                efficiency_store=efficiency_store,
+                protocol_version=protocol_version,
+                consume_granularity=consume_granularity,
+                paths=paths,
+                logger=logger,
+            )
+        elif needs_provider:
+            assert provider is not None
             try:
                 provider.prepare(run_context)
             except Exception:
                 provider.cleanup()
                 raise
 
-        supports_extraction = provider.session_memory_report
-        for conversation in selected_conversations:
-            state = conversation_status.get(conversation.conversation_id, {})
-            status = _conversation_state_status(state)
-            if policy.resume and status == _STATUS_COMPLETED:
-                continue
-            if status == _STATUS_FAILED_INGEST:
-                if policy.retry_failed_conversations:
-                    raise ConfigurationError(
-                        f"Cannot retry conversation '{conversation.conversation_id}' "
-                        "after failed ingest without clean retry support"
+        if not uses_factory_workers:
+            assert provider is not None
+            for conversation in pending_conversations:
+                try:
+                    failure_context: dict[str, str] = {
+                        "stage": "operation_conversation",
+                    }
+                    conversation_observations = _run_operation_conversation(
+                        conversation=conversation,
+                        provider=provider,
+                        run_id=run_context.run_id,
+                        answer_reader=answer_reader,
+                        unified_prompt_builder=unified_prompt_builder,
+                        supports_extraction=provider.session_memory_report,
+                        session_report_records=session_report_records,
+                        update_probe_records=update_probe_records,
+                        prediction_records=prediction_records,
+                        answer_prompt_records=answer_prompt_records,
+                        efficiency_collector=efficiency_collector,
+                        failure_context=failure_context,
                     )
-                continue
-            try:
-                failure_context: dict[str, str] = {
-                    "stage": "operation_conversation",
+                except Exception as exc:
+                    conversation_status[conversation.conversation_id] = {
+                        "status": _STATUS_FAILED_INGEST,
+                        **failure_context,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                        "ingested": False,
+                    }
+                    atomic_write_json(paths.conversation_status_path, conversation_status)
+                    logger.log_event(
+                        "conversation_failed",
+                        {
+                            "conversation_id": conversation.conversation_id,
+                            **failure_context,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        },
+                    )
+                    if failure_context.get("stage") != "provider_cleanup":
+                        try:
+                            provider.cleanup()
+                        except Exception as cleanup_exc:
+                            raise cleanup_exc from exc
+                    raise
+                if efficiency_store is not None:
+                    efficiency_store.merge_observations(conversation_observations)
+                conversation_status[conversation.conversation_id] = {
+                    "status": _STATUS_COMPLETED,
+                    "ingested": True,
                 }
-                conversation_observations = _run_operation_conversation(
-                    conversation=conversation,
-                    provider=provider,
-                    run_id=run_context.run_id,
-                    answer_reader=answer_reader,
-                    unified_prompt_builder=unified_prompt_builder,
-                    supports_extraction=supports_extraction,
+                atomic_write_json(paths.conversation_status_path, conversation_status)
+                _write_operation_output_artifacts(
+                    paths=paths,
                     session_report_records=session_report_records,
                     update_probe_records=update_probe_records,
                     prediction_records=prediction_records,
                     answer_prompt_records=answer_prompt_records,
-                    efficiency_collector=efficiency_collector,
-                    failure_context=failure_context,
+                    selected_conversations=selected_conversations,
                 )
-            except Exception as exc:
-                conversation_status[conversation.conversation_id] = {
-                    "status": _STATUS_FAILED_INGEST,
-                    **failure_context,
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
-                    "ingested": False,
-                }
-                atomic_write_json(paths.conversation_status_path, conversation_status)
-                logger.log_event(
-                    "conversation_failed",
-                    {
-                        "conversation_id": conversation.conversation_id,
-                        **failure_context,
-                        "error_type": type(exc).__name__,
-                        "error": str(exc),
-                    },
-                )
-                if failure_context.get("stage") != "provider_cleanup":
-                    try:
-                        provider.cleanup()
-                    except Exception as cleanup_exc:
-                        raise cleanup_exc from exc
-                raise
-            if efficiency_store is not None:
-                efficiency_store.merge_observations(conversation_observations)
-            conversation_status[conversation.conversation_id] = {
-                "status": "completed",
-                "ingested": True,
-            }
-            atomic_write_json(paths.conversation_status_path, conversation_status)
-            _write_operation_output_artifacts(
-                paths=paths,
-                session_report_records=session_report_records,
-                update_probe_records=update_probe_records,
-                prediction_records=prediction_records,
-                answer_prompt_records=answer_prompt_records,
-                selected_conversations=selected_conversations,
-            )
 
         completed_conversations = sum(
             1
@@ -329,6 +385,382 @@ def run_operation_level_predictions(
         return summary
 
 
+def _pending_operation_conversations(
+    *,
+    selected_conversations: list[Conversation],
+    conversation_status: dict[str, Any],
+    policy: PredictionRunPolicy,
+) -> list[Conversation]:
+    """按 resume/failure/budget 语义选择本次真正推进的 UUID。"""
+
+    pending: list[Conversation] = []
+    for conversation in selected_conversations:
+        status = _conversation_state_status(
+            conversation_status.get(conversation.conversation_id, {})
+        )
+        if status == _STATUS_COMPLETED:
+            continue
+        if status == _STATUS_FAILED_INGEST:
+            if policy.retry_failed_conversations:
+                raise ConfigurationError(
+                    f"Cannot retry conversation '{conversation.conversation_id}' "
+                    "after failed ingest without clean retry support"
+                )
+            continue
+        if (
+            policy.max_new_conversations is not None
+            and len(pending) >= policy.max_new_conversations
+        ):
+            break
+        pending.append(conversation)
+    return pending
+
+
+def _stable_operation_worker_chunks(
+    *,
+    pending_conversations: list[Conversation],
+    selected_conversations: list[Conversation],
+    max_workers: int,
+) -> tuple[tuple[int, tuple[Conversation, ...]], ...]:
+    """按完整 UUID 顺序稳定映射 worker，保证 resume 不换 state root。"""
+
+    if max_workers < 1:
+        raise ConfigurationError("operation-level max_workers must be positive")
+    if not pending_conversations:
+        return ()
+    worker_count = min(max_workers, len(selected_conversations))
+    order = {
+        conversation.conversation_id: index
+        for index, conversation in enumerate(selected_conversations)
+    }
+    chunks: dict[int, list[Conversation]] = {
+        worker_idx: [] for worker_idx in range(worker_count)
+    }
+    for conversation in pending_conversations:
+        worker_idx = order[conversation.conversation_id] % worker_count
+        chunks[worker_idx].append(conversation)
+    return tuple(
+        (worker_idx, tuple(conversations))
+        for worker_idx, conversations in chunks.items()
+        if conversations
+    )
+
+
+def _operation_worker_lane(
+    *,
+    worker_idx: int,
+    conversations: tuple[Conversation, ...],
+    provider_factory: Callable[[MethodBuildContext], MemoryProvider],
+    build_context_template: MethodBuildContext,
+    run_context: RunContext,
+    answer_reader: FrameworkAnswerReader,
+    unified_prompt_builder: Callable[[Question, RetrievalResult], AnswerPromptResult],
+    efficiency_collector: EfficiencyCollector | None,
+    protocol_version: str,
+    consume_granularity: str | None,
+    result_queue: Queue[
+        _OperationConversationBatch
+        | _OperationConversationFailure
+        | _OperationWorkerFailure
+    ],
+    cancellation_event: Event,
+) -> None:
+    """一个 worker 独占一份 runtime，并在 lane 内串行处理 UUID。"""
+
+    worker_context = MethodBuildContext(
+        config=build_context_template.config,
+        openai_settings=build_context_template.openai_settings,
+        path_settings=build_context_template.path_settings,
+        storage_root=build_context_template.storage_root / f"worker_{worker_idx}",
+        benchmark_name=build_context_template.benchmark_name,
+        completed_conversations=(),
+        efficiency_collector=build_context_template.efficiency_collector,
+        diagnostic_log_path=build_context_template.diagnostic_log_path,
+    )
+    if cancellation_event.is_set():
+        return
+    provider: MemoryProvider | None = None
+    failure_context: dict[str, str] = {"stage": "provider_factory"}
+    failure_conversation_id = conversations[0].conversation_id
+    try:
+        provider = provider_factory(worker_context)
+        if not isinstance(provider, MemoryProvider):
+            raise ConfigurationError(
+                "operation-level provider_factory must return MemoryProvider"
+            )
+        _validate_protocol_version(protocol_version, provider)
+        if consume_granularity is not None:
+            _validate_consume_granularity(consume_granularity, provider)
+        failure_context["stage"] = "provider_prepare"
+        provider.prepare(run_context)
+        for conversation in conversations:
+            if cancellation_event.is_set():
+                break
+            failure_conversation_id = conversation.conversation_id
+            local_session_reports: list[dict[str, Any]] = []
+            local_update_probes: list[dict[str, Any]] = []
+            local_predictions: dict[str, dict[str, Any]] = {}
+            local_answer_prompts: list[dict[str, Any]] = []
+            observations = _run_operation_conversation(
+                conversation=conversation,
+                provider=provider,
+                run_id=run_context.run_id,
+                answer_reader=answer_reader,
+                unified_prompt_builder=unified_prompt_builder,
+                supports_extraction=provider.session_memory_report,
+                session_report_records=local_session_reports,
+                update_probe_records=local_update_probes,
+                prediction_records=local_predictions,
+                answer_prompt_records=local_answer_prompts,
+                efficiency_collector=efficiency_collector,
+                failure_context=failure_context,
+                cleanup_provider=False,
+            )
+            result_queue.put(
+                _OperationConversationBatch(
+                    worker_idx=worker_idx,
+                    conversation_id=conversation.conversation_id,
+                    session_reports=tuple(local_session_reports),
+                    update_probes=tuple(local_update_probes),
+                    predictions=tuple(local_predictions.values()),
+                    answer_prompts=tuple(local_answer_prompts),
+                    observations=tuple(observations),
+                )
+            )
+    except BaseException as exc:
+        if provider is not None and failure_context.get("stage") != "provider_cleanup":
+            try:
+                provider.cleanup()
+            except BaseException as cleanup_exc:
+                failure_context = {"stage": "provider_cleanup"}
+                exc = cleanup_exc
+        result_queue.put(
+            _OperationConversationFailure(
+                worker_idx=worker_idx,
+                conversation_id=failure_conversation_id,
+                failure_context=dict(failure_context),
+                error=exc,
+            )
+        )
+        cancellation_event.set()
+        return
+    try:
+        provider.cleanup()
+    except BaseException as exc:
+        result_queue.put(
+            _OperationWorkerFailure(
+                worker_idx=worker_idx,
+                stage="provider_cleanup",
+                error=exc,
+            )
+        )
+        cancellation_event.set()
+
+
+def _run_parallel_operation_conversations(
+    *,
+    pending_conversations: list[Conversation],
+    selected_conversations: list[Conversation],
+    conversation_status: dict[str, Any],
+    prediction_records: dict[str, dict[str, Any]],
+    session_report_records: list[dict[str, Any]],
+    update_probe_records: list[dict[str, Any]],
+    answer_prompt_records: list[dict[str, Any]],
+    provider_factory: Callable[[MethodBuildContext], MemoryProvider] | None,
+    build_context_template: MethodBuildContext | None,
+    run_context: RunContext,
+    policy: PredictionRunPolicy,
+    answer_reader: FrameworkAnswerReader,
+    unified_prompt_builder: Callable[[Question, RetrievalResult], AnswerPromptResult],
+    efficiency_collector: EfficiencyCollector | None,
+    efficiency_store: EfficiencyArtifactStore | None,
+    protocol_version: str,
+    consume_granularity: str | None,
+    paths: ExperimentPaths,
+    logger: RunLogger,
+) -> None:
+    """并行调度 UUID；worker 不写 artifact，coordinator 稳定合并。"""
+
+    if not pending_conversations:
+        return
+    if provider_factory is None or build_context_template is None:
+        raise ConfigurationError("parallel operation-level dependencies are missing")
+    chunks = _stable_operation_worker_chunks(
+        pending_conversations=pending_conversations,
+        selected_conversations=selected_conversations,
+        max_workers=policy.max_workers,
+    )
+    result_queue: Queue[
+        _OperationConversationBatch
+        | _OperationConversationFailure
+        | _OperationWorkerFailure
+    ] = Queue()
+    cancellation_event = Event()
+    first_error: BaseException | None = None
+
+    def persist_result(
+        result: (
+            _OperationConversationBatch
+            | _OperationConversationFailure
+            | _OperationWorkerFailure
+        ),
+    ) -> None:
+        """在 coordinator 线程内提交一条 UUID 结果。"""
+
+        nonlocal first_error
+        if isinstance(result, _OperationWorkerFailure):
+            if first_error is None:
+                first_error = result.error
+            logger.log_event(
+                "operation_worker_failed",
+                {
+                    "worker_idx": result.worker_idx,
+                    "stage": result.stage,
+                    "error_type": type(result.error).__name__,
+                    "error": str(result.error),
+                },
+            )
+            return
+        if isinstance(result, _OperationConversationFailure):
+            if first_error is None:
+                first_error = result.error
+            conversation_status[result.conversation_id] = {
+                "status": _STATUS_FAILED_INGEST,
+                **result.failure_context,
+                "error_type": type(result.error).__name__,
+                "error": str(result.error),
+                "ingested": False,
+                "worker_idx": result.worker_idx,
+            }
+            atomic_write_json(paths.conversation_status_path, conversation_status)
+            logger.log_event(
+                "conversation_failed",
+                {
+                    "worker_idx": result.worker_idx,
+                    "conversation_id": result.conversation_id,
+                    **result.failure_context,
+                    "error_type": type(result.error).__name__,
+                    "error": str(result.error),
+                },
+            )
+            return
+        session_report_records.extend(result.session_reports)
+        update_probe_records.extend(result.update_probes)
+        for record in result.predictions:
+            prediction_records[record["question_id"]] = record
+        answer_prompt_records.extend(result.answer_prompts)
+        if efficiency_store is not None:
+            efficiency_store.merge_observations(result.observations)
+        conversation_status[result.conversation_id] = {
+            "status": _STATUS_COMPLETED,
+            "ingested": True,
+            "worker_idx": result.worker_idx,
+        }
+        atomic_write_json(paths.conversation_status_path, conversation_status)
+        _stable_sort_operation_records(
+            records=session_report_records,
+            selected_conversations=selected_conversations,
+            run_id=run_context.run_id,
+        )
+        _stable_sort_operation_records(
+            records=update_probe_records,
+            selected_conversations=selected_conversations,
+            run_id=run_context.run_id,
+        )
+        _write_operation_output_artifacts(
+            paths=paths,
+            session_report_records=session_report_records,
+            update_probe_records=update_probe_records,
+            prediction_records=prediction_records,
+            answer_prompt_records=answer_prompt_records,
+            selected_conversations=selected_conversations,
+        )
+        logger.log_event(
+            "conversation_completed_isolated",
+            {
+                "worker_idx": result.worker_idx,
+                "conversation_id": result.conversation_id,
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=len(chunks)) as executor:
+        futures: set[Future[None]] = {
+            executor.submit(
+                _operation_worker_lane,
+                worker_idx=worker_idx,
+                conversations=conversations,
+                provider_factory=provider_factory,
+                build_context_template=build_context_template,
+                run_context=run_context,
+                answer_reader=answer_reader,
+                unified_prompt_builder=unified_prompt_builder,
+                efficiency_collector=efficiency_collector,
+                protocol_version=protocol_version,
+                consume_granularity=consume_granularity,
+                result_queue=result_queue,
+                cancellation_event=cancellation_event,
+            )
+            for worker_idx, conversations in chunks
+        }
+        pending = set(futures)
+        while pending:
+            _, pending = wait(pending, timeout=0.1)
+            while True:
+                try:
+                    persist_result(result_queue.get_nowait())
+                except Empty:
+                    break
+        while True:
+            try:
+                persist_result(result_queue.get_nowait())
+            except Empty:
+                break
+        for future in futures:
+            future.result()
+    if first_error is not None:
+        raise first_error
+
+
+def _stable_sort_operation_records(
+    *,
+    records: list[dict[str, Any]],
+    selected_conversations: list[Conversation],
+    run_id: str,
+) -> None:
+    """按 dataset UUID/session/gold-index 重排并发产生的 session 型记录。"""
+
+    conversation_order = {
+        default_isolation_key(run_id, conversation.conversation_id): index
+        for index, conversation in enumerate(selected_conversations)
+    }
+    session_order = {
+        (
+            default_isolation_key(run_id, conversation.conversation_id),
+            session.session_id,
+        ): session_index
+        for conversation in selected_conversations
+        for session_index, session in enumerate(conversation.sessions)
+    }
+
+    def sort_key(record: dict[str, Any]) -> tuple[int, int, str]:
+        """返回公开 dataset 顺序对应的稳定记录排序键。"""
+
+        session_ref = record.get("session_ref")
+        if not isinstance(session_ref, dict):
+            raise ConfigurationError("operation-level record is missing session_ref")
+        isolation_key = session_ref.get("isolation_key")
+        session_id = session_ref.get("session_id")
+        if not isinstance(isolation_key, str):
+            raise ConfigurationError("operation-level session_ref isolation_key is invalid")
+        return (
+            conversation_order.get(isolation_key, len(conversation_order)),
+            session_order.get((isolation_key, session_id), 10**9),
+            str(record.get("gold_memory_index", "")),
+        )
+
+    records.sort(key=sort_key)
+
+
 def _run_operation_conversation(
     *,
     conversation: Conversation,
@@ -343,6 +775,7 @@ def _run_operation_conversation(
     answer_prompt_records: list[dict[str, Any]],
     efficiency_collector: EfficiencyCollector | None = None,
     failure_context: dict[str, str],
+    cleanup_provider: bool = True,
 ) -> list[EfficiencyObservation]:
     """按 spec S4.2 驱动单个 HaluMem user，并采集效率 observation。
 
@@ -447,11 +880,12 @@ def _run_operation_conversation(
         observations.extend(end_scope.records)
     else:
         provider.end_conversation(UnitRef(isolation_key=isolation_key))
-    _set_operation_failure_context(
-        failure_context,
-        stage="provider_cleanup",
-    )
-    provider.cleanup()
+    if cleanup_provider:
+        _set_operation_failure_context(
+            failure_context,
+            stage="provider_cleanup",
+        )
+        provider.cleanup()
     return observations
 
 

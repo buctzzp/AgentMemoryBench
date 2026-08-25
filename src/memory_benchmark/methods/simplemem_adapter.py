@@ -40,6 +40,9 @@ from memory_benchmark.core.provider_protocol import (
     UnitRef,
 )
 from memory_benchmark.methods.image_text import turn_text_with_images
+from memory_benchmark.methods.embedding_assets import (
+    resolve_embedding_runtime_model_reference,
+)
 from memory_benchmark.methods.openai_transport import (
     with_chat_completions_request_overrides,
 )
@@ -415,7 +418,10 @@ class SimpleMem(MemoryProvider):
         simplemem_settings.OPENAI_API_KEY = self._openai_settings.api_key
         simplemem_settings.OPENAI_BASE_URL = self._openai_settings.base_url
         simplemem_settings.LLM_MODEL = self.config.llm_model
-        simplemem_settings.EMBEDDING_MODEL = self.config.embedding_model_path
+        simplemem_settings.EMBEDDING_MODEL = resolve_embedding_runtime_model_reference(
+            self.config.embedding_model_path,
+            self.path_settings.project_root,
+        )
         simplemem_settings.EMBEDDING_DIMENSION = self.config.embedding_dimension
         simplemem_settings.LANCEDB_PATH = str(db_path)
         simplemem_settings.MEMORY_TABLE_NAME = table_name

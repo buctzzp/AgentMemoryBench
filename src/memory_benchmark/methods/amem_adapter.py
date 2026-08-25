@@ -56,6 +56,9 @@ from memory_benchmark.core.provider_protocol import (
     UnitRef,
 )
 from memory_benchmark.methods.image_text import turn_text_with_images
+from memory_benchmark.methods.embedding_assets import (
+    resolve_embedding_runtime_model_reference,
+)
 from memory_benchmark.methods.openai_transport import (
     with_chat_completions_request_overrides,
 )
@@ -122,7 +125,6 @@ class AMemConfig:
         api_timeout_seconds: OpenAI-compatible 请求超时秒数。
         api_max_retries: OpenAI-compatible 请求最大重试次数。
         max_workers: runner 可读取的建议 conversation 并发数；初期保持 1。
-        use_product_layer: 是否使用官方通用产品 layer；当前必须为 true。
         suppress_official_stdout: 是否压制第三方源码中的 stdout。
         profile_name: 可审计 profile 名称。
     """
@@ -133,7 +135,6 @@ class AMemConfig:
     max_workers: int
     api_timeout_seconds: float = 60.0
     api_max_retries: int = 8
-    use_product_layer: bool = True
     suppress_official_stdout: bool = True
     profile_name: str = "custom"
 
@@ -152,10 +153,6 @@ class AMemConfig:
             raise ConfigurationError("A-Mem api_max_retries cannot be negative")
         if self.max_workers < 1:
             raise ConfigurationError("A-Mem max_workers must be positive")
-        if not self.use_product_layer:
-            raise ConfigurationError(
-                "A-Mem adapter requires use_product_layer=true"
-            )
 
     def to_manifest(self) -> dict[str, Any]:
         """返回不含 secret 和绝对存储路径的公开配置。"""
@@ -947,8 +944,12 @@ class AMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
             original_retriever_cls = runtime_module.ChromaRetriever
             runtime_module.ChromaRetriever = _ConversationPersistentRetriever
             try:
+                embedding_model = resolve_embedding_runtime_model_reference(
+                    self.config.embedding_model,
+                    self.path_settings.project_root,
+                )
                 runtime = runtime_cls(
-                    model_name=self.config.embedding_model,
+                    model_name=embedding_model,
                     llm_backend="openai",
                     llm_model=self.config.llm_model,
                     api_key=self._openai_api_key,

@@ -50,6 +50,7 @@ from memory_benchmark.storage import read_jsonl
 
 
 pytestmark = pytest.mark.unit
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _write_memoryos_profiles(project_root: Path) -> None:
@@ -72,7 +73,6 @@ page_similarity_threshold = 0.1
 knowledge_threshold = 0.01
 top_k_sessions = 5
 top_k_knowledge = 20
-longmemeval_prompt_profile = "memoryos-pypi-retrieve-v1"
 """,
         encoding="utf-8",
     )
@@ -665,7 +665,8 @@ def test_memoryos_registered_prediction_uses_generic_runner_with_smoke_crop_resu
             build_identity=method_registry_module.resolve_registered_build_identity(
                 "memoryos",
                 resolved_profile.method_config_manifest,
-            )
+            ),
+            project_root=PROJECT_ROOT,
         ).to_manifest_dict(),
     }
     assert captured["source_paths"] == (tmp_path / LOCOMO_SOURCE_PATH,)
@@ -791,13 +792,13 @@ def test_new_memoryos_run_writes_only_canonical_prediction_artifacts(
         }
     ]
 
-    # registered preflight candidate 与 runner 最终 manifest 必须共用同一 v1 identity；
+    # registered preflight candidate 与 runner 最终 manifest 必须共用同一 v2 identity；
     # 再用同一 run_id 真正走一次 resume，证明首跑/续跑身份对称。
     first_manifest = json.loads(canonical_paths["manifest"].read_text(encoding="utf-8"))
     first_identity = first_manifest["method"]["run_identity"]
     assert "config_track" not in first_manifest["method"]
     assert "track_identity" not in first_manifest["method"]
-    assert first_identity["contract_version"] == "v1"
+    assert first_identity["contract_version"] == "v2"
     assert first_identity["profile"] == {"name": "smoke", "section": "method"}
     assert first_identity["answer_builder"] == "benchmark"
     assert first_identity["build"]["implementation_variant"] == "product"
@@ -807,10 +808,22 @@ def test_new_memoryos_run_writes_only_canonical_prediction_artifacts(
         "dimension": 384,
         "revision": None,
         "revision_status": "local_unpinned",
-        "normalization": "external_l2",
+        "normalization": "model_pipeline_l2+product_l2",
         "instruction": None,
         "distance": "faiss-inner-product",
         "identity_status": "declared",
+    }
+    assert first_identity["build"]["embedding_artifact"] == {
+        "status": "provider_managed_unpinned",
+        "closure_schema_version": None,
+        "logical_path": None,
+        "local_content_sha256": None,
+        "tokenizer_sha256": None,
+        "tokenizer_name": None,
+        "tokenizer_max_length": None,
+        "tokenizer_lowercase": None,
+        "sentence_transformers_version": None,
+        "transformers_version": None,
     }
     resumed = run_prediction_module.run_registered_conversation_qa_prediction(
         project_root=tmp_path,

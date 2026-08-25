@@ -84,7 +84,6 @@ from memory_benchmark.runners.prediction import (
 SUPPORTED_BENCHMARK = "locomo"
 SUPPORTED_METHOD = "mem0"
 DEFAULT_SMOKE_TURN_LIMIT = 20
-MAX_SMOKE_WORKERS = 10
 OPENCODEGO_LOCOMO_MAX_TOKENS = 4096
 OPENCODEGO_LOCOMO_COMPATIBILITY = (
     "opencodego_locomo_explicit_completion_cap_4096_v3"
@@ -234,7 +233,7 @@ def resolve_prediction_max_workers(
 
     输入:
         config: 已确认的 Mem0 smoke 或 official-full profile。
-        smoke_max_workers: 可选 smoke 并发覆盖，最多允许 10。
+        smoke_max_workers: 可选 smoke 并发覆盖；正整数，由调用方承担资源预算。
 
     输出:
         int: 传给通用 prediction runner 的 conversation worker 数。
@@ -248,10 +247,6 @@ def resolve_prediction_max_workers(
         )
     if smoke_max_workers < 1:
         raise ConfigurationError("Mem0 smoke_max_workers must be at least 1")
-    if smoke_max_workers > MAX_SMOKE_WORKERS:
-        raise ConfigurationError(
-            f"Mem0 smoke_max_workers must be at most {MAX_SMOKE_WORKERS}"
-        )
     return smoke_max_workers
 
 
@@ -301,7 +296,8 @@ def run_registered_conversation_qa_prediction(
         smoke_round_limit: CLI v2 smoke 的历史 round 上限；为空时沿用 legacy
             `smoke_turn_limit` 语义。
         smoke_conversation_limit: smoke 选择 1 或 2 个 conversation。
-        smoke_max_workers: smoke runner 的可选并发覆盖，最多为 10。
+        smoke_max_workers: runner 的可选并发覆盖；只要求正整数，实际资源由调用方
+            与后续 admission control 负责。
         max_new_conversations: 本次命令最多推进多少个未完成 conversation；它只属于
             当前命令预算，不属于实验 identity。
         retry_failed_conversations: 是否重试 checkpoint 中已标记 failed 的 conversation；
@@ -429,6 +425,7 @@ def run_registered_conversation_qa_prediction(
         profile_section=resolved_profile.section_name,
         answer_builder=resolved_profile.answer_builder,
         build_identity=build_identity,
+        project_root=path_settings.project_root,
     )
     answer_prompt_builder = _resolve_registered_answer_builder(
         answer_builder=resolved_profile.answer_builder,
@@ -497,7 +494,15 @@ def run_registered_conversation_qa_prediction(
         smoke_max_workers=smoke_max_workers,
         configured_max_workers=max_workers,
         allow_override=method_registration.allow_smoke_worker_override,
+        # 部分外部/测试 registration 替身早于 capability cap 字段；缺席表示
+        # capability 层不设硬上限，而不是偷偷套一个 framework 常量。
+        max_parallel_workers=getattr(
+            method_registration,
+            "max_parallel_workers",
+            None,
+        ),
     )
+    composition = replace(composition, resolved_max_workers=max_workers)
     prompt_track = getattr(benchmark_registration, "prompt_track", "native")
     answer_llm_settings: AnswerLLMSettings | None = None
     answer_compatibility_note: str | None = None
@@ -742,31 +747,29 @@ def run_registered_conversation_qa_prediction(
             "supports_shared_instance_parallelism",
             False,
         )
+        operation_level = bool(
+            getattr(benchmark_registration, "operation_level", False)
+        )
         use_isolated_worker_instances = (
-            child.policy.max_workers > 1
-            and not supports_shared_instance_parallelism
+            operation_level
+            or (
+                child.policy.max_workers > 1
+                and not supports_shared_instance_parallelism
+            )
         )
         system: BaseMemorySystem = (
             _UnusedRootSystem()
             if use_isolated_worker_instances
             else method_registration.system_factory(build_context)
         )
-        if getattr(benchmark_registration, "operation_level", False):
-            if use_isolated_worker_instances:
-                raise ConfigurationError(
-                    "operation-level prediction currently requires max_workers=1"
-                )
-            if not isinstance(system, MemoryProvider):
-                raise ConfigurationError(
-                    "operation-level prediction requires a protocol v3 MemoryProvider"
-                )
+        if operation_level:
             if answer_reader is None:
                 raise ConfigurationError(
                     "operation-level prediction requires framework answer reader"
                 )
             summary = run_operation_level_predictions(
                 dataset=child.dataset,
-                provider=system,
+                provider=system if isinstance(system, MemoryProvider) else None,
                 run_context=child.run_context,
                 policy=child.policy,
                 method_manifest=child.method_manifest,
@@ -791,6 +794,15 @@ def run_registered_conversation_qa_prediction(
                     None,
                 ),
                 clean_failed_ingest_conversation=clean_failed_ingest_conversation,
+                provider_factory=(
+                    method_registration.system_factory
+                    if operation_level
+                    else None
+                ),
+                build_context_template=(
+                    build_context if operation_level else None
+                ),
+                consume_granularity=consume_granularity,
             )
         else:
             summary = run_predictions(
@@ -892,7 +904,7 @@ def _run_custom_conversation_qa_prediction(
     composition = load_run_composition(
         project_root=project_root,
         profile_name=profile_name,
-        method_max_workers_cap=MAX_SMOKE_WORKERS,
+        method_max_workers_cap=None,
     )
     api_provider = composition.runtime.provider
     api_model = composition.runtime.model
@@ -937,6 +949,7 @@ def _run_custom_conversation_qa_prediction(
         smoke_max_workers=smoke_max_workers,
         allow_unsafe_custom_parallel=allow_unsafe_custom_parallel,
     )
+    composition = replace(composition, resolved_max_workers=max_workers)
     base_answer_settings = resolve_answer_llm_settings(
         method_name="custom",
         benchmark_name=benchmark_name,
@@ -1189,8 +1202,6 @@ def _resolve_custom_max_workers(
     max_workers = 1 if smoke_max_workers is None else smoke_max_workers
     if max_workers < 1:
         raise ConfigurationError("workers must be at least 1")
-    if max_workers > MAX_SMOKE_WORKERS:
-        raise ConfigurationError(f"workers must be at most {MAX_SMOKE_WORKERS}")
     if max_workers > 1 and not allow_unsafe_custom_parallel:
         raise ConfigurationError(
             "Custom method workers > 1 requires --allow-unsafe-custom-parallel"
@@ -1709,6 +1720,7 @@ def _resolve_smoke_max_workers(
     smoke_max_workers: int | None,
     configured_max_workers: int,
     allow_override: bool,
+    max_parallel_workers: int | None,
 ) -> int:
     """校验用户传入的 conversation 并发覆盖。"""
 
@@ -1720,9 +1732,13 @@ def _resolve_smoke_max_workers(
         )
     if smoke_max_workers < 1:
         raise ConfigurationError("workers must be at least 1")
-    if smoke_max_workers > MAX_SMOKE_WORKERS:
+    if (
+        max_parallel_workers is not None
+        and smoke_max_workers > max_parallel_workers
+    ):
         raise ConfigurationError(
-            f"workers must be at most {MAX_SMOKE_WORKERS}"
+            f"{method_display_name} supports at most {max_parallel_workers} "
+            "parallel conversation workers"
         )
     return smoke_max_workers
 

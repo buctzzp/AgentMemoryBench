@@ -14,7 +14,7 @@ import pytest
 from memory_benchmark.config import OpenAISettings, load_path_settings
 from memory_benchmark.methods import registry as registry_module
 from memory_benchmark.methods.mem0_adapter import Mem0Config
-from memory_benchmark.methods.memoryos_adapter import MemoryOSPaperConfig
+from memory_benchmark.methods.memoryos_adapter import MemoryOSConfig
 from memory_benchmark.methods.registry import MethodBuildContext, get_method_registration
 from memory_benchmark.observability.efficiency import EfficiencyCollector
 
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.unit
     ("method_name", "config", "adapter_attribute"),
     [
         ("mem0", Mem0Config.smoke(), "Mem0"),
-        ("memoryos", MemoryOSPaperConfig(), "MemoryOS"),
+        ("memoryos", MemoryOSConfig(), "MemoryOS"),
     ],
 )
 def test_method_factory_passes_same_efficiency_collector_to_adapter(
@@ -70,7 +70,7 @@ def test_method_factory_passes_same_efficiency_collector_to_adapter(
     ("method_name", "config", "adapter_attribute"),
     [
         ("mem0", Mem0Config.smoke(), "Mem0"),
-        ("memoryos", MemoryOSPaperConfig(), "MemoryOS"),
+        ("memoryos", MemoryOSConfig(), "MemoryOS"),
     ],
 )
 def test_method_factory_passes_none_when_efficiency_is_disabled(

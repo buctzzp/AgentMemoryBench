@@ -60,6 +60,9 @@ from memory_benchmark.core.provider_protocol import (
     UnitRef,
 )
 from memory_benchmark.methods.image_text import turn_text_with_images
+from memory_benchmark.methods.embedding_assets import (
+    resolve_embedding_runtime_model_reference,
+)
 from memory_benchmark.methods.openai_transport import (
     merge_chat_completions_request_overrides,
     with_chat_completions_request_overrides,
@@ -109,7 +112,6 @@ class Mem0Config:
         reader_model: 框架固定 reader 用于根据检索记忆生成最终回答的模型。
         top_k: method 内部检索记忆上限，不进入统一接口参数。
         max_workers: conversation 级建议并发数，由 runner policy 读取。
-        ingestion_chunk_size: 每次 Mem0 add 包含的 turn 数；官方 LoCoMo 配置为 1。
         infer: 是否启用 vendored Mem0 V3 事实抽取与 ADD/hash-dedup 写入；本 adapter 的
             可达调用链不执行手工 update/delete API。
         rerank: 是否启用 Mem0 产品 reranker。当前观测契约只允许 False；
@@ -126,7 +128,6 @@ class Mem0Config:
     top_k: int
     max_workers: int
     embedding_provider: str = "huggingface"
-    ingestion_chunk_size: int = 1
     infer: bool = True
     rerank: bool = False
     api_timeout_seconds: float = 60.0
@@ -148,10 +149,6 @@ class Mem0Config:
             raise ConfigurationError("Mem0 top_k must be positive")
         if self.max_workers < 1:
             raise ConfigurationError("Mem0 max_workers must be positive")
-        if self.ingestion_chunk_size != 1:
-            raise ConfigurationError(
-                "Current Mem0 adapter requires official per-turn ingestion_chunk_size=1"
-            )
         if not self.infer:
             raise ConfigurationError(
                 "Mem0 benchmark adapter requires infer=True to test the Mem0 algorithm"
@@ -181,13 +178,12 @@ class Mem0Config:
 
         return cls(
             extraction_model="ox-alpha-free",
-            embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+            embedding_model="models/all-MiniLM-L6-v2",
             embedding_dimensions=384,
             embedding_provider="huggingface",
             reader_model="ox-alpha-free",
             top_k=20,
             max_workers=1,
-            ingestion_chunk_size=1,
             infer=True,
             rerank=False,
             api_timeout_seconds=60.0,
@@ -201,13 +197,12 @@ class Mem0Config:
 
         return cls(
             extraction_model="gpt-4o-mini",
-            embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+            embedding_model="models/all-MiniLM-L6-v2",
             embedding_dimensions=384,
             embedding_provider="huggingface",
             reader_model="gpt-4o-mini",
             top_k=20,
             max_workers=10,
-            ingestion_chunk_size=1,
             infer=True,
             rerank=False,
             api_timeout_seconds=60.0,
@@ -423,6 +418,8 @@ class Mem0(BaseMemoryProvider, BaseResumableMemorySystem, MemoryProvider):
         config: Mem0Config,
         openai_settings: OpenAISettings,
         storage_root: str | Path,
+        *,
+        project_root: Path | None = None,
     ) -> dict[str, Any]:
         """构造只传给 Mem0 `Memory.from_config()` 的内部配置。
 
@@ -439,8 +436,18 @@ class Mem0(BaseMemoryProvider, BaseResumableMemorySystem, MemoryProvider):
         root = Path(storage_root).expanduser().resolve()
         # embedder config 按 provider 派生：openai 走 OpenAI 兼容 API（需 api_key/
         # openai_base_url）；huggingface 走本地 SentenceTransformer（不传密钥）。
+        embedding_model = config.embedding_model
+        if embedding_model.startswith("models/"):
+            if project_root is None:
+                raise ConfigurationError(
+                    "Mem0 local embedding config requires explicit project_root"
+                )
+            embedding_model = resolve_embedding_runtime_model_reference(
+                embedding_model,
+                project_root,
+            )
         embedder_config: dict[str, Any] = {
-            "model": config.embedding_model,
+            "model": embedding_model,
             "embedding_dims": config.embedding_dimensions,
         }
         if config.embedding_provider == "openai":
@@ -1255,6 +1262,7 @@ class Mem0(BaseMemoryProvider, BaseResumableMemorySystem, MemoryProvider):
             config=self.config,
             openai_settings=openai_settings,
             storage_root=self.storage_root,
+            project_root=self.path_settings.project_root,
         )
         try:
             return mem0_module.Memory.from_config(backend_config)

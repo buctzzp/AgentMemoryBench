@@ -15,11 +15,25 @@
 | adapter | `graphiti-oss-product-v1` |
 | product surface | direct `Graphiti.add_episode()` + `Graphiti.search()` |
 | storage | 每 conversation 独占 FalkorDB Lite 物理 root |
-| embedding | local `all-MiniLM-L6-v2`，384 维、L2 normalize、cosine |
+| embedding | local `models/all-MiniLM-L6-v2`，384 维、模型 pipeline + 显式 L2、cosine |
 
-Graphiti 于 2026-08-09 经用户裁定接替 source-unavailable 的 Supermemory。2026-08-09 再核远端
-tag：`v0.29.3` 仍是最新稳定版，`v0.30.0` 仅有 pre-release。Supermemory 旧 blocked note
+Graphiti 于 2026-08-09 经用户裁定接替 source-unavailable 的 Supermemory。2026-08-25 再核远端：
+`v0.29.3` 仍是最新稳定 release，current `main=993e081a6d7948a0d8851c12a5fbdbeb49fed862`，
+相对 stable 为 25 commits / 11 files；`v0.30.0` 仍只有 prerelease。current main 不机械混入 pin。
+Supermemory 旧 blocked note
 保留为 source-gate 判例，但不再占 Phase 1 第十格。
+
+官方 README 指向的论文是
+[`Zep: A Temporal Knowledge Graph Architecture for Agent Memory`](https://arxiv.org/abs/2501.13956)，
+其机制材料可用于理解 Graphiti core，但论文实验通过 hosted Zep API、BGE-m3 与 nodes+edges context
+运行，不能当成 Graphiti OSS v0.29.3 的 author 数字。完整四身份与参数证据见
+[M10 provenance](../../workstreams/ws05.1-method-profile-provenance/notes/graphiti-profile-provenance.md)。
+
+ws05.1 M11 已把本地模型 bytes/tokenizer/pipeline/runtime 锁进 run identity v2，并以 165-file
+`graphiti-oss-main-v2` 组件闭包替代旧 11-file source lock，覆盖完整 `graphiti_core`、lock、adapter/
+worker/transport/bootstrap。新 run 必须 fresh-state，旧 artifact 不改写；author profile 仍因 hosted
+Zep 与 OSS/current payload 身份不等价而不注册。完整收据见
+[M11 implementation](../../workstreams/ws05.1-method-profile-provenance/notes/m11-effective-config-source-embedding-implementation.md)。
 
 ## 产品与配置
 
@@ -33,9 +47,21 @@ tag：`v0.29.3` 仍是最新稳定版，`v0.30.0` 仅有 pre-release。Supermemo
 - cleanup：root 外 marker → 固定 tombstone → resumable rmtree，embedded Redis 必须 exact stop；
   shutdown 未确认后 runtime 永久 fail-closed。
 
+Graphiti README 声称默认 `SEMAPHORE_LIMIT=10`，v0.29.3 `helpers.py` 实际默认是 20；framework
+显式 `max_coroutines=10`，所以有效值稳定，但它是显式 framework 值，不是“沿 source default”。
+Zep paper build context 写最近 4 条 messages，v0.29.3 source 的 `RELEVANT_SCHEMA_LIMIT` 是 10；main
+沿 current source 10，不把 paper 值倒灌进 current product。
+
 current stable repo 只含 LongMemEval graph-building eval：逐 message `role: content`、session date、
-单 user group。它没有完整 question search/answer/judge，因此只提供 payload parity；LoCoMo、
+单 user group。它没有完整 question search/answer/judge，而且其 `candidate_is_worse` 字段描述、
+自然语言 prompt 与 scorer polarity 互相矛盾，因此只提供 ingest payload/topology anchor，不提供可直接
+采用的 graph-quality 分数；LoCoMo、
 HaluMem、BEAM、MemBench 都是 framework extension。Graphiti OSS 也不等于 Zep cloud 产品。
+
+同 owner `getzep/zep-papers` 的 LoCoMo/LME pipeline 是 hosted Zep external provenance：它使用
+nodes RRF + edges cross-encoder、top-20、Zep context constructor 和 method-owned answer/judge。该设计
+面向作者产品效果，和本项目受控 edge-only basic RRF 回答不同实验问题；不因不同而判错，也不把它
+注册为 Graphiti OSS `author_*`。
 
 ## 产品接口契约（参数、返回与批次）
 
@@ -96,7 +122,7 @@ MemBench 100k 缺 source time 时在产品调用前 fail-fast。
 | MemBench 0-10k | First/Third canonical turn；原文 place/time 保留，typed time 另传 | provenance valid/turn；rank valid | W1/W2 live passed |
 | MemBench 100k | source time 可能缺失，Graphiti reference_time 必填 | N/A；禁止造时 | pre-runtime rejected |
 | BEAM | 四 variant 原序；10M orphan/mismatch 不位置配对 | provenance valid/turn；rank valid | 四 variant W1/W2 live passed |
-| HaluMem | 逐 turn add；session-local current active edge report | extraction/update/QA/memory-type valid | Medium/Long fixed W1 passed |
+| HaluMem | 逐 turn add；session-local current active edge report | extraction/update/QA/memory-type valid | Medium/Long 历史 fixed-shape W1 passed；current runner 可按 UUID 并行 |
 
 HaluMem memory-type 是 gold category breakdown，不要求 method 自己输出 Event/Persona/Relationship；
 早期 M2 草稿中的 N/A 已更正。统一 `query_limit=20` 只是容量上限：普通 query 仍用自身 top-k，

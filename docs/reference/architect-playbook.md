@@ -85,6 +85,8 @@
     method source identity 都要纳入该文件哈希；只给 adapter/worker 自身盖章会留下 resume
     漏洞。抽取时把真正相同的机械协议单源，把 timeout、终止、handle retention、Docker/DB
     cleanup 等差异做成显式窄 policy，并用强反例逐项锁住，不能拿“DRY”当行为改判。
+    vendored source lock 同理：清单应由行为调用链与本项目 patch 文件反推，不能只手选几个
+    “代表文件”；LightMem 8-file identity 漏掉已改 manager/buffer/utils 是本条的补充判例。
 21. **拆编排器要保留组合根、切断反向依赖**：按 planning/preflight/ingest/answer/parallel
     的变化原因 leaf-first 迁移，叶模块不得 import 原 façade；旧 private import 在迁移期由
     façade 直接 re-export canonical object，不能复制 wrapper 或第二份实现。每迁一层先跑直接
@@ -131,7 +133,37 @@
     论文主流程/消融中的组件若在代码里被做成开关，不能仅因通用默认关闭就删掉；反过来也不能
     看到 bool 就全部开启。沿到最终调用分支，并对关键开关或高影响数值做零 API mutation。
     官方 benchmark 的专调值只进入显式 `author_<benchmark>`；主配置保持跨 benchmark 固定。
-    LightMem `pre_compress=False` 的库默认与论文/LoCoMo/LME 实验 `True` 的分叉是本条首个判例。
+    配置字段名、README 描述和 harness 传值也不证明字段有效：若产品没有消费者，应裁
+    `DEAD_CONFIG`，不能继续把它写进 active identity。一个 benchmark 报告多组 backbone/参数/
+    lifecycle 时，也不能压成一个假唯一 `author_<benchmark>`。LightMem 的
+    `pre_compress=False` 默认、dead `extract_threshold` 与多组 `(r,th)` 是本条判例。
+31. **同一论文谱系的多个“官方仓库”也不得自动视为等价**：先锁 paper 页实际链接、current
+    product、benchmark eval 与各自 commit，再逐函数对最终 state/index/update 对表。repo 更晚、
+    owner 相同、README 互相链接都不是算法等价证明；若邻居 id、embedding document、自动
+    analysis 或失败语义不同，就分类 `SOURCE_VARIANT` 并保留旧 artifact identity，不能用一次
+    fast-forward 偷换。A-Mem 的 `agiresearch/A-mem`、`WujiangXu/A-mem-sys` 与
+    `WujiangXu/A-mem` 三源分叉是本条判例。
+32. **比较第三方设计不是为现行方案找赞成票**：先重建对方要解决的问题、约束、estimand 与
+    保护的不变量，再追到 final payload/effective config 判断代价；最后才裁其对本项目是否可
+    迁移。设计与现行政策相反时，既不能因“别人这样做”照搬，也不能因“不符合我们目标”立即
+    否定。应明确它在自己的目标下是否合理，以及换到本项目的公平性、复现性、成本和 identity
+    约束后为何保留、改造或拒绝。
+33. **论文阅读要产出可复用机制卡，而不是一次性上下文**：完整取证留 workstream note；稳定
+    integration 页摘要 paper/source identity、算法阶段、状态变化、关键参数语义、与 current
+    product 的已知分叉及适用边界，并从文档索引可定位。以后回答机制问题优先复用机制卡；只有
+    upstream/paper 版本变化、现有 locator 失效、问题涉及未覆盖分支或新反证时才定点重读，不能
+    在无新信息时从头再调查，也不能把旧机制卡冒充 current-source 证明。
+34. **默认值探针必须复现 final consumer 的可选参数**：同一个依赖的默认行为可能随是否安装
+    embedding function、provider、metadata 或 config object 改变。不能用“少传一个对象”的最小
+    探针替代真实调用面。2026-08-25 M11 中，架构师用无 embedding function 的 Chroma collection
+    探到 fallback L2，险些把 A-Mem manifest 从正确的 cosine 改错；Luna 调查沿到产品实际安装的
+    `SentenceTransformerEmbeddingFunction.default_space()` 后推翻该结论。修法是先逐项对齐 final
+    constructor 参数，再运行零下载探针；subagent 反证仍须由架构师复核源码与可执行最小反例。
+35. **先对齐真正的问题，再开始求解**：面对可能有多种解释的需求，先用自己的话复述用户要作的
+    决策、成功标准、已知约束和明确非目标；不能把相邻但更容易回答的问题偷偷替换进来。若不同
+    解释会改变实验身份、配置、预算、数据范围或外部写入，而当前证据无法唯一消歧，必须追问；
+    若含义已由源码、现行裁决和上下文唯一闭合，则直接说明理解并推进，避免为形式完整反复确认。
+    澄清不是停工借口，未经对齐的执行也不是效率。
 
 完整历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。
@@ -154,6 +186,28 @@
 - 当前题有 gold 是否被误当成 provider 整体能力？
 - 字段缺席与显式 null 是否被验货器混为一谈？
 - 并行施工是否超过架构师的验收带宽？
+
+### 4.3 调查型 subagent 的轻量验收
+
+派发前冻结小型调查合同：一个可判定问题、它支持的决策、背景/当前 ruling、source/version、
+允许范围与非目标、覆盖方法、输出格式和停工条件。回报至少包含 claim-evidence 表（每条结论、
+精确 locator、能证明/不能证明什么、适用范围与反证）、实际读取/命令、全量或抽样边界、假设、
+冲突、未闭合项、模型身份和 scope 偏差；自报置信度只能作元数据。
+
+架构师先做收据/范围/locator 的廉价结构门，再亲自抽锚会改变 source identity、协议、隐私、
+metric/provenance、有效配置、plan 或稳定文档的承重断言；“全部/唯一/不存在/恒为零”等普遍或
+否定性结论还要核覆盖方法和至少一个边界反例。结构化扫描能证明计数与覆盖，不能替代语义判断。
+
+默认不再派 reviewer。只有 source/agent 结论冲突、普遍性覆盖不足、承重结论缺少廉价机器门，
+或错误损失高时，才启动一个窄范围、只读 reviewer；其发现仍是待核假设，不得直接改代码或稳定
+文档。默认一轮，只有客观证据失败、已复现的阻断问题或新共享边界才进入第二轮。主架构师重点
+验收多个局部结论之间的接缝，不平均重做每条探索。
+
+调查第三方设计时先做“目标重建”：它面对的用户、运行环境、比较对象、成本约束和需要保持的
+invariant 是什么；随后才对收益、代价与迁移适用性作判词。发现 benchmark override、隐藏
+fallback 或与本项目不同的参数，不等于已经证明对方设计错误。若目标不同，应分类为不同
+estimand/identity；若目标相同，再用最终 effective call 与可复现反例比较优劣。避免把调研变成
+为现状寻找佐证。
 
 完整手艺见[旧案例库 §4](playbooks/architect/casebook-through-2026-07-23.md#4-审查手艺隐性知识核心)。
 
@@ -326,6 +380,19 @@ commit、测试数、在途 actor、下一张卡只写活跃 workstream。手册
 
 局部问题出现时横扫同类边界：五 benchmark、双 runner、十 method、manifest/resume、
 public/private、W1/W2。横扫是找同构风险，不是无边界扩 scope。
+
+### 12.1 并发资格不是 W2 天花板
+
+并发审查必须拆成 benchmark isolation、method namespace、runtime ownership、resource policy
+四层。W2 是暴露共享状态竞态的最小强反例，不得因此把 method 能力硬编码成最多 2；反过来，
+namespace 可隔离也不能证明共享 tokenizer/scheduler/client 线程安全。正确做法是让每个 worker
+独占可变 runtime，lane 内串行复用并稳定映射 isolation，实际 worker 数交给统一资源政策。
+execution profile 的 worker 数是默认值，不是 cap；除非一手产品约束证明真实硬上限，否则
+registry 应声明 `None`，显式正整数由资源 admission control 约束，不能再用 2 或 10 冒充算法
+天花板。
+operation-level benchmark 只锁一个 isolation 内部的事件顺序，不等于整个 benchmark W1。
+未来共享只读 dataset/model 时必须做 serial-vs-shared payload/artifact/score 等价门；结果变化就
+不是纯工程优化。
 
 ## 13. 持续维护清单
 

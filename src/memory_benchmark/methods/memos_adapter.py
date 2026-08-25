@@ -62,7 +62,7 @@ from memory_benchmark.observability.efficiency import (
 from memory_benchmark.storage import atomic_write_json
 
 
-MEMOS_ADAPTER_VERSION = "memos-v2.0.25-product-v5"
+MEMOS_ADAPTER_VERSION = "memos-v2.0.25-product-v6"
 MEMOS_METHOD_DIRECTORY = "MemOS"
 MEMOS_UPSTREAM_URL = "https://github.com/MemTensor/MemOS.git"
 MEMOS_RELEASE_TAG = "v2.0.25"
@@ -151,9 +151,8 @@ class _MemosEfficiencyCapture:
 class MemOSConfig:
     """MemOS v2.0.25 product 运行 profile。
 
-    两个 section（`smoke` / `official_full`）除 `max_workers` 外参数完全相同；
-    首版两者都固定为 1，因为 MemOS factory 按 config 缓存单例、reader 还持有构造
-    期 graph DB，跨 namespace interleaving 尚未一手验证。
+    method 参数不携带 worker 拓扑；conversation 并行由 execution composition
+    注入，并受 registry 当前已验证的能力上限约束。
     """
 
     llm_model: str
@@ -259,10 +258,6 @@ class MemOSConfig:
             raise ConfigurationError("MemOS embedding_max_tokens must be positive")
         if self.task_timeout_seconds <= 0:
             raise ConfigurationError("MemOS task_timeout_seconds must be positive")
-        if self.max_workers != 1:
-            raise ConfigurationError(
-                "MemOS首版不声明跨 conversation 并行资格，max_workers 必须为 1"
-            )
         if not 0.0 <= self.search_relativity <= 1.0:
             raise ConfigurationError("MemOS search_relativity must be within [0, 1]")
         if self.vector_db_port < 1:
@@ -453,6 +448,9 @@ def _bool_env(value: bool) -> str:
     return "true" if value else "false"
 
 
+_MEMOS_RUNTIME_INIT_LOCK = threading.RLock()
+
+
 class MemosRuntime:
     """一个 MemOS product component bundle 及其 typed handler。
 
@@ -484,10 +482,14 @@ class MemosRuntime:
         from memos.api.handlers.component_init import init_server
         from memos.api.handlers.search_handler import SearchHandler
 
-        with _scoped_environment(
-            _memos_environment(config, openai_settings, path_settings)
-        ):
-            components = init_server()
+        # `init_server()` 从 process-global os.environ 读取配置。不同 worker 的
+        # runtime 必须各自拥有 component graph/embedder，但初始化区间不能交错，
+        # 否则一个线程恢复环境时会污染另一个线程尚未完成的构造。
+        with _MEMOS_RUNTIME_INIT_LOCK:
+            with _scoped_environment(
+                _memos_environment(config, openai_settings, path_settings)
+            ):
+                components = init_server()
         self.components = components
         self.dependencies = HandlerDependencies.from_init_server(components)
         self.add_handler = AddHandler(self.dependencies)
@@ -577,11 +579,11 @@ class MemosRuntime:
 
 
 class _MemosRuntimeOwner:
-    """进程内、按完整 config identity 单例的 MemOS runtime 持有者。
+    """单个 provider/worker 独占的 MemOS runtime 持有者。
 
-    clean retry 可能发生在 provider 构造之前，因此需要一个进程级 owner；但它
-    必须：同 config 复用、冲突 config fail-fast、thread-safe、可确定性 reset，
-    且不跨 run 复用已关闭 runtime。
+    owner 只在一个 provider 内复用同 config runtime；不同 worker 各有自己的
+    owner，因此不会共享 tokenizer/scheduler。它仍负责冲突 config fail-fast、
+    thread-safe、确定性 reset，且不跨 provider/run 复用已关闭 runtime。
     """
 
     def __init__(self) -> None:
@@ -693,9 +695,6 @@ class _MemosRuntimeOwner:
             self._runtime = None
 
 
-MEMOS_RUNTIME_OWNER = _MemosRuntimeOwner()
-
-
 def _ensure_memos_importable(path_settings: PathSettings) -> None:
     """把 vendored MemOS 的 `src/` 加入 sys.path，保持 lazy import 语义。"""
 
@@ -739,7 +738,13 @@ class MemOS(MemoryProvider):
             raise ConfigurationError("MemOS session_memory_report must be bool")
         self.session_memory_report = session_memory_report
         self.benchmark_name = benchmark_name
-        self._runtime_owner = runtime_owner or MEMOS_RUNTIME_OWNER
+        # 默认绝不使用进程级单例：generic W2 会在同一 Python 进程创建两个
+        # provider；若二者折叠到同一 runtime，会共享 SentenceTransformer
+        # tokenizer 并触发 `Already borrowed`。显式注入 owner 只供同一 provider
+        # 的生命周期测试与 clean handoff 使用。
+        self._runtime_owner = (
+            runtime_owner if runtime_owner is not None else _MemosRuntimeOwner()
+        )
         self._runtime_factory = runtime_factory
         self._runtime: MemosRuntime | None = None
         self._cleaned = False
@@ -2164,7 +2169,6 @@ __all__ = [
     "MEMOS_EMPTY_MEMORY_SENTINEL",
     "MEMOS_IMPLEMENTATION_IDENTITY",
     "MEMOS_REFERENCE_TIME_EFFECT",
-    "MEMOS_RUNTIME_OWNER",
     "MemOS",
     "MemOSConfig",
     "MemosRuntime",

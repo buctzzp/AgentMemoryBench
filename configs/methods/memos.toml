@@ -6,13 +6,11 @@
 #        dispatcher → MEM_READ fine 抽取 → raw 清理 → refresh
 #   HTTP host / server_router 一律禁止；答题走 framework benchmark builder。
 #
-# API runtime、task timeout 与 conversation workers 由独立组合根注入；MemOS 的
-# method capability cap 固定为 1。虽然 runner 可为 W2 构造两个 provider，但
-# MemOSRuntimeOwner 仍会
-# 按同一 config 复用进程级 runtime/embedder；真实 LongMemEval W2 已在并发
-# SentenceTransformer tokenizer 上触发 `RuntimeError: Already borrowed`。因此当前
-# product profile 明确不支持 framework conversation 并行，CLI 必须在 runtime/API
-# 启动前拒绝 `--workers` 覆盖。MemOS 产品内部 async dispatcher 保持开启。
+# API runtime、task timeout 与 conversation workers 由独立组合根注入。每个
+# framework worker 独占 MemOS runtime/embedder/scheduler，在 lane 内用 namespace
+# 串行处理 conversation；`init_server()` 的进程环境读取区间由 adapter 加锁，业务
+# 操作不串行化。并发数由统一 execution/resource policy 决定，不在 method TOML
+# 固定 W2 或 W1；MemOS 产品内部 async dispatcher 继续保持开启。
 # secret 只声明**环境变量名**，值不进本文件、不进 manifest、不进日志。
 
 [method]

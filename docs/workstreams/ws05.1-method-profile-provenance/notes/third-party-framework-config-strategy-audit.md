@@ -23,6 +23,26 @@
 比换格式更符合当前目标。若未来需要大规模矩阵生成，应增加显式 planner/composition schema，而不是
 让 YAML merge 隐式改写 method 主算法参数。
 
+### 1.1 目标重建：per-benchmark override 不是天然缺陷
+
+本审计中的分类描述的是**实验身份是否可追**，不是给第三方框架排优劣。三类常见目标本来就会导出
+不同配置策略：
+
+1. 作者数字复现或产品效果展示会允许每个 benchmark 使用作者已经调好的 batch、prompt、search
+   depth 与 lifecycle；它优化的是“在该任务上忠实复现/发挥产品能力”，不是隔离单一 method
+   变量。
+2. 通用产品互操作框架会按 dataset shape 调整 namespace、collection、flush、输入 chunk 与请求
+   budget；这些覆盖可能是让异构产品真正可运行的必要适配，而不是不公平调参。
+3. controlled benchmark 主表才会要求同一 method 的主算法参数跨 benchmark 固定，以便把分数变化
+   更清楚地归因于 benchmark 输入与 method 本身，而不是隐藏的逐格调参。
+
+因此 OmniMemEval、MemoryData 与 EverCore 的 per-dataset 选择在各自目标下可以是合理设计；它们的
+收益是更强的产品可运行性、作者口径贴合或单格效果，代价是同名 system 的 effective identity 依赖
+运行时 merge，跨格分数不再只代表一份固定 method 配置。本项目不把该代价判成“错误”，而是把它
+分流为显式 `author_<benchmark>` / product-effectiveness 补充身份；主表继续采用固定 `[method]`
+是因为主表回答的是另一类研究问题。将来若项目新增“每格最佳效果”赛道，应吸收这些框架的显式
+override 与展开后 manifest 机制，而不是让主表偷偷承担两个 estimand。
+
 ## 2. 审计范围与分类
 
 | 框架 | source identity | 多 method × 多 benchmark | 主分类 | 深读结论 |
@@ -72,9 +92,11 @@ EverCore 快照不是独立 Git checkout；父仓 `git rev-parse` 不能证明�
 ### 3.3 可借鉴与风险
 
 - 可借鉴：公共 answer/judge/runtime 字段有独立命名空间；产品 client 负责把配置追到最终 payload；
-  top-k 有清楚的 env→CLI 覆盖顺序。
-- 不照搬：credential、runtime、evaluation 与算法字段共居 `.env`；benchmark 脚本可以修改产品
-  env；没有看到与本项目同等级的 typed manifest/resume identity 来锁最终有效配置。
+  top-k 有清楚的 env→CLI 覆盖顺序；针对产品/数据形状的必要覆盖让一套客户端能运行更多异构
+  benchmark。
+- 迁移时需补的边界：credential、runtime、evaluation 与算法字段共居 `.env`；benchmark 脚本可以
+  修改产品 env；没有看到与本项目同等级的 typed manifest/resume identity 来锁最终有效配置。
+  这些事实阻止的是“直接把它当 controlled-main 身份”，不否定其产品互操作目标。
 
 ## 4. MemoryData
 
@@ -133,7 +155,9 @@ composition 写进 manifest。MemoryData 的扁平 preset 可作参数盘点线�
   若 artifact 不保存展开后的 effective config，就无法只凭文件名复现。
 
 可借鉴的是 dataset/system/evaluator 分层和显式深合并函数；本项目不采用其 benchmark 自动覆盖
-method 参数的政策。
+method 参数的政策用于 controlled main。但这套设计很适合作者复现或“每格最佳产品配置”赛道：
+若将来引入，应把 override 展开为一份完整 effective manifest、显式命名 estimand，并禁止与固定
+主表分数直接混比。
 
 ## 6. MemEval
 

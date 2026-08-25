@@ -242,7 +242,6 @@ def _batch(events: list[TurnEvent], *, session_time: str | None = None) -> Sessi
     ("override", "message"),
     [
         ({"max_messages_per_batch": 11}, "must not exceed 10"),
-        ({"max_workers": 2}, "max_workers must be 1"),
         ({"human_block_limit": 9999}, "locks human=10000"),
         ({"worker_request_timeout_seconds": 0.0}, "must be positive"),
     ],
@@ -255,6 +254,36 @@ def test_letta_config_rejects_product_contract_drift(
 
     with pytest.raises(ConfigurationError, match=message):
         _config(**override)
+
+
+def test_letta_config_accepts_independent_runtime_w2() -> None:
+    """W2 是 execution 拓扑，不改变 sleeptime memory method 参数。"""
+
+    assert _config(max_workers=2).max_workers == 2
+
+
+def test_letta_w2_storage_roots_own_distinct_product_runtimes(tmp_path: Path) -> None:
+    """两个 conversation worker 必须拥有不同容器、volume 与 runtime tag。"""
+
+    paths = _paths(tmp_path)
+    settings = OpenAISettings(api_key="test", model="model")
+    first = LettaRuntime(
+        config=_config(max_workers=2),
+        openai_settings=settings,
+        path_settings=paths,
+        storage_root=paths.outputs_root / "run/method_state/worker_0",
+    )
+    second = LettaRuntime(
+        config=_config(max_workers=2),
+        openai_settings=settings,
+        path_settings=paths,
+        storage_root=paths.outputs_root / "run/method_state/worker_1",
+    )
+
+    assert first._identity != second._identity
+    assert first._container_name != second._container_name
+    assert first._volume_name != second._volume_name
+    assert first.runtime_tag != second.runtime_tag
 
 
 def test_letta_runtime_enables_pgvector_before_schema_migration() -> None:

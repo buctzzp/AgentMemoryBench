@@ -21,6 +21,7 @@ import re
 import shutil
 import tempfile
 from time import perf_counter_ns
+import tomllib
 from typing import Any, Protocol
 
 from memory_benchmark.config import OpenAISettings, PathSettings, load_path_settings
@@ -51,8 +52,8 @@ from memory_benchmark.observability.efficiency import (
 )
 
 
-EVEROS_ADAPTER_VERSION = "everos-product-chat-v7"
-EVEROS_WORKER_SCHEMA_VERSION = "everos-worker-protocol-v3"
+EVEROS_ADAPTER_VERSION = "everos-product-chat-v8"
+EVEROS_WORKER_SCHEMA_VERSION = "everos-worker-protocol-v4"
 EVEROS_METHOD_DIRECTORY = "EverOS"
 EVEROS_UPSTREAM_URL = "https://github.com/EverMind-AI/EverOS.git"
 EVEROS_COMMIT = "48fc9084888bc17100053227284f939a5aca5e91"
@@ -101,6 +102,13 @@ EVEROS_SOURCE_FILES = (
 # a root-local ``ome.toml`` at runtime, so that one template remains required.
 _PRODUCT_ROOT_TEMPLATES = {
     "ome.toml": "src/everos/config/default_ome.toml",
+}
+_CONTROLLED_OME_STRATEGY_PROFILE = {
+    "extract_atomic_facts": True,
+    "extract_foresight": False,
+    "extract_user_profile": False,
+    "reflect_episodes": False,
+    "trigger_profile_clustering": True,
 }
 _ALLOWED_ROLES = frozenset({"user", "assistant"})
 _PATH_SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_.@+-]+$")
@@ -225,7 +233,7 @@ class EverOSConfig:
             "implementation_identity": EVEROS_IMPLEMENTATION_IDENTITY,
             "product_surface": EVEROS_PRODUCT_SURFACE,
             "consume_granularity": "session",
-            "embedding_distance": "lancedb-l2",
+            "embedding_distance": "lancedb-cosine",
             "embedding_normalization": "model-internal-l2",
             "missing_timestamp_policy": "require-source-time-v1",
             "timestamp_derivation_policy": "locomo-official-30s-only-v1",
@@ -233,6 +241,7 @@ class EverOSConfig:
             "owner_merge_policy": "score-desc-owner-order-product-rank-v1",
             "input_content_time_prefix": False,
             "product_episode_time_policy": "source-derived-only-v1",
+            "ome_strategy_profile": dict(_CONTROLLED_OME_STRATEGY_PROFILE),
         }
 
 
@@ -437,6 +446,8 @@ class EverOSRuntime:
             or result.get("adapter_version") != EVEROS_ADAPTER_VERSION
             or result.get("worker_schema_version") != EVEROS_WORKER_SCHEMA_VERSION
             or result.get("product_surface") != EVEROS_PRODUCT_SURFACE
+            or result.get("ome_strategy_profile")
+            != _CONTROLLED_OME_STRATEGY_PROFILE
         ):
             self._terminate_worker()
             self._active_isolation_key = None
@@ -458,6 +469,7 @@ class EverOSRuntime:
             "schema_version": EVEROS_STATE_SCHEMA_VERSION,
         }
         marker_path = product_root / EVEROS_ROOT_MARKER
+        template_payloads = self._product_root_template_payloads()
         if marker_path.is_file():
             try:
                 existing_marker = json.loads(marker_path.read_text(encoding="utf-8"))
@@ -470,22 +482,32 @@ class EverOSRuntime:
                 raise ConfigurationError(
                     "EverOS refused to initialize a non-empty unmarked product root"
                 )
-            for target_name, source_relative in _PRODUCT_ROOT_TEMPLATES.items():
-                source = self._everos_root() / source_relative
-                if not source.is_file():
-                    raise ConfigurationError(
-                        f"EverOS product root template is missing: {source_relative}"
-                    )
-                _atomic_write_bytes(product_root / target_name, source.read_bytes())
+            for target_name, payload in template_payloads.items():
+                _atomic_write_bytes(product_root / target_name, payload)
             _atomic_write_json(marker_path, root_marker)
-        for target_name, source_relative in _PRODUCT_ROOT_TEMPLATES.items():
+        for target_name, payload in template_payloads.items():
             target = product_root / target_name
-            source = self._everos_root() / source_relative
-            if not target.is_file() or target.read_bytes() != source.read_bytes():
+            if not target.is_file() or target.read_bytes() != payload:
                 raise ConfigurationError(
                     f"EverOS product root config drifted: {target_name}"
                 )
         return product_root, root_marker
+
+    def _product_root_template_payloads(self) -> dict[str, bytes]:
+        """读取 upstream 模板并生成本次受控产品配置。"""
+
+        payloads: dict[str, bytes] = {}
+        for target_name, source_relative in _PRODUCT_ROOT_TEMPLATES.items():
+            source = self._everos_root() / source_relative
+            if not source.is_file():
+                raise ConfigurationError(
+                    f"EverOS product root template is missing: {source_relative}"
+                )
+            payload = source.read_bytes()
+            if target_name == "ome.toml":
+                payload = _render_controlled_ome_config(payload)
+            payloads[target_name] = payload
+        return payloads
 
     def _worker_stderr_redactor(self) -> Callable[[str], str]:
         """冻结本次 worker 的 secret 集并返回逐行脱敏器。"""
@@ -1304,6 +1326,35 @@ def clean_everos_conversation_state(
     sidecar.unlink(missing_ok=True)
     if sidecar.exists():
         raise ConfigurationError("EverOS sidecar remains after clean retry")
+
+
+def _render_controlled_ome_config(source_payload: bytes) -> bytes:
+    """在 upstream OME 模板上显式关闭非主表的用户画像抽取。"""
+
+    try:
+        source_text = source_payload.decode("utf-8")
+        parsed = tomllib.loads(source_text)
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ConfigurationError("EverOS upstream OME template is invalid") from exc
+    strategies = parsed.get("strategies", {})
+    if not isinstance(strategies, dict):
+        raise ConfigurationError("EverOS upstream OME strategies must be a table")
+    existing = strategies.get("extract_user_profile")
+    if existing is not None:
+        if not isinstance(existing, dict) or existing.get("enabled") is not False:
+            raise ConfigurationError(
+                "EverOS upstream extract_user_profile default conflicts with "
+                "the controlled profile"
+            )
+        return source_payload
+    separator = "" if not source_text or source_text.endswith("\n") else "\n"
+    override = (
+        "\n# MemoryBenchmark controlled main profile: profile synthesis changes "
+        "build state and cost.\n"
+        "[strategies.extract_user_profile]\n"
+        "enabled = false\n"
+    )
+    return f"{source_text}{separator}{override}".encode("utf-8")
 
 
 def _namespace_id(isolation_key: str) -> str:

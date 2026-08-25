@@ -201,7 +201,7 @@ def test_memos_registered_prediction_runs_five_benchmarks_through_generic_runner
     assert manifest["method"]["consume_granularity"] == "session"
     assert manifest["method"]["provenance_granularity"] == "none"
     assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"
-    assert manifest["method"]["config"]["adapter_version"] == "memos-v2.0.25-product-v5"
+    assert manifest["method"]["config"]["adapter_version"] == "memos-v2.0.25-product-v6"
     assert manifest["method"]["config"]["build_llm_response_contract"] == (
         "provider-aware-v2:"
         "opencodego=model_aware_json_reasoning_control;"

@@ -10,9 +10,8 @@
 
 [method]
 embedding_provider = "huggingface"
-embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
+embedding_model = "models/all-MiniLM-L6-v2"
 embedding_dimensions = 384
 top_k = 20
-ingestion_chunk_size = 1
 infer = true
 rerank = false

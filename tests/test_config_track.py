@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -30,6 +31,9 @@ from memory_benchmark.prompts.author.lightmem import (
 )
 from memory_benchmark.methods.registry import resolve_registered_build_identity
 from memory_benchmark.methods.run_identity import build_method_run_identity
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _mem0_manifest() -> dict[str, Any]:
@@ -213,7 +217,7 @@ def test_memoryos_unified_identity_is_current_pypi_product_with_real_geometry() 
     assert identity.embedding.provider == "sentence-transformers"
     assert identity.embedding.model == "sentence-transformers/all-MiniLM-L6-v2"
     assert identity.embedding.dimension == 384
-    assert identity.embedding.normalization == "external_l2"
+    assert identity.embedding.normalization == "model_pipeline_l2+product_l2"
     assert identity.embedding.distance == "faiss-inner-product"
     assert identity.readout_track == "unified"
     assert identity.judge_model_source == "framework_default"
@@ -241,7 +245,7 @@ def test_memoryos_native_identity_keeps_product_build_and_fallback_judge() -> No
     assert identity.native_scope == "readout_only"
     assert identity.build_override_applied is False
     assert identity.embedding.provider == "sentence-transformers"
-    assert identity.embedding.normalization == "external_l2"
+    assert identity.embedding.normalization == "model_pipeline_l2+product_l2"
     assert identity.embedding.distance == "faiss-inner-product"
     assert identity.judge_source == "framework_fallback"
     assert identity.answer_model_source == "official_parity"
@@ -281,7 +285,7 @@ def test_amem_and_simplemem_build_identities_match_current_products() -> None:
     assert amem.embedding.provider == "sentence-transformers"
     assert amem.embedding.model == "all-MiniLM-L6-v2"
     assert amem.embedding.dimension == 384
-    assert amem.embedding.normalization == "none"
+    assert amem.embedding.normalization == "model_pipeline_l2"
     assert amem.embedding.distance == "chroma-cosine"
     assert amem.embedding.revision_status == "local_unpinned"
     assert amem.embedding.identity_status == "declared"
@@ -289,7 +293,7 @@ def test_amem_and_simplemem_build_identities_match_current_products() -> None:
     assert simplemem.embedding.provider == "sentence-transformers-local"
     assert simplemem.embedding.model == "models/all-MiniLM-L6-v2"
     assert simplemem.embedding.dimension == 384
-    assert simplemem.embedding.normalization == "internal_l2"
+    assert simplemem.embedding.normalization == "model_pipeline_l2+explicit_l2"
     assert simplemem.embedding.distance == "lancedb-l2"
     assert simplemem.embedding.identity_status == "declared"
 
@@ -476,11 +480,18 @@ def test_unified_identity_rejects_native_sources_and_native_none_scope() -> None
 def test_method_manifest_stamps_new_run_identity_and_rejects_duck_type() -> None:
     """新 manifest 只写 profile run identity，且拒绝字典冒充强类型对象。"""
 
+    current_mem0_manifest = {
+        **_mem0_manifest(),
+        "embedding_model": "models/all-MiniLM-L6-v2",
+    }
     identity = build_method_run_identity(
         profile_name="smoke",
         profile_section="smoke",
         answer_builder="benchmark",
-        build_identity=resolve_registered_build_identity("mem0", _mem0_manifest()),
+        build_identity=resolve_registered_build_identity(
+            "mem0", current_mem0_manifest
+        ),
+        project_root=PROJECT_ROOT,
     )
     manifest = _build_method_manifest(
         config_manifest={"profile_name": "smoke"},

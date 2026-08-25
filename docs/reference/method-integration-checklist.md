@@ -280,8 +280,9 @@ type 字段就判 N/A；Graphiti M2 初稿误判、M3 更正是判例。
 - answer/judge 主表仍由 benchmark 统一；作者 answer 配置是可选校准，不强铺 5×10。当前真实
   LLM 被项目硬锁 `gpt-4o-mini`，作者若使用别的 model 必须标 framework override，不得宣称
   paper-model parity。
-- **M1-B 现行运行门（2026-08-14）**：新 run 使用 `MethodRunIdentity v1` 锁公开 profile、
-  TOML section、完整 builder 与 build/embedding；不能与旧 `TrackIdentity v1` 字段混写。
+- **现行运行门（2026-08-25）**：新 run 使用 `MethodRunIdentity v2` 锁公开 profile、
+  TOML section、完整 builder、build/embedding 与本地 embedding artifact；v1 只读且严格不
+  resume，不能与旧 `TrackIdentity v1` 字段混写。
   新 `native` config-track run 已关闭，显式 `unified` 只是 deprecated no-op；旧 artifact 的
   evaluation/cost 回读继续严格兼容。分层输出目录以 profile 而非 track 分段。
 
@@ -294,9 +295,10 @@ type 字段就判 N/A；Graphiti M2 初稿误判、M3 更正是判例。
   `uv run memory-benchmark plan-smoke --root . --method <m> --benchmark <b>
   --variant <v> --run-id <base>`，审阅并保存 `smoke-plan-v1` JSON，再逐字执行其中
   `predict_argv` 与 `evaluate_argv`。shape、历史轴、默认裁剪、真实 child run-id、
-  worker 资格与 evaluator 集合均以 registry/TOML 为单一事实源；不得从上一家 method
-  命令复制。HaluMem 是固定 `4-session/1-QA/W1` operation-level shape，生成命令不得出现
-  任何裁剪旗标。planner 自身必须在无 `.env`、无 runtime、无 API 条件下完成；未通过
+  worker 资格与 evaluator 集合均以 registry/execution profile 为单一事实源；不得从上一家
+  method 命令复制。HaluMem 是固定 `4-session/1-QA` operation-level shape，生成命令不得出现
+  任何裁剪旗标；并行轴是 UUID，单 UUID 内 session 仍串行。planner 自身必须在无 `.env`、
+  无 runtime、无 API 条件下完成；未通过
   preflight 不得启动付费 smoke。
 - 进入真实 smoke 前重读 B0 parity matrix：逐个官方 benchmark 核对 main/author/
   extension/upstream-bug 四类归属仍与**当前 source lock**一致；任何“已记录但未裁”
@@ -326,7 +328,9 @@ type 字段就判 N/A；Graphiti M2 初稿误判、M3 更正是判例。
   ③ 效率观测落盘且可读（injected tokens / api_usage / latency 三类都在）；
   ④ **formatted_memory 内容抽查**：时间戳等应带字段确实带上（B4 口径）；
   空记忆哨兵是合法结果但要留痕原因（极小输入抽取 0 条属方法行为）；
-  ⑤ **并行冒烟/资格裁决**：默认 workers>1 跑一次不崩（隔离等效性的最低验证）。
+  ⑤ **并行冒烟/资格裁决**：用 W2 跑一次不崩（隔离等效性的最低竞态验证）。W2 只是最小
+  witness，不是能力天花板；execution profile 的 W1/W10 也只是默认值。没有一手产品硬约束时，
+  registry 的 method cap 必须为 `None`，显式正整数由资源 admission control 约束。
   若 method 的 current product runtime 确实无法安全复制或并发，允许把 framework
   conversation 并行判为 `N/A/unsupported`，但必须同时具备：真实 backend 反例或一手
   产品硬约束、为何“isolated provider”仍共享资源的调用链、TOML 固定 W1、CLI 在

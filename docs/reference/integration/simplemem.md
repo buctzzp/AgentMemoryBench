@@ -70,3 +70,36 @@ ThirdAgent 与 BEAM orphan 都逐 turn 原样写入，不造 placeholder。
 
 实现与算法证据见
 [`simplemem-text-v2-implementation.md`](../../workstreams/ws02.7-method-track/branches/method-recertification/simplemem/notes/simplemem-text-v2-implementation.md)。
+
+## ws05.1 M6 profile provenance（2026-08-25）
+
+完整一手证据见
+[`simplemem-profile-provenance.md`](../../workstreams/ws05.1-method-profile-provenance/notes/simplemem-profile-provenance.md)。
+
+- **current product identity**：`aiming-lab/SimpleMem@60a48e83…` +
+  `simplemem-product-compat.patch`；现行组合 source hash=`612d2f65…`。patch 只处理新版
+  LanceDB native FTS、检索线程的观测上下文传播和 endpoint 日志脱敏，不改变成功路径的
+  window/memory/retrieval topology。2026-08-25 upstream main 已到 `db80b6a7…`；M11 裁定不把该
+  source upgrade 夹带进配置清理，若升级仍须独立算法审计。
+- **论文与 current source 是 implementation variant**：论文三阶段是 Semantic Structured
+  Compression、Online Semantic Synthesis、Intent-Aware Retrieval Planning；current source以
+  `previous_entries` 条件化新 entry生成并 append，没有可独立识别的 existing-entry merge/update
+  consumer。论文 W20/stride-or-overlap 5、Qwen3-1024、adaptive retrieval depth也不等于 main
+  W40/O2、MiniLM-384、固定25/5/5。
+- **构建串行是算法身份**：`add_dialogues_parallel()` 会让同批窗口共享提交前 context并按
+  completion order聚合；main逐 turn调用 `add_dialogue()` 且显式关闭 build parallel，保留窗口间
+  previous-context 因果链。retrieval parallel仍开，是不同的轴。
+- **官方覆盖**：锁定 text repo只公开完整 LoCoMo harness；论文报告 LongMemEval-S，但没有闭合
+  原始 text pipeline的公开 runner。后续 EvolveMem 的 LME/MemBench support只作同owner extension。
+- **author profile**：LoCoMo current repo的 normal answer可重建，但 batch/parallel topology、
+  paper effective config和source identity尚未闭合；category 5还把私有 `adversarial_answer` 放进
+  answer选项，不能进入 framework。故 LoCoMo/LME均为 `AUTHOR_NOT_READY`；M11 未注册空壳 profile。
+- **metric资格不变**：synthesized entry没有 exact source membership，semantic provenance继续
+  N/A；multi-query completion-order合并且无global score/rerank，stable ranking继续 pending。
+
+M6只新增证据与长期判词，不改变本页 B1-B11冻结状态，也不重标既有artifact。
+
+M11 已把当前本地 MiniLM 锁为 bytes/tokenizer/pipeline/runtime identity，并以 20-file
+`simplemem-text-main-v2` 组件闭包覆盖 product、lock、adapter 与 compat patch。新 run 使用 identity
+v2/fresh-state；旧 artifact 只读。完整收据见
+[M11 implementation](../../workstreams/ws05.1-method-profile-provenance/notes/m11-effective-config-source-embedding-implementation.md)。

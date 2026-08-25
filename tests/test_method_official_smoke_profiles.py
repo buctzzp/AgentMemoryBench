@@ -11,7 +11,7 @@ from pathlib import Path
 from memory_benchmark.methods.amem_adapter import AMemConfig
 from memory_benchmark.methods.lightmem_adapter import LightMemConfig
 from memory_benchmark.methods.mem0_adapter import Mem0Config
-from memory_benchmark.methods.memoryos_adapter import MemoryOSPaperConfig
+from memory_benchmark.methods.memoryos_adapter import MemoryOSConfig
 from memory_benchmark.methods.registry import load_method_profile
 
 
@@ -41,11 +41,11 @@ def test_smoke_profiles_keep_official_method_parameters() -> None:
 
     assert isinstance(mem0, Mem0Config)
     assert mem0.top_k == 20
-    assert mem0.embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
+    assert mem0.embedding_model == "models/all-MiniLM-L6-v2"
     assert mem0.embedding_dimensions == 384
     assert mem0.embedding_provider == "huggingface"
 
-    assert isinstance(memoryos, MemoryOSPaperConfig)
+    assert isinstance(memoryos, MemoryOSConfig)
     assert memoryos.short_term_capacity == 10
     assert memoryos.mid_term_capacity == 2000
     assert memoryos.long_term_knowledge_capacity == 100

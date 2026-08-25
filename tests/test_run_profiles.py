@@ -52,7 +52,7 @@ def test_current_method_tomls_have_one_main_section_and_no_framework_keys() -> N
 
 
 def test_current_profiles_resolve_without_method_algorithm_config() -> None:
-    """runtime/execution 应独立于 method TOML，并按产品并发上限组合。"""
+    """runtime/execution 应独立于 method TOML，并按可选产品硬上限组合。"""
 
     smoke = load_run_composition(
         project_root=PROJECT_ROOT,
@@ -133,6 +133,23 @@ def test_author_profile_uses_formal_runtime_without_inventing_method_section() -
     assert composition.runtime.profile_name == "official_full"
     assert composition.runtime.provider == "primary"
     assert composition.resolved_max_workers == 10
+
+
+def test_execution_default_is_not_a_parallel_cap() -> None:
+    """execution default 可被显式资源选择覆盖，method 无硬上限时不截断。"""
+
+    from dataclasses import replace
+
+    composition = load_run_composition(
+        project_root=PROJECT_ROOT,
+        profile_name="smoke",
+        method_max_workers_cap=None,
+    )
+
+    selected = replace(composition, resolved_max_workers=37)
+    assert composition.resolved_max_workers == 1
+    assert selected.resolved_max_workers == 37
+    assert selected.to_manifest_dict()["execution"]["resolved_max_workers"] == 37
 
 
 def test_composition_rejects_missing_or_malformed_public_config(tmp_path: Path) -> None:

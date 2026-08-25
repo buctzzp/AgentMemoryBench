@@ -97,6 +97,14 @@
    “入口/模型/切换点/哪一段由谁完成”；无法独立核实时明确写“未核实”，commit 不写猜测的
    `Co-Authored-By`。混合执行不能在报告里事后归功给单一模型。
 
+### 4.1 调查型任务的附加收据
+
+只读调查除 §4 通用报告外，还要提交：调查问题与非目标、source owner/version/commit 或论文
+版本、claim-evidence 表、读取路径与实际命令、全量/抽样覆盖及排除项、每条证据能证明和不能
+证明什么、反证/source conflict、假设与未解决问题。结果默认是候选事实，不得自行改稳定
+survey/integration 页或架构政策；current source 推翻卡内事实、locator 无法复核、需要真实 API
+或不同官方 source 行为冲突时立即按停工格式交回。模型自报的 confidence 不能替代一手证据。
+
 ## 5. 工程速查
 
 - **只用 uv**：`uv run pytest -q`、`uv run python ...`、`uv sync`。

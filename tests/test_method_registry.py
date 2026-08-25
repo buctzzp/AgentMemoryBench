@@ -20,7 +20,7 @@ from memory_benchmark.methods.langmem_adapter import LangMemConfig
 from memory_benchmark.methods.letta_adapter import LettaConfig
 from memory_benchmark.methods.lightmem_adapter import LightMemConfig
 from memory_benchmark.methods.mem0_adapter import Mem0Config
-from memory_benchmark.methods.memoryos_adapter import MemoryOSPaperConfig
+from memory_benchmark.methods.memoryos_adapter import MemoryOSConfig
 from memory_benchmark.methods.memos_adapter import MemOSConfig
 from memory_benchmark.methods.simplemem_adapter import SimpleMemConfig
 from memory_benchmark.methods.registry import (
@@ -120,7 +120,7 @@ def test_memoryos_registration_uses_generic_contract() -> None:
 
     registration = get_method_registration("memoryos")
 
-    assert registration.config_type is MemoryOSPaperConfig
+    assert registration.config_type is MemoryOSConfig
     assert registration.profile_names == frozenset(
         {"smoke", "pilot", "official-full"}
     )
@@ -346,7 +346,7 @@ def test_graphiti_registration_declares_direct_core_product_contract() -> None:
     assert declaration.implementation_variant == "product"
     assert declaration.embedding_profile == "controlled_embedding_v1"
     assert declaration.embedding.dimension == 384
-    assert declaration.embedding.normalization == "l2-normalized"
+    assert declaration.embedding.normalization == "model_pipeline_l2+explicit_l2"
     assert declaration.embedding.distance == "falkordb-cosine"
     registration.validate_variant("membench", "0_10k")
     with pytest.raises(ConfigurationError, match="does not support MemBench"):
@@ -354,7 +354,7 @@ def test_graphiti_registration_declares_direct_core_product_contract() -> None:
 
 
 def test_letta_registration_declares_sleeptime_product_contract() -> None:
-    """Letta 注册应固定 session 粒度、W1 与唯一 build LLM。"""
+    """Letta 注册应固定 session 粒度、独立 runtime 与唯一 build LLM。"""
 
     registration = get_method_registration("letta")
     config = load_method_profile(
@@ -369,7 +369,8 @@ def test_letta_registration_declares_sleeptime_product_contract() -> None:
     )
     assert registration.profile_relative_path == Path("configs/methods/letta.toml")
     assert registration.requires_api is True
-    assert registration.allow_smoke_worker_override is False
+    assert registration.allow_smoke_worker_override is True
+    assert registration.max_parallel_workers is None
     assert registration.supports_shared_instance_parallelism is False
     assert registration.provenance_granularity == "none"
     assert registration.retrieval_evidence_contract_version == "v1"
@@ -421,7 +422,7 @@ def test_langmem_registration_declares_background_product_contract() -> None:
     assert declaration.implementation_variant == "product"
     assert declaration.embedding_profile == "controlled_embedding_v1"
     assert declaration.embedding.dimension == 384
-    assert declaration.embedding.normalization == "external_l2"
+    assert declaration.embedding.normalization == "model_pipeline_l2+explicit_l2"
     assert declaration.embedding.distance == "langgraph-inmemory-cosine"
 
 
@@ -462,8 +463,8 @@ def test_everos_registration_declares_typed_product_session_contract() -> None:
     assert declaration.embedding.provider == "sentence-transformers-local"
     assert declaration.embedding.model == "models/all-MiniLM-L6-v2"
     assert declaration.embedding.dimension == 384
-    assert declaration.embedding.normalization == "model-internal-l2"
-    assert declaration.embedding.distance == "lancedb-l2"
+    assert declaration.embedding.normalization == "model_pipeline_l2"
+    assert declaration.embedding.distance == "lancedb-cosine"
     registration.validate_variant("membench", "0_10k")
     with pytest.raises(ConfigurationError, match="timestamp fabrication is forbidden"):
         registration.validate_variant("membench", "100k")
@@ -582,7 +583,6 @@ embedding_dimensions = 1536
 reader_model = "gpt-4o-mini"
 top_k = 200
 max_workers = 1
-ingestion_chunk_size = 1
 infer = true
 """,
         encoding="utf-8",
@@ -615,7 +615,6 @@ embedding_dimensions = 1536
 reader_model = "gpt-4o-mini"
 top_k = 200
 max_workers = 10
-ingestion_chunk_size = 1
 infer = true
 """,
         encoding="utf-8",
@@ -702,7 +701,6 @@ embedding_dimensions = 1536
 reader_model = "gpt-4o-mini"
 top_k = 200
 max_workers = 1
-ingestion_chunk_size = 1
 infer = true
 """,
         encoding="utf-8",
@@ -786,8 +784,9 @@ def test_memos_registration_declares_product_typed_handler_contract() -> None:
     assert registration.requires_api is True
     assert registration.provenance_granularity == "none"
     assert registration.retrieval_evidence_contract_version == "v1"
-    # isolated provider 仍共享进程级 runtime/embedder，真实 W2 已证不安全。
-    assert registration.allow_smoke_worker_override is False
+    # 每个 isolated provider 独占 runtime/embedder；资源层决定实际并发。
+    assert registration.allow_smoke_worker_override is True
+    assert registration.max_parallel_workers is None
     assert registration.supports_shared_instance_parallelism is False
     assert registration.max_workers_getter(_memos_registry_config()) == 1
 
@@ -844,13 +843,13 @@ def test_memos_build_identity_declares_source_proven_normalization() -> None:
     assert declaration.embedding_profile == "controlled_embedding_v1"
     assert declaration.historical_controlled_build_equivalent_to_current_main is False
     assert declaration.embedding.dimension == 384
-    assert declaration.embedding.revision_status == "local_unpinned"
+    assert declaration.embedding.revision_status == "local_content_locked"
     assert declaration.embedding.normalization == "model_pipeline_l2"
     assert declaration.embedding.distance == "qdrant-cosine"
 
 
-def test_memos_profiles_only_differ_in_budget_model_and_are_both_serial() -> None:
-    """两 profile 仅允许 LLM runtime 身份不同，非 LLM 参数保持一致。"""
+def test_memos_profiles_only_differ_in_budget_model_and_execution_workers() -> None:
+    """method 参数全等；runtime 模型与 execution worker 由组合层分别注入。"""
 
     import dataclasses
 
@@ -864,9 +863,9 @@ def test_memos_profiles_only_differ_in_budget_model_and_are_both_serial() -> Non
     assert official_fields.pop("profile_name") == "method"
     assert smoke_fields.pop("llm_model") == "ox-alpha-free"
     assert official_fields.pop("llm_model") == "gpt-4o-mini"
+    assert smoke_fields.pop("max_workers") == 1
+    assert official_fields.pop("max_workers") == 10
     assert smoke_fields == official_fields
-    assert smoke.max_workers == 1
-    assert official.max_workers == 1
 
 
 @pytest.mark.parametrize(
@@ -895,7 +894,7 @@ def test_memos_manifest_carries_adapter_version_and_no_absolute_paths() -> None:
 
     manifest = _memos_registry_config().to_manifest()
 
-    assert manifest["adapter_version"] == "memos-v2.0.25-product-v5"
+    assert manifest["adapter_version"] == "memos-v2.0.25-product-v6"
     assert manifest["implementation_identity"] == "typed-product-handler"
     assert manifest["build_llm_response_contract"] == (
         "provider-aware-v2:"

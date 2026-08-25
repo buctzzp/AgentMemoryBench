@@ -3,8 +3,9 @@
 > 稳定页：只记录经架构师验收的承重结论。完整一手证据、争议与施工记录见
 > `docs/workstreams/ws02.7-method-track/branches/method-recertification/memos/`。
 >
-> 状态：current product adapter 已完成五格真实服务 smoke、B7 观测补证与 B1-B11
-> 对表，冻结为 `method-frozen-v1`。下方 `pending/N/A` 是能力资格边界，不代表接入失败。
+> 状态：v5 已完成五格真实服务 smoke、B7 观测补证与 B1-B11 对表。2026-08-25
+> 因 conversation 并行门重开为 v6：零 API runtime-owner/runner 强反例已闭合，真实
+> 多 isolation sentinel 尚待新 run，不得把旧 v5 artifact 重标为 v6。
 
 ## 1. Source identity
 
@@ -16,8 +17,12 @@
 | 本地路径 | `third_party/methods/MemOS`（gitignored，local-only） |
 | patch | `scripts/patches/memos-product-runtime-observability.patch`（zero-context，`--unidiff-zero` 幂等应用） |
 | adapter | `src/memory_benchmark/methods/memos_adapter.py` |
-| adapter version | `memos-v2.0.25-product-v5` |
+| adapter version | `memos-v2.0.25-product-v6` |
 | 实现身份 | `typed-product-handler` |
+| product 17-file identity | `a436c8e48e85a7b8425895cc44971bef169949e7942a45366b3811ff85111ed3` |
+| patch identity | `69c564ef3ecee1d629ee534865f55b9e88be2c3bd0e65c0b6ffddeb43769f595` |
+| product+patch+wrapper identity | `602678ba7fe3995a582627de4e14a91d89dea2c33827e98314b24209f5e1206d` |
+| local paper | arXiv `2507.03724v4`；SHA-256 `9b9b71b61487ce9f01d2de014b80201d9a30c4fd43effa33e84ef7d2db824977`；local-only |
 
 判据：`clean v2.0.25 checkout + patch` 与当前 vendored 树逐字节一致。
 
@@ -36,7 +41,10 @@ reorganize              false
 cube topology           通常一个 conversation 一个 namespace / cube；
                         LoCoMo 为官方 speaker A/B 双视角、两个 namespace / cube
 framework granularity   session
-framework max_workers   1（smoke 与 official_full 都是 1）
+framework workers       每个 worker 独占 runtime/embedder/scheduler；lane 内串行
+                        处理 namespace 隔离的 conversation。实际数量由统一
+                        execution/resource policy 决定；W1/W10 只是 profile 默认值，
+                        显式正整数不设 method 伪上限
 answer                  framework benchmark unified builder
 ```
 
@@ -58,8 +66,9 @@ answer                  framework benchmark unified builder
   → 两个 handler 共用同一 scheduler / naive_mem_cube / tracker
 ```
 
-`init_server()` 对同一 config identity 在进程内只执行一次；provider 构造本身是 lazy，
-clean-only 路径不会为了清理反向创建 runtime。禁止 import
+`init_server()` 对每个 worker runtime 只执行一次；它读取 process-global
+`os.environ` 的构造区间由 adapter 串行化，构造完成后的业务操作不被该锁串行。
+provider 构造本身是 lazy，clean-only 路径不会为了清理反向创建 runtime。禁止 import
 `memos.api.routers.server_router`，因为它会在 import 期创建另一套全局 components。
 
 #### Ingest
@@ -403,16 +412,47 @@ current v4 结果：
 - author LoCoMo 的 preference/top-k/server-env/paper-number parity；
 - `author_longmemeval` 的 pair batching、8000 截断、官方 builder 与已坏
   reference-time 路径；
-- framework conversation W2 已由真实 `Already borrowed` 反例判为
-  `N/A/unsupported`：两个 isolated provider 仍共享进程级 MemOS runtime/embedder。
-  `max_workers=1`、禁 smoke override；MemOS 产品内部 async dispatcher 保持开启。
+- 历史 v5 LongMemEval W2 的 `Already borrowed` 反例仍保留：它证明“两个 provider
+  折叠到同一进程级 runtime/tokenizer”不安全。v6 的修复不是忽略该反例，而是删除
+  默认全局 owner，让每个 worker 独占 runtime/embedder/scheduler，并只串行化
+  `init_server()` 的环境读取区间。W2 是最小竞态哨兵，不是能力天花板；并发规模由统一
+  execution/resource policy 控制，资源不足必须 fail-loud，不能改变分数或静默降级。
+- 历史失败 run `memos-lme-v4-r1q1-c2-w2-s-cleaned` 仍为 1/2 completed，不能 resume
+  成 v6 或重标。v6 必须新建 run；真实双 isolation sentinel 通过前只宣称零 API
+  lifecycle/ownership 资格，不宣称吞吐压测完成。
 
-一次 LoCoMo W2 成功不能推翻 LongMemEval W2 的真实竞态。失败 run
-`memos-lme-v4-r1q1-c2-w2-s-cleaned` 为 1/2 completed，且无 conversation budget；
-现行 summary 会记录 `failed_conversations`，CLI 返回非零，`run` 子命令也不会继续给
-失败 child 评分。完整裁决见 frozen note §5。
+## 11. Paper / product / official-eval profile provenance
 
-## 11. 调查与裁决资产索引
+日常机制理解按四种身份分开，不能把“同一 owner”压成同一个配置：
+
+| 身份 | 能证明什么 | 不能证明什么 |
+| --- | --- | --- |
+| paper `MemOS-1031` | MemCube、MemReader、MemOperator、scheduler/lifecycle/governance 与三类 memory 的系统目标；论文共同使用 GPT-4o-mini、validation 选参 | 公开材料未把 `1031` 映射到 exact commit/server env，也没有完整 embedding/window/decode 配置 |
+| v2.0.25 current product | framework 当前真实运行的 tree-text、MultiModalStruct reader、Neo4j/Qdrant、async fast→fine 与 typed-handler 路径 | 只运行论文整体愿景的 plaintext 子集，不能称三类 memory 全开或 paper-number parity |
+| v2.0.25 `evaluation/` | LoCoMo 双 namespace/正反 role/batch2/top20；LongMemEval batch2、8000-char 截断与两格 final-message/judge 形状 | LME `reference_time` 与 client 签名冲突；公开 wrapper 不是完整可运行 author identity |
+| OmniMemEval official extension | 同一 MemTensor 团队后来用公共 MemOS cloud/local client横评 BEAM/HaluMem；统一 batch20/top20 与 benchmark prompt 的工程策略 | 没有锁 MemOS server/source；HaluMem 只覆盖 retrieval+QA，不含原始 extraction/update/memory-type；不是 paper author profile |
+| framework main | 跨五格 lossless canonical input、controlled MiniLM-384、typed async exact terminal、benchmark统一 answer/judge | 不与 paper/official wrapper 数字直接对表 |
+
+两个 effective-config 陷阱已锁：
+
+1. config 暴露的 `1600/10/2` 不进入 current `MultiModalStructMemReader` 主路径；真实 chat window 是
+   `1024 tokens / overlap 200`。只有追到 concrete reader 的最终调用才可写入 identity。
+2. SentenceTransformer config 的 `embedding_dims` 不会把模型裁成指定维度；模型对象读取自身真实
+   维度，Neo4j/Qdrant 仍必须显式匹配 384。ws05.1 M11 已锁项目本地 MiniLM 的
+   bytes/tokenizer/pipeline/runtime，模型 pipeline L2、无 instruction 与产品 distance 分轴入 identity。
+   385-file `memos-product-main-v2` closure 覆盖完整 product tree、lockfile、adapter/lifecycle 与观测
+   patch；新 run 必须 fresh-state，旧 artifact 不改写。完整收据见
+   [M11 implementation](../../workstreams/ws05.1-method-profile-provenance/notes/m11-effective-config-source-embedding-implementation.md)。
+
+作者校准当前仍为 `AUTHOR_NOT_READY`：LoCoMo topology 已对齐，但完整 MemOS-1031 runtime与
+preference/search identity 未公开；LongMemEval wrapper自身不可运行；OmniMemEval BEAM/HaluMem是
+通用横评扩展而非 method-specific author profile。完整机制卡、参数表和证据边界见
+[ws05.1 MemOS profile provenance](../../workstreams/ws05.1-method-profile-provenance/notes/memos-profile-provenance.md)。
+
+重读触发器：MemOS source/tag升级、论文版本变化、current locator失效、需要 author数字复现、
+或需要改变 embedding/LLM client identity；否则优先复用本节，不从头重读论文。
+
+## 12. 调查与裁决资产索引
 
 日常查“当前 MemOS 怎么调用”只读本页；需要复核某个承重结论再下钻：
 
@@ -425,6 +465,7 @@ current v4 结果：
 | cleanup 四态与最终接收边界 | [M4 architect acceptance](../../workstreams/ws02.7-method-track/branches/method-recertification/memos/notes/memos-v2.0.25-product-adapter-m4-architect-acceptance.md) |
 | 官方 LoCoMo/LME harness parity、五格主/作者身份 | [M5 harness ruling](../../workstreams/ws02.7-method-track/branches/method-recertification/memos/notes/memos-v2.0.25-official-harness-parity-m5-ruling.md) |
 | 五格 smoke、B7 观测与最终冻结 | [frozen-v1](../../workstreams/ws02.7-method-track/branches/method-recertification/memos/notes/memos-frozen-v1.md) |
+| paper/current product/effective config/official extension 四身份 | [ws05.1 profile provenance](../../workstreams/ws05.1-method-profile-provenance/notes/memos-profile-provenance.md) |
 
 根目录未跟踪的 `MemOS.md` 是用户提供的外部调研草稿，可作线索，**不是**本项目稳定事实
 源；本页与上表 notes 才是跨模型可恢复入口。

@@ -14,6 +14,17 @@
 > `semantic_provenance=valid + provenance_granularity=turn`；它们只按当时 manifest 回读，
 > 不得据此补算 Recall/Precision/F1/NDCG，也不改写历史文件。
 
+> **ws05.1 source/profile 边界（2026-08-25）**：`method-frozen-v1` 只说明现有
+> `agiresearch/A-mem@ceffb860` controlled product profile 已通过五格运行门，不等于论文结果
+> 复现身份已认证。论文 v11 链接的 `WujiangXu/A-mem-sys@f303dfc` 在真实 neighbor id、
+> metadata-enhanced embedding 与 auto-analysis 上不同；LoCoMo GPT-4o-mini paper k 还是按类别
+> `40/40/50/50/40`，不是主配置 10。完整证据见
+> [`amem-profile-provenance.md`](../../workstreams/ws05.1-method-profile-provenance/notes/amem-profile-provenance.md)；
+> M11 已裁定不静默换源且仍为 `AUTHOR_NOT_READY`。主配置改用内容锁定的项目本地 MiniLM，
+> 新 run 以 7-file `amem-product-main-v2` source closure + run identity v2 生成，历史 build 不宣称
+> 等价、不得 resume。收据见
+> [M11 implementation](../../workstreams/ws05.1-method-profile-provenance/notes/m11-effective-config-source-embedding-implementation.md)。
+
 ## 接口调用面
 
 | framework | A-Mem 产品调用 | 裁决 |
@@ -44,8 +55,9 @@ list batch：框架五格均以 `TurnEvent` 调一次 `ingest()`，每个真实�
 
 ## B1-B11
 
-- **B1 ✅**：官方通用仓库 `third_party/methods/A-mem-product`，upstream
-  `ceffb860f0712bbae97b184d440df62bc910ca8d`，MIT；不用 LoCoMo 复现 engine。
+- **B1 ✅（current controlled product）**：`third_party/methods/A-mem-product` 锁
+  `agiresearch/A-mem@ceffb860f0712bbae97b184d440df62bc910ca8d`，MIT；现有 artifact 按此
+  identity 回读。它不再被表述成唯一“论文官方产品”；paper-linked source 的差异留 M11 裁决。
 - **B2 ✅**：五格均 turn ingest；LoCoMo speaker name，其余 canonical role；无 pair 约束。
 - **B3 ✅**：每 conversation 独占 persistent Chroma；100-evolution consolidation 仍落回同一
   scoped retriever；clean retry 物理删除。
@@ -65,7 +77,8 @@ list batch：框架五格均以 `TurnEvent` 调一次 `ingest()`，每个真实�
   prompt、分析字段与其他 provider 保持不变。
 - **B8 ✅**：检索只读；官方 swallow-error 两处在 wrapper fail-fast；endpoint/timeout/retry 注入。
 - **B9 ✅**：`gpt-4o-mini` + product-default MiniLM-384/Chroma cosine；revision 诚实 unpinned。
-- **B10 ✅**：主 TOML 跨五 benchmark 固定；作者 LoCoMo builder/复现参数不混入主表。
+- **B10 ✅（主表隔离）**：主 TOML 跨五 benchmark 固定；作者 LoCoMo builder/复现参数不混入
+  主表。author profile 尚未完成，不能从“未混入”推导出“已经可复现论文”。
 - **B11 ✅**：最终主树全量 `1680 passed`、compileall 0；五 benchmark 共 11 个真实 run
   覆盖 W1/W2、BEAM 100K/10M、HaluMem extraction/update/QA/type，artifact/state/
   efficiency 机器门全部通过；冻结记录见

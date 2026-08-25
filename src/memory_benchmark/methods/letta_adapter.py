@@ -144,7 +144,7 @@ class LettaConfig:
     profile_name: str = "smoke"
 
     def __post_init__(self) -> None:
-        """拒绝偏离 official product contract 或缺乏一手并行证明的配置。"""
+        """拒绝偏离 official product contract 的配置。"""
 
         for field_name in ("llm_model", "postgres_image"):
             value = getattr(self, field_name)
@@ -170,10 +170,6 @@ class LettaConfig:
         if self.human_block_limit != 10_000 or self.summary_block_limit != 1_000:
             raise ConfigurationError(
                 "Letta product profile locks human=10000 and summary=1000 chars"
-            )
-        if self.max_workers != 1:
-            raise ConfigurationError(
-                "Letta M2 has not proven independent W2 runtime ownership; max_workers must be 1"
             )
         if isinstance(self.temperature, bool) or not isinstance(
             self.temperature,

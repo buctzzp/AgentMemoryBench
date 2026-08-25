@@ -64,12 +64,12 @@ frozen_note: none
 | GRID-LONGMEMEVAL | 稳定异常、role 异形、时间、完整 haystack、最终 payload、检索指标、隐私与 smoke 独立闭合 | PENDING | evidence=stable=<填写> / payload=<填写> / metric=<填写> / privacy=<填写> / smoke=<填写>; ruling=<填写>; next=<填写> |
 | GRID-MEMBENCH | first/third、尾部 time/place、missing-time noise、gold 异常、最终 payload、指标与 smoke 独立闭合 | PENDING | evidence=stable=<填写> / payload=<填写> / metric=<填写> / privacy=<填写> / smoke=<填写>; ruling=<填写>; next=<填写> |
 | GRID-BEAM | variant、时间、10M orphan/mismatch、最终 payload、abstention、指标与 smoke 独立闭合 | PENDING | evidence=stable=<填写> / payload=<填写> / metric=<填写> / privacy=<填写> / smoke=<填写>; ruling=<填写>; next=<填写> |
-| GRID-HALUMEM | 固定 shape、session-local delta、四类 operation、最终 payload、指标、隐私与 W1 独立闭合 | PENDING | evidence=stable=<填写> / payload=<填写> / metric=<填写> / privacy=<填写> / smoke=<填写> / operations=extraction/update/qa/memory_type; ruling=<填写>; next=<填写> |
+| GRID-HALUMEM | 固定 shape、session-local delta、四类 operation、最终 payload、指标、隐私与 UUID worker-lane 独立闭合 | PENDING | evidence=stable=<填写> / payload=<填写> / metric=<填写> / privacy=<填写> / smoke=<填写> / operations=extraction/update/qa/memory_type; ruling=<填写>; next=<填写> |
 | B11-DOSSIER | 一份 living dossier 已按五 benchmark 分章并链接承重 note、异常处置和失效触发器 | PENDING | evidence=<填写>; ruling=<填写>; next=<填写> |
 | B11-SMOKE-PLAN | 每个 concrete variant 的 smoke-plan-v1 已无 API 生成、审阅并保存，命令未手写 | PENDING | evidence=<填写>; ruling=<填写>; next=<填写> |
 | B11-REAL-SMOKE | planner 生成的全部 predict 与适用 evaluator 已真实执行，固定 shape 未误传裁剪参数 | PENDING | evidence=<填写>; ruling=<填写>; next=<填写> |
 | B11-ARTIFACT-GATE | manifest、prediction、formatted_memory、private labels、efficiency、state 与 summary 已逐 run 开箱 | PENDING | evidence=<填写>; ruling=<填写>; next=<填写> |
-| B11-PARALLEL-GATE | 每个适用 variant 的 W1/W2 已实测，或 W1-only 的产品硬约束和 CLI 预启动拒绝已证明 | PENDING | evidence=<填写>; ruling=<填写>; next=<填写> |
+| B11-PARALLEL-GATE | 每个适用 variant 的 W2 最小竞态哨兵已实测；若产品确有硬 cap，源码/真实反例与 CLI 预启动拒绝已证明；不得把 W2 或 execution 默认值冒充能力上限 | PENDING | evidence=<填写>; ruling=<填写>; next=<填写> |
 | B11-REGRESSION-GATE | 定向强反例、全量 pytest、compileall、diff check 与第三方 patch identity 均通过 | PENDING | evidence=<填写>; ruling=<填写>; next=<填写> |
 | B11-FREEZE-SYNC | frozen note、integration page、总表、workstream README、roadmap 和 ledger 状态已同步 | PENDING | evidence=<填写>; ruling=<填写>; next=<填写> |
 <!-- ledger-checkpoints:end -->

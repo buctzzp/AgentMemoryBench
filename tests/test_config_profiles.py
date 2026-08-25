@@ -24,8 +24,10 @@ from memory_benchmark.config.settings import (
     resolve_answer_llm_settings,
 )
 from memory_benchmark.core import ConfigurationError
+from memory_benchmark.methods.amem_adapter import AMemConfig
+from memory_benchmark.methods.lightmem_adapter import LightMemConfig
 from memory_benchmark.methods.mem0_adapter import Mem0Config
-from memory_benchmark.methods.memoryos_adapter import MemoryOSPaperConfig
+from memory_benchmark.methods.memoryos_adapter import MemoryOSConfig
 from memory_benchmark.methods.registry import resolve_method_profile
 
 
@@ -48,12 +50,11 @@ def test_load_typed_profile_builds_mem0_smoke_profile_from_section(tmp_path: Pat
         [smoke]
         extraction_model = "ox-alpha-free"
         embedding_provider = "huggingface"
-        embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
+        embedding_model = "models/all-MiniLM-L6-v2"
         embedding_dimensions = 384
         reader_model = "ox-alpha-free"
         top_k = 20
         max_workers = 1
-        ingestion_chunk_size = 1
         infer = true
         """,
     )
@@ -77,7 +78,6 @@ def test_load_typed_profile_requires_requested_section(tmp_path: Path) -> None:
         reader_model = "gpt-4o-mini"
         top_k = 200
         max_workers = 10
-        ingestion_chunk_size = 1
         infer = true
         """,
     )
@@ -100,7 +100,6 @@ def test_load_typed_profile_rejects_unknown_key(tmp_path: Path) -> None:
         reader_model = "gpt-4o-mini"
         top_k = 200
         max_workers = 1
-        ingestion_chunk_size = 1
         infer = true
         unexpected = "value"
         """,
@@ -108,6 +107,39 @@ def test_load_typed_profile_rejects_unknown_key(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="unexpected"):
         load_typed_profile(toml_path, "smoke", Mem0Config)
+
+
+@pytest.mark.parametrize(
+    ("method_name", "config_type", "retired_assignment"),
+    [
+        ("lightmem", LightMemConfig, "extract_threshold = 0.5"),
+        ("amem", AMemConfig, "use_product_layer = true"),
+        ("mem0", Mem0Config, "ingestion_chunk_size = 1"),
+        (
+            "memoryos",
+            MemoryOSConfig,
+            'longmemeval_prompt_profile = "memoryos-pypi-retrieve-v1"',
+        ),
+    ],
+)
+def test_retired_method_controls_fail_fast_for_new_profiles(
+    tmp_path: Path,
+    method_name: str,
+    config_type: type[object],
+    retired_assignment: str,
+) -> None:
+    """已证实无消费者的旧字段不得继续进入新 run identity。"""
+
+    project_profile = PROJECT_ROOT / "configs" / "methods" / f"{method_name}.toml"
+    test_profile = tmp_path / f"{method_name}.toml"
+    test_profile.write_text(
+        project_profile.read_text(encoding="utf-8") + f"\n{retired_assignment}\n",
+        encoding="utf-8",
+    )
+
+    retired_key = retired_assignment.split("=", maxsplit=1)[0].strip()
+    with pytest.raises(ConfigurationError, match=retired_key):
+        load_typed_profile(test_profile, "method", config_type)
 
 
 def test_load_typed_profile_rejects_framework_method_field_ownership_overlap(
@@ -149,7 +181,6 @@ def test_load_typed_profile_rejects_wrong_field_type(tmp_path: Path) -> None:
         reader_model = "gpt-4o-mini"
         top_k = 200
         max_workers = 1
-        ingestion_chunk_size = 1
         infer = true
         """,
     )
@@ -172,7 +203,6 @@ def test_load_typed_profile_autofills_profile_name_and_rejects_duplicate(tmp_pat
         reader_model = "gpt-4o-mini"
         top_k = 200
         max_workers = 1
-        ingestion_chunk_size = 1
         infer = true
         profile_name = "custom"
         """,
@@ -195,7 +225,6 @@ def test_load_typed_profile_rejects_root_without_section(tmp_path: Path) -> None
         reader_model = "gpt-4o-mini"
         top_k = 200
         max_workers = 1
-        ingestion_chunk_size = 1
         infer = true
         """,
     )
@@ -523,7 +552,7 @@ def test_load_typed_profile_builds_memoryos_official_full_profile_from_project_t
     )
     config = resolved.config
 
-    assert isinstance(config, MemoryOSPaperConfig)
+    assert isinstance(config, MemoryOSConfig)
     assert resolved.public_name == "official-full"
     assert resolved.section_name == "method"
     assert config.profile_name == "method"
@@ -532,7 +561,6 @@ def test_load_typed_profile_builds_memoryos_official_full_profile_from_project_t
     assert config.top_k_sessions == 5
     assert config.retrieval_queue_capacity == 7
     assert config.max_workers == 10
-    assert config.longmemeval_prompt_profile == "memoryos-pypi-retrieve-v1"
 
 
 def test_load_typed_profile_builds_matching_memoryos_smoke_and_official_profiles() -> None:
@@ -547,16 +575,14 @@ def test_load_typed_profile_builds_matching_memoryos_smoke_and_official_profiles
     smoke = smoke_resolved.config
     official_full = official_resolved.config
 
-    assert isinstance(smoke, MemoryOSPaperConfig)
-    assert isinstance(official_full, MemoryOSPaperConfig)
+    assert isinstance(smoke, MemoryOSConfig)
+    assert isinstance(official_full, MemoryOSConfig)
     assert smoke_resolved.section_name == official_resolved.section_name == "method"
     assert smoke.profile_name == official_full.profile_name == "method"
     assert smoke.llm_model == "ox-alpha-free"
     assert official_full.llm_model == "gpt-4o-mini"
-    assert smoke.embedding_model_name == "sentence-transformers/all-MiniLM-L6-v2"
-    assert official_full.embedding_model_name == "sentence-transformers/all-MiniLM-L6-v2"
-    assert smoke.longmemeval_prompt_profile == "memoryos-pypi-retrieve-v1"
-    assert official_full.longmemeval_prompt_profile == "memoryos-pypi-retrieve-v1"
+    assert smoke.embedding_model_name == "models/all-MiniLM-L6-v2"
+    assert official_full.embedding_model_name == "models/all-MiniLM-L6-v2"
     assert smoke_resolved.method_config_manifest == (
         official_resolved.method_config_manifest
     )

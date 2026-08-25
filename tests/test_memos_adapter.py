@@ -23,6 +23,7 @@ import os
 import sys
 import threading
 import types
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -2245,7 +2246,6 @@ def test_source_identity_declares_upstream_patch_and_implementation():
         ({"reorganize": True}, "reorganize=false"),
         ({"include_preference": True}, "include_preference=false"),
         ({"internet_search": True}, "internet_search=false"),
-        ({"max_workers": 4}, "max_workers 必须为 1"),
         ({"task_timeout_seconds": 0}, "task_timeout_seconds must be positive"),
     ],
 )
@@ -2256,12 +2256,18 @@ def test_config_rejects_profile_drift(overrides, expected):
         _make_config(**overrides)
 
 
+def test_config_accepts_independent_runtime_w2() -> None:
+    """W2 属于 execution 拓扑，不改变 MemOS product 算法参数。"""
+
+    assert _make_config(max_workers=2).max_workers == 2
+
+
 def test_manifest_never_leaks_secrets_or_absolute_paths():
     """manifest 只写环境变量名，不写 secret 值或绝对路径。"""
 
     manifest = _make_config().to_manifest()
 
-    assert manifest["adapter_version"] == "memos-v2.0.25-product-v5"
+    assert manifest["adapter_version"] == "memos-v2.0.25-product-v6"
     assert manifest["build_llm_response_contract"] == (
         "provider-aware-v2:"
         "opencodego=model_aware_json_reasoning_control;"
@@ -2273,6 +2279,57 @@ def test_manifest_never_leaks_secrets_or_absolute_paths():
     assert "vector_db_api_key" not in manifest
     for value in manifest.values():
         assert not (isinstance(value, str) and value.startswith("/"))
+
+
+def test_default_w2_providers_build_independent_runtimes_concurrently(tmp_path):
+    """默认 owner 不得把两个 worker 折叠到同一 runtime/tokenizer。"""
+
+    from memory_benchmark.config import OpenAISettings, load_path_settings
+
+    barrier = threading.Barrier(2)
+    built: list[_FakeRuntime] = []
+
+    def _overlap_factory(**kwargs):
+        """只有两个独立 owner 都进入 factory 时才允许构造完成。"""
+
+        barrier.wait(timeout=2.0)
+        runtime = _FakeRuntime(**kwargs)
+        built.append(runtime)
+        return runtime
+
+    paths = load_path_settings()
+    config = _make_config(max_workers=2)
+    settings = OpenAISettings(api_key="unit-test-key", base_url=None)
+    providers = tuple(
+        MemOS(
+            config=config,
+            path_settings=paths,
+            storage_root=(
+                paths.project_root
+                / "outputs"
+                / "unit-test-run"
+                / tmp_path.name
+                / "method_state"
+                / f"worker_{worker_idx}"
+            ),
+            openai_settings=settings,
+            benchmark_name="longmemeval",
+            runtime_factory=_overlap_factory,
+        )
+        for worker_idx in range(2)
+    )
+
+    assert providers[0]._runtime_owner is not providers[1]._runtime_owner
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        runtimes = tuple(pool.map(lambda provider: provider._require_runtime(), providers))
+
+    assert len(built) == 2
+    assert runtimes[0] is not runtimes[1]
+    assert providers[0]._runtime_owner._runtime is runtimes[0]
+    assert providers[1]._runtime_owner._runtime is runtimes[1]
+
+    for provider in providers:
+        provider.cleanup()
 
 
 # --------------------------------------------------------------------------------------
@@ -2736,7 +2793,7 @@ def test_real_runtime_inits_once_and_shares_one_dependencies_bundle(
     assert isinstance(runtime.tracker, MemosLocalTaskTracker)
     # 仍然不得触发 server_router。
     assert "memos.api.routers.server_router" not in sys.modules
-    assert adapter_module.MEMOS_ADAPTER_VERSION == "memos-v2.0.25-product-v5"
+    assert adapter_module.MEMOS_ADAPTER_VERSION == "memos-v2.0.25-product-v6"
 
 
 # --------------------------------------------------------------------------------------

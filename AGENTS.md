@@ -44,9 +44,10 @@
   `docs/reference/method-toml-and-answer-builder-policy.md`；旧 `config_track` 只作历史产物
   兼容，迁移排在首个作者校准/真实效果 full run 前。对 retrieve 与答题耦合的 method
   （如 MemoryOS `get_response`），仍须忠实抽出 `formatted_memory` 与公开 builder 变量。
-- **Phase 1 controlled embedding**（2026-08-24 改判）：所有实际消费 embedding、且可经
+- **Phase 1 controlled embedding**（2026-08-24 改判，2026-08-25 身份闭合）：所有实际消费 embedding、且可经
   upstream 公开 seam 无损替换的方法，主比较统一 `all-MiniLM-L6-v2`/384；manifest/resume
-  必须锁 provider/model/revision/dimension/normalization/instruction/distance/tokenizer，变更即
+  必须锁 provider/model/revision/dimension/normalization/instruction/distance/tokenizer、项目本地
+  模型内容闭包与实际 loader runtime；新 run 使用 identity v2，v1 只读且严格不 resume。变更即
   全量重建。不消费 embedding 的产品 profile 记 N/A，禁止为了“十家统一”填一个运行时未使用
   的模型；product-default/author 配置只作显式补充校准。省略第三方 SDK 参数不等于显式 None，
   必须沿到最终 product object/payload 才能裁定。
@@ -103,6 +104,19 @@
   文件、预算/API、证据与停工边界，不替 actor 规定内部执行拓扑；subagent 不得扩大
   scope 或替代主 actor 对最终报告负责，发生实质性使用时须在回报中说明。plan 未覆盖
   的情况停工写断点，交回架构师，不自行发散。
+- **调查型 Codex subagent 的长期授权与验收**（2026-08-25 用户裁定）：架构师可主动把
+  有界、只读、可复核的调查交给当前工具面可用的 `gpt-5.6-luna`，并固定
+  `reasoning_effort=max`；派发前先做真实能力探针，模型不可用时不得静默换名替代。该授权不
+  扩展到实现施工、真实 API 或外部副作用。调查 prompt 必须写清问题/决策、背景与当前裁定、
+  source/version、范围/非目标、覆盖方法、claim-evidence 收据和停工条件；不能只写“调查一下”。
+  subagent 回报默认只是候选事实，架构师按风险亲自抽锚后才可裁决；低风险且一手 locator 精确
+  时不默认再派 reviewer，source 冲突、全量/否定性断言、协议/隐私/metric/provenance/identity
+  等承重结论或不可廉价验证时，才追加一次窄范围、只读复核。完成依据是原始验收标准，不是
+  reviewer 是否终于沉默。
+- **外部方案先解释、后裁决**：参考第三方框架、作者 harness 或论文实现时，不能因其与当前
+  项目政策不同就把它当反例。先重建对方优化的目标、约束、invariant、estimand 与运行环境，
+  再分别写清它解决了什么、付出什么代价、哪些部分适合迁入本项目；比较的目的不是证明现行
+  方案正确，而是寻找更好的共同目标解。只有证据证明违反本项目不可退让边界时，才作否定裁决。
 - 执行者报告完成不等于任务完成；验收以架构师复跑命令的输出为准，**完成度
   以 git log 为准，不以 actor 最后一条消息为准**（额度耗尽时消息可能错乱）。
   架构师负责关键 diff 审读、定向复跑、最终全量回归和状态冻结；“放慢”是 benchmark/
@@ -176,6 +190,10 @@
   `docs/reference/integration/<method>.md`；完整一手命令、统计与争议保留在 workstream note，
   并从 `docs/survey/README.md` 或 `docs/README.md` 可定位。只摘要承重结论，不把整份聊天/
   note 重复倾倒到稳定页；发现新反证时同步更新稳定页并给旧判词加 superseded 链接。
+- 调查资产按“候选事实 → 架构裁决 → 稳定事实”晋级：subagent 的原始证据、命令、覆盖与争议
+  先进入 workstream note；架构师裁决写清理由、适用范围与旧判词；只有验收后的机制摘要才进入
+  survey/integration 稳定页。论文机制卡还要记录 paper/source identity、可复用不变量与重读
+  触发器，避免既机械重读又把旧版本结论误当 current truth。
 - 历史文档在 `docs/archive/`，只读；与现状冲突时以 workstream README 为准。
 
 ## 导航

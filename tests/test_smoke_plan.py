@@ -105,21 +105,22 @@ def test_locomo_plan_emits_registered_default_shape() -> None:
     assert _flag_value(plan.predict_argv, "--questions-per-conversation") == "1"
 
 
-def test_memos_plan_rejects_unqualified_worker_override_without_env(
+def test_memos_plan_emits_resource_selected_workers_without_reading_api_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """MemOS W2 必须只靠 registry/TOML 被拒绝，不得读取 API secret。"""
+    """MemOS 不应把 W2/W10 当硬上限，也不得提前读取 API secret。"""
 
     monkeypatch.delenv("OPENCODEGO_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(ConfigurationError, match="does not support smoke worker override"):
-        build_smoke_execution_plan(
-            project_root=PROJECT_ROOT,
-            method_name="memos",
-            benchmark_name="locomo",
-            run_id="memos-locomo-plan",
-            workers=2,
-        )
+    plan = build_smoke_execution_plan(
+        project_root=PROJECT_ROOT,
+        method_name="memos",
+        benchmark_name="locomo",
+        run_id="memos-locomo-plan",
+        workers=16,
+    )
+
+    assert _flag_value(plan.predict_argv, "--workers") == "16"
 
 
 def test_mem0_plan_emits_allowed_worker_override() -> None:
@@ -199,17 +200,18 @@ def test_everos_variant_gate_rejects_membench_100k_but_plans_0_10k(
     assert plan.method == "everos"
 
 
-def test_operation_level_plan_rejects_parallel_request() -> None:
-    """HaluMem operation-level runner 的 W1 门也应在 planner 前置。"""
+def test_operation_level_plan_allows_parallel_uuid_request() -> None:
+    """HaluMem 只锁 UUID 内 session 顺序，不应禁止 UUID 级 W2。"""
 
-    with pytest.raises(ConfigurationError, match="requires workers=1"):
-        build_smoke_execution_plan(
-            project_root=PROJECT_ROOT,
-            method_name="mem0",
-            benchmark_name="halumem",
-            run_id="mem0-halumem-w2-plan",
-            workers=2,
-        )
+    plan = build_smoke_execution_plan(
+        project_root=PROJECT_ROOT,
+        method_name="mem0",
+        benchmark_name="halumem",
+        run_id="mem0-halumem-w2-plan",
+        workers=2,
+    )
+
+    assert _flag_value(plan.predict_argv, "--workers") == "2"
 
 
 def test_multivariant_plan_evaluates_exact_child_run_id() -> None:

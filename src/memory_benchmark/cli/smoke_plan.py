@@ -154,8 +154,8 @@ def build_smoke_execution_plan(
 ) -> SmokeExecutionPlan:
     """只读注册契约并生成 predict + evaluate 的精确 argv。
 
-    固定 shape benchmark 拒绝所有裁剪覆盖。operation-level benchmark 当前由统一
-    runner 强制 W1；规划器会在 runtime/API 前把该约束与 method worker 配置合并。
+    固定 shape benchmark 拒绝所有裁剪覆盖。operation-level benchmark 只保持单个
+    UUID 内 session 串行；不同 UUID 可按 method 已验证的 worker 能力并行。
     """
 
     root = Path(project_root).expanduser().resolve()
@@ -211,11 +211,10 @@ def build_smoke_execution_plan(
     configured_workers = method_registration.max_workers_getter(config)
     worker_plan = _resolve_worker_plan(
         method_display_name=method_registration.display_name,
-        benchmark_name=benchmark_name,
-        operation_level=benchmark_registration.operation_level,
         configured_workers=configured_workers,
         requested_workers=workers,
         override_allowed=method_registration.allow_smoke_worker_override,
+        max_parallel_workers=method_registration.max_parallel_workers,
     )
 
     normalized_run_id = run_id.strip()
@@ -318,13 +317,12 @@ def _resolve_smoke_shape(
 def _resolve_worker_plan(
     *,
     method_display_name: str,
-    benchmark_name: str,
-    operation_level: bool,
     configured_workers: int,
     requested_workers: int | None,
     override_allowed: bool,
+    max_parallel_workers: int | None,
 ) -> SmokeWorkerPlan:
-    """在 method 配置、覆盖资格和 operation-level W1 门之间裁出 worker。"""
+    """在 execution 默认值、覆盖资格与可选硬上限之间裁出 worker。"""
 
     configured = _positive_or_default(
         configured_workers,
@@ -340,14 +338,13 @@ def _resolve_worker_plan(
             field_name="workers",
         )
     )
-    if operation_level:
-        if requested not in {None, 1}:
-            raise ConfigurationError(
-                f"{benchmark_name} operation-level smoke requires workers=1"
-            )
-        selected = 1
-    else:
-        selected = configured if requested is None else requested
+    selected = configured if requested is None else requested
+
+    if max_parallel_workers is not None and selected > max_parallel_workers:
+        raise ConfigurationError(
+            f"{method_display_name} supports at most {max_parallel_workers} "
+            "parallel conversation workers"
+        )
 
     emits_override = selected != configured
     if emits_override and not override_allowed:

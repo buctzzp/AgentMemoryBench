@@ -1872,11 +1872,11 @@ def test_main_rejects_all_cropping_parameters_for_halumem_smoke(
     assert exit_code == 2
 
 
-def test_main_rejects_parallel_halumem_before_dispatch(
+def test_main_dispatches_parallel_halumem_uuid_workers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """HaluMem operation-level W2 不得进入 command service。"""
+    """HaluMem W2 只并行 UUID，应完整进入 command service。"""
 
     dispatched: list[PredictCommand] = []
     monkeypatch.setattr(
@@ -1902,8 +1902,9 @@ def test_main_rejects_parallel_halumem_before_dispatch(
         ]
     )
 
-    assert exit_code == 2
-    assert dispatched == []
+    assert exit_code == 0
+    assert len(dispatched) == 1
+    assert dispatched[0].smoke_max_workers == 2
 
 
 def test_main_rejects_sessions_for_non_halumem_smoke(tmp_path: Path) -> None:

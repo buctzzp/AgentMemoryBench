@@ -116,11 +116,20 @@ class ExecutionProfile:
                 "Execution suppress_method_stdout must be a boolean"
             )
 
-    def resolve_for_method(self, *, method_max_workers_cap: int) -> int:
-        """按 method 的执行能力上限解析实际默认 conversation 并发。"""
+    def resolve_for_method(self, *, method_max_workers_cap: int | None) -> int:
+        """按可选 method 硬上限解析默认 conversation 并发。
 
+        ``default_max_workers`` 是资源策略的默认值，不是能力天花板。只有产品或
+        adapter 确有不可绕过的并发上限时，registry 才声明正整数 cap；``None``
+        表示能力层不设上限。
+        """
+
+        if method_max_workers_cap is None:
+            return self.default_max_workers
         if type(method_max_workers_cap) is not int or method_max_workers_cap < 1:
-            raise ConfigurationError("method_max_workers_cap must be a positive integer")
+            raise ConfigurationError(
+                "method_max_workers_cap must be None or a positive integer"
+            )
         return min(self.default_max_workers, method_max_workers_cap)
 
 
@@ -141,10 +150,6 @@ class RunComposition:
             raise ConfigurationError("RunComposition.execution must be ExecutionProfile")
         if type(self.resolved_max_workers) is not int or self.resolved_max_workers < 1:
             raise ConfigurationError("resolved_max_workers must be a positive integer")
-        if self.resolved_max_workers > self.execution.default_max_workers:
-            raise ConfigurationError(
-                "resolved_max_workers cannot exceed execution default_max_workers"
-            )
 
     def to_manifest_dict(self) -> dict[str, object]:
         """返回不含 secret、参与新 run resume 的完整组合身份。"""
@@ -199,14 +204,14 @@ def load_run_composition(
     *,
     project_root: str | Path,
     profile_name: str,
-    method_max_workers_cap: int,
+    method_max_workers_cap: int | None,
 ) -> RunComposition:
     """从独立 TOML 组合 API runtime 与 execution profile。
 
     输入:
         project_root: 项目根目录。
         profile_name: CLI 公开 run profile。
-        method_max_workers_cap: registry 声明的产品执行能力上限。
+        method_max_workers_cap: registry 声明的产品硬上限；无硬上限时为 None。
 
     输出:
         RunComposition: 不含 secret 与 method 算法参数的组合结果。

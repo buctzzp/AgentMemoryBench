@@ -6,26 +6,36 @@ created: 2026-07-05
 ---
 # ws05 全量实验申请材料与前置工程
 
-## Codex 恢复胶囊（2026-08-24）
+## Codex 恢复胶囊（2026-08-25）
 
-- **当前目标**：真实 pilot 暂停；在已关闭配置所有权/观测门之后，逐家闭合 method 参数值与
-  作者 prompt provenance，防止用 demo/default 配置关闭论文完整算法阶段。
+- **当前目标**：runtime/观测与十家参数/source/embedding provenance 门已关闭；真实 API 仍暂停。
+  当前先闭合开跑前 isolation 并行门，再完成“公开输入代表 isolation → 分批预算 → 同 run resume”
+  的成本校准身份与命令面。
 - **当前批次**：
   [runtime 配置与观测 M0-M5](branches/runtime-config-and-observability/plan.md) 已完成无 API验收；
-  当前转入 [ws05.1 method profile provenance](../ws05.1-method-profile-provenance/README.md)，
-  先做第三方框架配置策略对照，再按 LightMem → A-Mem → 其余八家串行推进。
+  [ws05.1 method profile provenance](../ws05.1-method-profile-provenance/README.md) 的 M0/M0.5、
+  M1 LightMem、M2 A-Mem、M3 Mem0、M4 MemoryOS、M5 MemOS、M6 SimpleMem、M7 Letta、M8
+  LangMem、M9 EverOS、M10 Graphiti OSS 与 M11 横向实现均已闭合；ws05.1 状态为 done。
 - **当前判据**：[ws05.1 spec](../ws05.1-method-profile-provenance/spec.md)；参数类型不是语义，
   paper/author-reported/current-product/framework-main 四种身份必须分栏；method 官方 judge 只盘点，
   未经 metric tier 裁决不得暗换 benchmark 主 judge。
 - **现场证据**：十家 method 主 TOML 已单源化，runtime/execution composition 进入严格 resume
-  identity；Letta embedding=N/A，EverOS v7 controlled MiniLM 的 patch 重放、本地模型、六表
-  schema 与 official lifespan 零 API门均通过。M2/M3/M4/M5 证据见支线 notes；最终全量为
-  `2259 passed, 3 deselected, 25 warnings, 29 subtests passed`，扩大 pilot 尚未恢复。
-- **禁止事项**：本支线 M5 完成且用户重新批准规模/run_id 前，不恢复真实 pilot；不得改写旧
+  identity v2；九家 controlled MiniLM 锁同一组本地 bytes/tokenizer/runtime，Letta embedding=N/A；
+  十家 source closure v2 与 EverOS effective strategy 均已闭合。M11 最终零 API 全量门为
+  `2297 passed, 3 deselected, 25 warnings, 29 subtests passed`，扩大 pilot 尚未恢复。
+- **并行断点**：[开跑前 isolation 并行门](notes/2026-08-25-pre-experiment-parallelism-gate.md)
+  已实现 HaluMem UUID 级稳定 worker lane、Letta 独立 product runtime、MemOS v6 独立
+  runtime/embedder；W2 是最小竞态哨兵，不是能力天花板，显式 worker 接受任意正整数，实际
+  数量由 selected isolation 与 execution/resource policy 控制。零 API全量为
+  `2304 passed, 3 deselected, 25 warnings, 29 subtests passed`；真实多 isolation sentinel 尚未
+  授权/执行。
+- **禁止事项**：用户重新批准规模/run_id 前，不恢复真实 pilot；不得改写旧
   artifact、把旧 embedding build 重标为新 controlled identity，或用 lineage 伪造 metric 资格。
-- **当前动作**：ws05.1 M0/M0.5 已完成，当前进入 M1 LightMem：按 paper 阶段图核 current source、
-  LoCoMo/LongMemEval official harness、完整 answer builder 与最终 effective 参数；用户重新批准前
-  不创建任何真实 API run。
+- **当前动作**：完成并行门最终回归与稳定文档；随后继续零 API核对 staged calibration 设计。
+  现有 `predict pilot` 只含固定首 isolation，
+  `predict formal --conversation-budget` 虽可续跑却绑定正式 runtime；两者均不能直接冒充用户提出的
+  “代表 isolation 先跑 1 个、随后同 cheap-runtime run 继续”的身份。模型、规模、run-id 与新命令面
+  未经用户裁定前不创建 run。M11 前的 method state 不 resume；作者校准与主 controlled run 分开。
 
 ## 目标
 
@@ -37,6 +47,25 @@ created: 2026-07-05
 
 运行账：
 [`ox 完整 isolation pilot 矩阵账`](notes/2026-08-21-ox-complete-isolation-pilot-ledger.md)。
+
+- 2026-08-25：用户提出成本校准应先按 public input shape 选择有代表性的完整 isolation，以每次
+  一个未完成 isolation 的预算运行，并在同一 run 上 resume，兼顾成本外推与真实续跑验收；实际
+  provider/model 在 API 前另行指定。架构核对确认内部字段仍为 `max_new_conversations`，当前正式
+  CLI 名为 `--conversation-budget`；它只按数据顺序取下一个未完成 isolation，不会自动选中位样本。
+  `predict pilot` 又在 dataset prepare 阶段只保留第一 isolation，无法继续到余量。因此下一步先
+  裁定代表样本的无 gold 选择规则及可续跑 calibration scope，不复用旧 run、不调用 API。
+- 2026-08-25：分批语义进一步对齐为 `1 + 2 (+ 2)`：十家×五格先各推进 1 个完整
+  isolation，全部通过后对同一 run `--resume --conversation-budget 2`，即再推进 2 个、累计 3 个；
+  若实测方差仍大，再增量 2 个到累计 5 个，不在开跑前盲目扩全矩阵。
+  `max_workers` 是 manifest/resume identity，因此任一 run 必须首批就锁定后续实际使用的 worker
+  数，resume 不得改。W2 只是最小并发哨兵，不是 method 能力上限；样本候选集须在首批前由
+  公开输入形状一次锁定，
+  不用 gold/答案/method 输出选样；这样后续增量才不改变实验人群或 resume identity。
+- W1/W2/W10 只是单个 run 的 isolation worker 数示例，不是 method 内部算法并行。HaluMem 已改为
+  UUID 级 worker lane，UUID 内 session 顺序不变；Letta 与 MemOS 也使用每 worker 独立 runtime，
+  不再需要另造“W1 child run + artifact 合并”旁路。execution profile 的 W1/W10 是默认值，
+  显式 `--workers` 没有伪造的 2/10 method 上限；正式大规模前仍需全局 API/本地资源 admission
+  control，不能因参数可填任意正整数就同时盲放 50 格。
 
 - 2026-08-21：用户明确恢复 ws05，并授权用 `.env` 第四槽限时免费
   `opencodego/ox-alpha-free` 做真实兼容性、效率观测和受控扩大范围测试。直接 OpenAI SDK
@@ -56,6 +85,20 @@ created: 2026-07-05
   `prompts/author/` 目前只有三家代码资产，也不等于其余七家没有官方评测 prompt。ws05.1 将
   逐家复用已有 integration/note 后补 current-source 一手证据，避免重复调查；真实 pilot 继续
   暂停。
+- 2026-08-25：ws05.1 M11 已关闭。九家 embedding consumer 使用内容锁定的项目本地 MiniLM，
+  Letta 为 N/A；十家 registered source 改用分组件 closure v2；dead/hidden config 已按 final
+  consumer 修正，零 author profile 通过完整就绪门。新 identity 与旧 artifact 严格失配，下一轮
+  pilot 全部 fresh-state。实施收据见
+  [`M11 implementation`](../ws05.1-method-profile-provenance/notes/m11-effective-config-source-embedding-implementation.md)。
+
+### M11 后重建矩阵
+
+| 范围 | 下一轮 pilot | 历史 artifact |
+|---|---|---|
+| LightMem、A-Mem、Mem0、MemoryOS、MemOS、SimpleMem、LangMem、EverOS、Graphiti | embedding artifact v2 + source closure v2，全部 fresh-state | 只按原 manifest 回读，不重标、不 resume |
+| Letta | source closure v2，fresh-state；embedding 继续 N/A | 只读，不补 MiniLM 身份 |
+| EverOS 特别项 | v8 effective strategy 与 controlled MiniLM 必须用新 run-id 实跑 | 旧 v6/v7 只证明当时 profile |
+| author calibration | 当前不运行；逐格 source/data/builder/decode/parser 全闭合后另批批准 | 不拿历史主表 run 冒充 author parity |
 - 2026-08-21：新增 `RunScope.PILOT`。它复用 TOML `[smoke]` 的 method 参数与 ox runtime，
   但保留一个完整 isolation 及全部问题、写独立 `pilot/` 目录并进入 manifest identity。
   LoCoMo/LME/BEAM/HaluMem 各取第一完整 conversation/instance/conversation/UUID；MemBench
@@ -113,7 +156,7 @@ created: 2026-07-05
   graph store、transaction、scheduler/lifecycle、非线程安全 tokenizer/client 均保持隔离；连接池
   可以共享 transport，不等于共享业务状态。Spring Bean 的复用思想只适用于明确 stateless 或
   受控生命周期对象，不能照搬成“一类只建一个实例”。
-- [ ] **资源调度器**：按 local embedding、GPU model、Docker/DB、API-only、W1-only 等资源类给
+- [ ] **资源调度器**：按 local embedding、GPU model、Docker/DB、API-only、isolated-runtime 等资源类给
   run 建 semaphore/配额与 admission control；5×10 是实验矩阵，不代表同时放行 50 个进程。
   支持 bounded queue、背压、优雅取消、per-run timeout 与失败隔离。
 - [ ] **验收指标**：相同 run identity 下 payload/artifact/score 字节或语义守恒；峰值 RSS、模型

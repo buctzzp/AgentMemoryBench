@@ -1,7 +1,9 @@
 # M4 零 API 资源画像与隔离裁决
 
 日期：2026-08-24
-状态：`ACCEPTED_BY_M5_NO_API_REGRESSION`
+状态：`ACCEPTED_BY_M5_NO_API_REGRESSION`；其中 Letta/MemOS 的 W1 临时裁决已由
+[2026-08-25 isolation 并行门](../../../notes/2026-08-25-pre-experiment-parallelism-gate.md)
+取代，下面保留当时证据，不再作为 current worker 能力口径。
 
 ## 1. 问题与边界
 
@@ -54,9 +56,9 @@ LongMemEval 都只取一个完整 isolation；后者使用 `s_cleaned`。PSS 在
 | method | 当前业务状态隔离 | 本批裁决 |
 | --- | --- | --- |
 | Mem0 | worker 内 product-native `run_id`；worker 间物理 backend | 保持混合隔离；可共享连接/模型仍需单独证明 |
-| Letta | product-native subject/agent/core blocks；run-owned PostgreSQL lifecycle | namespace 可隔离 conversation，但 worker/runtime 上限仍为 1；不得共享 mutable agent/DB lifecycle |
+| Letta | product-native subject/agent/core blocks；run-owned PostgreSQL lifecycle | 历史 W1；现已改为每 worker 独立 PostgreSQL/runtime，无 method 硬上限，仍不得共享 mutable agent/DB lifecycle |
 | LangMem | worker 内 `langgraph_user_id` namespace；W2 建独立 worker/store | 保持混合隔离；不因 InMemoryStore 有 namespace 就共享非线程安全 tokenizer/model |
-| MemOS | product-native user/cube namespace，同 process runtime owner | 保持逻辑 namespace + `max_workers=1`；已有 tokenizer `Already borrowed` 反例否决并发 singleton |
+| MemOS | product-native user/cube namespace，同 process runtime owner | 历史 W1；`Already borrowed` 否决的是共享 singleton，现 v6 改为每 worker 独立 runtime、无 method 硬上限 |
 | A-Mem | per-conversation Chroma/state root | 当前必须物理隔离；只把 embedder 视为未来候选依赖 |
 | MemoryOS | per-conversation product object/storage root | 当前必须物理隔离 |
 | LightMem | per-conversation Qdrant collection/path | 当前必须物理隔离；collection 名不能证明整个 runtime 可共享 |

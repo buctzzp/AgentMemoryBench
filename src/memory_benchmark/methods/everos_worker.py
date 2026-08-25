@@ -21,12 +21,21 @@ import traceback
 from typing import Any
 
 
-EVEROS_ADAPTER_VERSION = "everos-product-chat-v7"
-EVEROS_WORKER_SCHEMA_VERSION = "everos-worker-protocol-v3"
+EVEROS_ADAPTER_VERSION = "everos-product-chat-v8"
+EVEROS_WORKER_SCHEMA_VERSION = "everos-worker-protocol-v4"
 EVEROS_PRODUCT_SURFACE = "create_app-lifespan+typed-memorize-search-get"
 EVEROS_ROOT_MARKER = ".memory-benchmark-everos-root.json"
 _TERMINAL_FAILURES = frozenset({"dead_letter", "crashed"})
 _CASCADE_SETTLE_POLL_SECONDS = 0.05
+_OME_PROFILE_APPLY_TIMEOUT_SECONDS = 5.0
+_OME_PROFILE_POLL_SECONDS = 0.01
+_CONTROLLED_OME_STRATEGY_PROFILE = {
+    "extract_atomic_facts": True,
+    "extract_foresight": False,
+    "extract_user_profile": False,
+    "reflect_episodes": False,
+    "trigger_profile_clustering": True,
+}
 _OPENCODEGO_REASONING_EFFORT_LOW_MODELS = frozenset({"ox-alpha-free"})
 
 
@@ -377,6 +386,7 @@ class _WorkerEngine:
             self.lifespan = None
             raise
         try:
+            ome_strategy_profile = await self._wait_for_controlled_ome_profile()
             self._install_observers()
         except BaseException as observer_error:
             error_info = sys.exc_info()
@@ -398,7 +408,39 @@ class _WorkerEngine:
             "product_surface": EVEROS_PRODUCT_SURFACE,
             "status": "ready",
             "worker_schema_version": EVEROS_WORKER_SCHEMA_VERSION,
+            "ome_strategy_profile": ome_strategy_profile,
         }
+
+    async def _wait_for_controlled_ome_profile(self) -> dict[str, bool]:
+        """等待 root-local override 落到最终 StrategyMeta 后再开放业务命令。"""
+
+        lifespan_data = getattr(self.app.state, "lifespan_data", None)
+        if not isinstance(lifespan_data, dict):
+            raise RuntimeError("EverOS lifespan_data is unavailable")
+        engine = lifespan_data.get("ome")
+        registry = getattr(engine, "_registry", None)
+        if registry is None or not callable(getattr(registry, "get", None)):
+            raise RuntimeError("EverOS final OME strategy registry is unavailable")
+        deadline = monotonic() + _OME_PROFILE_APPLY_TIMEOUT_SECONDS
+        last_profile: dict[str, bool] | None = None
+        while True:
+            try:
+                last_profile = {}
+                for name in _CONTROLLED_OME_STRATEGY_PROFILE:
+                    enabled = registry.get(name).enabled
+                    if type(enabled) is not bool:
+                        raise TypeError(f"{name}.enabled must be bool")
+                    last_profile[name] = enabled
+            except (AttributeError, KeyError, TypeError) as exc:
+                raise RuntimeError("EverOS final OME strategy profile is invalid") from exc
+            if last_profile == _CONTROLLED_OME_STRATEGY_PROFILE:
+                return last_profile
+            if monotonic() >= deadline:
+                raise RuntimeError(
+                    "EverOS controlled OME strategy profile was not applied: "
+                    f"{last_profile}"
+                )
+            await asyncio.sleep(_OME_PROFILE_POLL_SECONDS)
 
     def _install_controlled_embedding_provider(self) -> None:
         """在 product lifespan 前注入 upstream 协议兼容的本地 provider。"""

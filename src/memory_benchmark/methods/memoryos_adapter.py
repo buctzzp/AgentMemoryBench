@@ -85,6 +85,9 @@ from memory_benchmark.observability.efficiency import (
 )
 from memory_benchmark.observability import capture_method_output
 from memory_benchmark.methods.image_text import turn_text_with_images
+from memory_benchmark.methods.embedding_assets import (
+    resolve_embedding_runtime_model_reference,
+)
 from memory_benchmark.methods.openai_transport import (
     merge_chat_completions_request_overrides,
 )
@@ -131,7 +134,7 @@ _MEMORYOS_PYPI_CACHE: dict[str, Any] = {}
 
 
 @dataclass(frozen=True)
-class MemoryOSPaperConfig:
+class MemoryOSConfig:
     """MemoryOS 通用产品（memoryos-pypi）运行 profile。
 
     字段:
@@ -156,13 +159,11 @@ class MemoryOSPaperConfig:
         api_retry_max_wait_seconds: 单次重试等待上限。
         suppress_official_stdout: 是否压制第三方 stdout。
         max_workers: conversation 级建议并发数。
-        longmemeval_prompt_profile: 遗留字段，保留向后兼容；迁移后 retrieve 统一
-            用 memoryos-pypi-retrieve-v1，不再按此字段分支。
         profile_name: 可审计 profile 名称。
     """
 
     llm_model: str = "gpt-4o-mini"
-    embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_model_name: str = "models/all-MiniLM-L6-v2"
     short_term_capacity: int = _MEMORYOS_PYPI_DEFAULT_SHORT_TERM_CAPACITY
     mid_term_capacity: int = _MEMORYOS_PYPI_DEFAULT_MID_TERM_CAPACITY
     long_term_knowledge_capacity: int = _MEMORYOS_PYPI_DEFAULT_LONG_TERM_KNOWLEDGE_CAPACITY
@@ -181,7 +182,6 @@ class MemoryOSPaperConfig:
     api_retry_max_wait_seconds: float = 60.0
     suppress_official_stdout: bool = True
     max_workers: int = 1
-    longmemeval_prompt_profile: str = MEMORYOS_READER_PROMPT_VERSION
     profile_name: str = "custom"
 
     def __post_init__(self) -> None:
@@ -190,7 +190,6 @@ class MemoryOSPaperConfig:
         _require_non_empty_string(self.llm_model, "llm_model")
         _require_non_empty_string(self.embedding_model_name, "embedding_model_name")
         _require_non_empty_string(self.profile_name, "profile_name")
-        _require_non_empty_string(self.longmemeval_prompt_profile, "longmemeval_prompt_profile")
 
         for field_name in (
             "short_term_capacity",
@@ -496,7 +495,7 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
         openai_api_key: str | None = None,
         openai_base_url: str | None = None,
         storage_root: str | Path | None = None,
-        config: MemoryOSPaperConfig | None = None,
+        config: MemoryOSConfig | None = None,
         efficiency_collector: EfficiencyCollector | None = None,
         *,
         backend_factory: Callable[[str], Any] | None = None,
@@ -514,7 +513,7 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
             openai_base_url: API base URL；为空时从项目配置层读取。
             storage_root: MemoryOS 状态文件根目录；为空时写入
                 ``outputs/memoryos/<run-id>``。
-            config: MemoryOS profile；为空时使用 ``MemoryOSPaperConfig()``。
+            config: MemoryOS profile；为空时使用 ``MemoryOSConfig()``。
             efficiency_collector: runner 管理的可选效率 observation collector。
             backend_factory: 测试可注入 fake；生产为空时构造官方 pypi Memoryos。
             answer_client: 测试可注入 fake reader；bridge get_answer 路径使用。
@@ -530,7 +529,7 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
             diagnostic_log_path: runner 显式注入的第三方诊断日志；不进入算法配置。
         """
 
-        self.config = config or MemoryOSPaperConfig()
+        self.config = config or MemoryOSConfig()
         self._efficiency_collector = efficiency_collector
         self._backend_factory = backend_factory
         self._answer_client = answer_client
@@ -620,10 +619,14 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
 
             if collector.active_scope_type() is None:
                 return
-            if model_name != self.config.embedding_model_name:
+            expected_model_name = resolve_embedding_runtime_model_reference(
+                self.config.embedding_model_name,
+                self.path_settings.project_root,
+            )
+            if model_name != expected_model_name:
                 raise ConfigurationError(
                     "MemoryOS embedding observer model mismatch: "
-                    f"{model_name!r} != {self.config.embedding_model_name!r}"
+                    f"{model_name!r} != {expected_model_name!r}"
                 )
             collector.record_embedding_call(
                 model_id=MEMORYOS_EMBEDDING_MODEL_ID,
@@ -1266,6 +1269,10 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
         # pypi OpenAIClient 构造时 OpenAI(api_key) 懒连接，占位 key 不报错；
         # 真实 key 由调用方传入。
         api_key = self.openai_api_key or "memoryos-placeholder-key"
+        embedding_model_name = resolve_embedding_runtime_model_reference(
+            self.config.embedding_model_name,
+            self.path_settings.project_root,
+        )
         with self._suppress_stdout_if_needed():
             backend = memoryos_cls(
                 user_id=_safe_user_id(conversation_id),
@@ -1280,7 +1287,7 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
                 mid_term_heat_threshold=self.config.mid_term_heat_threshold,
                 mid_term_similarity_threshold=self.config.mid_term_similarity_threshold,
                 llm_model=self.config.llm_model,
-                embedding_model_name=self.config.embedding_model_name,
+                embedding_model_name=embedding_model_name,
             )
         self._inject_api_retry_timeout(backend)
         return backend
@@ -1490,7 +1497,7 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
     @staticmethod
     def estimate_add_workload(
         conversation: Conversation,
-        config: MemoryOSPaperConfig | None = None,
+        config: MemoryOSConfig | None = None,
     ) -> MemoryOSAddEstimate:
         """估算 add 阶段的 MemoryOS 更新成本。
 
@@ -1502,7 +1509,7 @@ class MemoryOS(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
             MemoryOSAddEstimate: page 数、预计更新批次数和剩余 STM page 数。
         """
 
-        selected_config = config or MemoryOSPaperConfig()
+        selected_config = config or MemoryOSConfig()
         if selected_config.short_term_capacity <= 0:
             raise ConfigurationError("MemoryOS short_term_capacity must be positive")
 
@@ -2066,7 +2073,7 @@ def _count_openai_tokens(text: str, model_name: str) -> int:
     return _TiktokenCounter(model_name).count_tokens(text)
 
 
-def _retry_wait_seconds(config: MemoryOSPaperConfig, failed_attempt_index: int) -> float:
+def _retry_wait_seconds(config: MemoryOSConfig, failed_attempt_index: int) -> float:
     """计算下一次 MemoryOS API 重试前的等待时间。"""
 
     wait_seconds = config.api_retry_wait_seconds * (
@@ -2082,7 +2089,7 @@ def _record_memoryos_llm_call(
     messages: list[dict[str, Any]],
     response: Any,
     content: str,
-    config: MemoryOSPaperConfig,
+    config: MemoryOSConfig,
 ) -> None:
     """记录 MemoryOS 通过 chat_completion 发出的 LLM 调用。"""
 
@@ -2222,7 +2229,7 @@ def clean_memoryos_conversation_state(
 __all__ = [
     "MemoryOS",
     "MemoryOSAddEstimate",
-    "MemoryOSPaperConfig",
+    "MemoryOSConfig",
     "build_memoryos_source_identity",
     "clean_memoryos_conversation_state",
 ]
