@@ -43,8 +43,9 @@ created: 2026-07-05
 - **当前动作**：LightMem 最终五格累计 8,620,622 个 SDK `api_usage` tokens，conversation/question
   零失败；LoCoMo/LME/BEAM/HaluMem 停在 p25/p50/p75，MemBench 因四 lane 异质性补齐五点，详见
   [最终收据](branches/lightmem-mimo-calibration/notes/second-batch-receipt.md)。SimpleMem 逐字复用
-  paired cohort：先做 Mimo streaming exact-usage 探针，再优先启动 HaluMem；任何成功 API LLM
-  observation 若不是 `api_usage`，立即把 token receipt 标 incomplete，不能用估算补账。
+  paired cohort：Mimo streaming exact-usage 探针已通过，HaluMem 三点关键路径与 LongMemEval-S
+  三点短 run 正在资源门下并行；任何成功 API LLM observation 若不是 `api_usage`，立即把 token
+  receipt 标 incomplete，不能用估算补账。
   M11 前的 method state 不 resume；作者校准、Mimo calibration
   与主 controlled run 分开。
 

@@ -50,8 +50,12 @@ incomplete，不能拿估算值补账。受控本地 MiniLM embedding 的 tokeni
 ## 当前动作
 
 - [x] LightMem 第二/条件第三批最终收据已闭合。
-- [ ] 运行 SimpleMem × Mimo streaming exact-usage 最小探针。
-- [ ] 确认五个新 run id 不存在并完成 manifest/配置零 API 门。
+- [x] SimpleMem × Mimo streaming exact-usage 最小探针通过：SDK usage tail 为
+  input=254、output=2，模型 `mimo-v2.5`，未回退 tokenizer estimate。
+- [x] 五个新 run id 均确认不存在；current SimpleMem 定向零 API门沿用已验收的 201 passed。
 - [ ] HaluMem 优先启动，其余四格在资源门下推进。
+  - MemBench 20/20、LongMemEval-S 3/3、BEAM-100K 3/3 已完成且零失败；适用 evaluator 也已
+    收口；
+  - LoCoMo 与 HaluMem 各三个 isolation 继续运行，外部并发已自然降到六路。
 - [ ] 完成适用 evaluator、SDK usage/failed-attempt/幂等门与预算敏感性判断。
 - [ ] 写最终实验收据并同步父 README。
