@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from threading import Barrier
 from types import SimpleNamespace
 from typing import Any
 
@@ -843,6 +844,22 @@ class _FakeHalumemResponsesClient:
         )
 
 
+class _BarrierHalumemResponsesClient(_FakeHalumemResponsesClient):
+    """要求两个 QA 同时进入 Responses 调用，证明 HaluMem artifact 内部并行。"""
+
+    def __init__(self) -> None:
+        """初始化两方 barrier 与固定 API usage。"""
+
+        super().__init__(input_tokens=13, output_tokens=3)
+        self._barrier = Barrier(2, timeout=5)
+
+    def _create(self, *, model: str, input: Any, temperature: float) -> object:
+        """等待另一个 QA；串行实现会在 barrier 处失败。"""
+
+        self._barrier.wait()
+        return super()._create(model=model, input=input, temperature=temperature)
+
+
 class _FakeHalumemChatClient:
     """记录 HaluMem OpenCodeGo Chat Completions 请求并返回结构化结果。"""
 
@@ -1037,6 +1054,36 @@ def test_halumem_qa_records_question_scoped_observations(tmp_path: Path) -> None
         assert observation["token_measurement_source"] == "api_usage"
     # QA 官方比例不因效率观测而变化。
     assert payload["overall_score"]["question_answering"]["correct_qa_ratio(all)"] == 0.5
+
+
+def test_halumem_qa_honors_workers_and_preserves_tokens_and_order(
+    tmp_path: Path,
+) -> None:
+    """两个 QA 应真实并发，score 顺序稳定且 API usage observation 一条不丢。"""
+
+    run_dir = _build_halumem_run_dir(tmp_path)
+    client = _BarrierHalumemResponsesClient()
+
+    summary = run_artifact_evaluation(
+        run_dir=run_dir,
+        evaluator=HalumemQAEvaluator(model="gpt-4o-mini", client=client),
+        expected_benchmark="halumem",
+        max_workers=2,
+    )
+
+    paths = ExperimentPaths(run_dir=run_dir)
+    scores = read_jsonl(Path(summary.score_path))
+    observations = read_jsonl(
+        paths.evaluator_efficiency_observations_path("halumem_qa")
+    )
+    assert [record["question_id"] for record in scores] == [
+        "user-1:s1:q1",
+        "user-1:s1:q2",
+    ]
+    assert len(client.calls) == 2
+    assert len(observations) == 2
+    assert sum(item["input_tokens"] for item in observations) == 26
+    assert sum(item["output_tokens"] for item in observations) == 6
 
 
 def test_halumem_qa_observations_do_not_cross_conversations(tmp_path: Path) -> None:

@@ -113,8 +113,9 @@ class BeamRubricJudgeEvaluator(LLMJudgeEvaluator):
             )
         )
 
-        sink = self._new_efficiency_observation_sink()
-        score_records: list[dict[str, Any]] = []
+        units: list[
+            tuple[str, dict[str, Any], dict[str, Any], dict[str, Any]]
+        ] = []
         for question_id in public_by_id:
             if question_id not in prediction_by_id:
                 continue
@@ -123,12 +124,7 @@ class BeamRubricJudgeEvaluator(LLMJudgeEvaluator):
                     f"missing private label for {question_id}"
                 )
 
-            public_record = public_by_id[question_id]
-            prediction_record = prediction_by_id[question_id]
             private_record = private_by_id[question_id]
-
-            question_text = public_record.get("question_text", "")
-            prediction_text = prediction_record.get("answer", "")
             rubric = _extract_rubric(private_record)
             ability = _extract_ability(private_record)
 
@@ -138,103 +134,126 @@ class BeamRubricJudgeEvaluator(LLMJudgeEvaluator):
                 raise ConfigurationError(
                     f"unknown BEAM ability in private label: {ability!r}"
                 )
-
-            conversation_id = public_record.get("conversation_id")
-            # 同一真实公开问题的全部 rubric-item judge 与 event-ordering 判等调用共用一个
-            # judge scope，靠 collector 的 call index 区分，不拆成伪 question。
-            with sink.unit_scope(conversation_id, question_id):
-                # 逐条 rubric item 打分；float 主分与官方 int 对照分同时保留。
-                item_scores: list[dict[str, Any]] = []
-                total_score = 0.0
-                official_int_total = 0
-                for rubric_item in rubric:
-                    # Official evaluate_* leaves <question> untouched and replaces only
-                    # rubric/response (compute_metrics.py:347-349 and repeated call sites).
-                    prompt = BEAM_JUDGE_PROMPT.replace(
-                        "<rubric_item>", str(rubric_item)
-                    ).replace(
-                        "<llm_response>", prediction_text
-                    )
-                    result = self._judge_json(prompt)
-                    item_score = require_beam_question_credit(
-                        result.get("score"),
-                        label="BEAM rubric item judge score",
-                    )
-                    item_scores.append(
-                        {
-                            "rubric_item": rubric_item,
-                            "score": item_score,
-                            "reason": result.get("reason", ""),
-                        }
-                    )
-                    total_score += item_score
-                    official_int_total += int(item_score)
-
-                llm_judge_score = total_score / len(rubric) if rubric else 0.0
-                official_int_score = official_int_total / len(rubric) if rubric else 0.0
-                question_credit = ordinary_beam_question_credit(
-                    item["score"] for item in item_scores
+            units.append(
+                (
+                    question_id,
+                    public_by_id[question_id],
+                    prediction_by_id[question_id],
+                    private_record,
                 )
-                question_credit_source = "rubric_item_tristate"
-                question_credit_profile = BEAM_ORDINARY_QUESTION_CREDIT_PROFILE
-                question_credit_reason = ""
-
-                event_details: dict[str, Any] = {}
-                if ability == "event_ordering":
-                    event_details = _event_ordering_score(
-                        reference=list(map(str, rubric)),
-                        system=prediction_text.split("\n"),
-                        equivalent=self._judge_equivalence,
-                    )
-                    ordered_result = self._judge_json(
-                        _event_ordering_credit_prompt(
-                            question_text=str(question_text),
-                            reference=list(map(str, rubric)),
-                            prediction_text=str(prediction_text),
-                        )
-                    )
-                    question_credit = require_beam_question_credit(
-                        ordered_result.get("score"),
-                        label="BEAM event-ordering question credit",
-                    )
-                    question_credit_source = "ordered_compound_rubric_llm"
-                    question_credit_profile = (
-                        BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE
-                    )
-                    reason = ordered_result.get("reason", "")
-                    question_credit_reason = reason if isinstance(reason, str) else ""
-
-            score_records.append(
-                {
-                    "record_kind": "beam_rubric_judge",
-                    "question_id": question_id,
-                    "conversation_id": conversation_id,
-                    "metric_name": self.metric_name,
-                    "score": llm_judge_score,
-                    "llm_judge_score_official_int": official_int_score,
-                    "ability": ability,
-                    "item_scores": item_scores,
-                    "rubric_count": len(rubric),
-                    "question_text": question_text,
-                    "prediction_text": prediction_text,
-                    "details": event_details,
-                    "event_ordering_composite_score": event_details.get(
-                        "event_ordering_composite_score"
-                    ),
-                    "aggregation_question_credit": question_credit,
-                    "aggregation_question_credit_contract_version": (
-                        BEAM_QUESTION_CREDIT_CONTRACT_VERSION
-                    ),
-                    "aggregation_question_credit_source": question_credit_source,
-                    "aggregation_question_credit_profile": question_credit_profile,
-                    "aggregation_question_credit_reason": question_credit_reason,
-                }
             )
+
+        score_records, sink = self._map_artifact_judge_units(
+            units=units,
+            evaluate_unit=self._evaluate_artifact_question,
+            max_workers=max_workers,
+        )
 
         return self._finalize_artifact_payload(
             _build_evaluation_payload(score_records),
             sink,
         )
+
+    def _evaluate_artifact_question(
+        self,
+        unit: tuple[str, dict[str, Any], dict[str, Any], dict[str, Any]],
+        unit_sink: Any,
+    ) -> dict[str, Any]:
+        """评测一个 BEAM 公开问题及其全部 rubric，保持单一 judge scope。"""
+
+        question_id, public_record, prediction_record, private_record = unit
+        question_text = public_record.get("question_text", "")
+        prediction_text = prediction_record.get("answer", "")
+        rubric = _extract_rubric(private_record)
+        ability = _extract_ability(private_record)
+        conversation_id = public_record.get("conversation_id")
+
+        # 同一真实公开问题的全部 rubric-item judge 与 event-ordering 判等调用共用一个
+        # judge scope，靠 collector 的 call index 区分，不拆成伪 question。
+        with unit_sink.unit_scope(conversation_id, question_id):
+            # 逐条 rubric item 打分；float 主分与官方 int 对照分同时保留。
+            item_scores: list[dict[str, Any]] = []
+            total_score = 0.0
+            official_int_total = 0
+            for rubric_item in rubric:
+                # Official evaluate_* leaves <question> untouched and replaces only
+                # rubric/response (compute_metrics.py:347-349 and repeated call sites).
+                prompt = BEAM_JUDGE_PROMPT.replace(
+                    "<rubric_item>", str(rubric_item)
+                ).replace(
+                    "<llm_response>", prediction_text
+                )
+                result = self._judge_json(prompt)
+                item_score = require_beam_question_credit(
+                    result.get("score"),
+                    label="BEAM rubric item judge score",
+                )
+                item_scores.append(
+                    {
+                        "rubric_item": rubric_item,
+                        "score": item_score,
+                        "reason": result.get("reason", ""),
+                    }
+                )
+                total_score += item_score
+                official_int_total += int(item_score)
+
+            llm_judge_score = total_score / len(rubric) if rubric else 0.0
+            official_int_score = official_int_total / len(rubric) if rubric else 0.0
+            question_credit = ordinary_beam_question_credit(
+                item["score"] for item in item_scores
+            )
+            question_credit_source = "rubric_item_tristate"
+            question_credit_profile = BEAM_ORDINARY_QUESTION_CREDIT_PROFILE
+            question_credit_reason = ""
+
+            event_details: dict[str, Any] = {}
+            if ability == "event_ordering":
+                event_details = _event_ordering_score(
+                    reference=list(map(str, rubric)),
+                    system=prediction_text.split("\n"),
+                    equivalent=self._judge_equivalence,
+                )
+                ordered_result = self._judge_json(
+                    _event_ordering_credit_prompt(
+                        question_text=str(question_text),
+                        reference=list(map(str, rubric)),
+                        prediction_text=str(prediction_text),
+                    )
+                )
+                question_credit = require_beam_question_credit(
+                    ordered_result.get("score"),
+                    label="BEAM event-ordering question credit",
+                )
+                question_credit_source = "ordered_compound_rubric_llm"
+                question_credit_profile = BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE
+                reason = ordered_result.get("reason", "")
+                question_credit_reason = reason if isinstance(reason, str) else ""
+
+        return {
+            "record_kind": "beam_rubric_judge",
+            "question_id": question_id,
+            "conversation_id": conversation_id,
+            "metric_name": self.metric_name,
+            "score": llm_judge_score,
+            "llm_judge_score_official_int": official_int_score,
+            "ability": ability,
+            "item_scores": item_scores,
+            "rubric_count": len(rubric),
+            "question_text": question_text,
+            "prediction_text": prediction_text,
+            "details": event_details,
+            "event_ordering_composite_score": event_details.get(
+                "event_ordering_composite_score"
+            ),
+            "aggregation_question_credit": question_credit,
+            "aggregation_question_credit_contract_version": (
+                BEAM_QUESTION_CREDIT_CONTRACT_VERSION
+            ),
+            "aggregation_question_credit_source": question_credit_source,
+            "aggregation_question_credit_profile": question_credit_profile,
+            "aggregation_question_credit_reason": question_credit_reason,
+        }
 
 
 def _extract_rubric(private_record: dict[str, Any]) -> list[Any]:

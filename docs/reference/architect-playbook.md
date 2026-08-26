@@ -188,6 +188,13 @@
     `ProgressReporter`；终端最少显示 isolation、当前 phase/session/question 与计数，并持续写
     `checkpoints/progress.json`。heartbeat 只证明活性，conversation/question 的全局完成数只能在
     coordinator 提交 checkpoint 后推进；历史 run 没采集的进度不得事后伪造。
+39. **昂贵目标模型允许用低价模型做 token 外推，但不能偷换实测身份**：预算不足时，先用调用
+    拓扑与 prompt shape 相同的低价模型跑完整代表 isolation，逐 method/benchmark/stage 保存
+    `api_usage`、失败尝试与 wall time；再按目标模型在报告时点的真实单价离线换算成本。至少抽取
+    少量目标模型代表 run 校验输出长度、重试与调用拓扑是否可迁移；若二者不同，只能给区间和
+    假设，不能把低价模型的分数、速度、token 数或价格写成 GPT-4o-mini 实测。优先把有限正式
+    经费用于效率高、能形成完整对照的方法；A-Mem 等高调用方法可只给低价 token 成本外推，但
+    必须诚实标注未做目标模型 full。
 
 完整历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

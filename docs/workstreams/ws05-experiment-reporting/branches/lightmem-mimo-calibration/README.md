@@ -58,7 +58,9 @@ artifact 瘦身/分批 evaluator 合同后的 current 全量零 API 门为
   2,889 次调用成本与跨 method 低覆盖裁定本轮不测 extraction，memory-type 因依赖它同步缺席。
 - [x] 完成 score/summary/model inventory/efficiency/失败成本机器门，见
   [首批 evaluate 收据](notes/first-batch-evaluation-receipt.md)。
-- [ ] 首批 evaluator 验收后再裁定第二批 resume，不提前扩大。
+- [x] 闭合 BEAM/HaluMem artifact judge 的内部有界并行、逐单元进度与 token 守恒，见
+  [M1 实现收据](notes/artifact-judge-parallelism-m1.md)。
+- [ ] 按既有 identity 推进第二批 prediction resume，并形成增量成本/波动收据。
 
 ## 已知边界
 
@@ -68,13 +70,13 @@ artifact 瘦身/分批 evaluator 合同后的 current 全量零 API 门为
   用户已裁定不扩修不影响结果的 method 内部瑕疵；本支线只保留此审计边界。
 - HaluMem operation-level 首批运行约 40 分钟。旧终端黑屏来自 runner 没接
   `ProgressReporter`，不是 API 或 method 停滞；该框架缺口正在本批修复。
-- artifact-level BEAM/HaluMem judge 当前接收但未消费 `max_workers`，所以本轮通过三个
-  evaluator 进程并行、每个内部串行完成；扩大 judge 前应补内部并行与逐题进度，不影响本轮分数。
+- 首批 artifact-level BEAM/HaluMem judge 曾接收但未消费 `max_workers`；M1 已闭合内部
+  有界并行与逐单元进度。该修复不改变首批分数，也未用付费重跑来证明。
 
 ## 当前断点
 
-进度 M0、首批 artifact 字段门和首批 evaluate 均已通过。HaluMem 的 20/10 已核实为官方
+进度 M0、首批 artifact 字段门、首批 evaluate 与 artifact judge 并行 M1 均已通过。HaluMem 的 20/10 已核实为官方
 Mem0 wrapper 参数而非 benchmark-wide scorer contract；LightMem product top-60 是本 method
-的自然 `formatted_memory`，无需另做 parity 裁决或重跑 prediction。下一步是验收本批结果并
-裁定是否按既有 cohort identity 推进第二批 prediction resume，而不是补跑不可横向比较的
+的自然 `formatted_memory`，无需另做 parity 裁决或重跑 prediction。用户已批准按既有 cohort
+identity 推进第二批 prediction resume；下一步先做 resume 预检再启动真实 API，而不是补跑不可横向比较的
 extraction；不得改变既有 run 的 profile、worker、cohort 顺序或 runtime 后强行 resume。

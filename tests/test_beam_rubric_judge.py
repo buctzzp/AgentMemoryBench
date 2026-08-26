@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 from pathlib import Path
+from threading import Barrier
 from types import SimpleNamespace
 from typing import Any
 
@@ -690,6 +691,22 @@ class _FakeBeamResponsesClient:
         )
 
 
+class _BarrierBeamResponsesClient(_FakeBeamResponsesClient):
+    """要求两个 question 同时进入 Responses 调用，证明 artifact 内部真实并行。"""
+
+    def __init__(self) -> None:
+        """初始化两方 barrier 与固定 API usage。"""
+
+        super().__init__(score=1.0, input_tokens=11, output_tokens=2)
+        self._barrier = Barrier(2, timeout=5)
+
+    def _create(self, *, model: str, input: Any, temperature: float) -> object:
+        """等待另一个 question；串行实现会在 barrier 处直接失败。"""
+
+        self._barrier.wait()
+        return super()._create(model=model, input=input, temperature=temperature)
+
+
 def _write_beam_run_dir(
     tmp_path: Path,
     *,
@@ -772,6 +789,57 @@ def test_beam_rubric_two_items_record_two_distinct_observations_same_question(
     # 分数与官方 int 对照分不因效率观测而变化。
     assert scores[0]["score"] == pytest.approx(0.5)
     assert scores[0]["llm_judge_score_official_int"] == 0.0
+
+
+def test_beam_artifact_judge_honors_workers_and_keeps_score_order(
+    tmp_path: Path,
+) -> None:
+    """两个问题应并发进入 API，完成顺序不改变公开 artifact 顺序或 token 归属。"""
+
+    question_ids = ["1:abstention:q1", "2:abstention:q1"]
+    run_dir = _write_beam_run_dir(
+        tmp_path,
+        questions=[
+            _make_question_record(question_id, "q?", category="abstention")
+            for question_id in question_ids
+        ],
+        predictions=[
+            _make_prediction_record(question_id, "answer")
+            for question_id in question_ids
+        ],
+        private_labels=[
+            _make_private_label(
+                question_id,
+                rubric=["one item"],
+                ability="abstention",
+            )
+            for question_id in question_ids
+        ],
+    )
+    client = _BarrierBeamResponsesClient()
+
+    summary = run_artifact_evaluation(
+        run_dir=run_dir,
+        evaluator=BeamRubricJudgeEvaluator(
+            mode="compact",
+            model="gpt-4o-mini",
+            client=client,
+        ),
+        expected_benchmark="BEAM",
+        max_workers=2,
+    )
+
+    paths = ExperimentPaths(run_dir=run_dir)
+    scores = read_jsonl(Path(summary.score_path))
+    observations = read_jsonl(
+        paths.evaluator_efficiency_observations_path("beam_rubric_judge")
+    )
+    assert [record["question_id"] for record in scores] == question_ids
+    assert len(client.calls) == 2
+    assert len(observations) == 2
+    assert {item["question_id"] for item in observations} == set(question_ids)
+    assert sum(item["input_tokens"] for item in observations) == 22
+    assert sum(item["output_tokens"] for item in observations) == 4
 
 
 def test_beam_event_ordering_equivalence_records_usage_without_double_count(

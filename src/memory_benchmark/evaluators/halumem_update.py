@@ -39,13 +39,12 @@ class HalumemUpdateEvaluator(HalumemJudgeEvaluatorBase):
     ) -> dict[str, Any]:
         """读取 update probe artifact 并计算 update 比例。"""
 
-        sink = self._new_efficiency_observation_sink()
         session_labels = index_session_labels(read_session_labels(paths))
         update_records = read_jsonl_or_empty(
             paths.artifacts_dir / "update_probe_results.jsonl",
             "update_probe_results",
         )
-        score_records: list[dict[str, Any]] = []
+        units: list[tuple[str, str, Any, dict[str, Any], list[str]]] = []
         skipped_empty_retrieval_count = 0
         for update_record in update_records:
             session_key, session_label = resolve_session_label(
@@ -69,6 +68,29 @@ class HalumemUpdateEvaluator(HalumemJudgeEvaluatorBase):
                 # 不建立 scope、不产生 observation。
                 skipped_empty_retrieval_count += 1
                 continue
+            units.append(
+                (
+                    conversation_id,
+                    session_id,
+                    gold_memory_index,
+                    memory_point,
+                    memories_from_system,
+                )
+            )
+
+        def evaluate_unit(
+            unit: tuple[str, str, Any, dict[str, Any], list[str]],
+            unit_sink: Any,
+        ) -> dict[str, Any]:
+            """评测一个有非空检索结果的 update point。"""
+
+            (
+                conversation_id,
+                session_id,
+                gold_memory_index,
+                memory_point,
+                memories_from_system,
+            ) = unit
             prompt = _UPDATE_PROMPT.format(
                 memories="\n".join(memories_from_system),
                 updated_memory=memory_point.get("memory_content", ""),
@@ -78,27 +100,31 @@ class HalumemUpdateEvaluator(HalumemJudgeEvaluatorBase):
             )
             # 每个被实际 judge 的 update point 一个 scope：真实 conversation +
             # 含 metric + session id + gold index 的稳定 evaluator-unit id。
-            with sink.unit_scope(
+            with unit_sink.unit_scope(
                 conversation_id,
                 _update_scope_unit_id(self.metric_name, session_id, gold_memory_index),
             ):
                 result = self._judge_json(prompt)
             update_type = result.get("evaluation_result")
-            score_records.append(
-                {
-                    "record_kind": "memory_update",
-                    "conversation_id": conversation_id,
-                    "session_id": session_id,
-                    "gold_memory_index": gold_memory_index,
-                    "metric_name": self.metric_name,
-                    "score": 1.0 if update_type == "Correct" else 0.0,
-                    "memory_update_type": update_type,
-                    "memory_content": memory_point.get("memory_content"),
-                    "memory_type": memory_point.get("memory_type"),
-                    "importance": memory_point.get("importance"),
-                    "raw_judge_response": result,
-                }
-            )
+            return {
+                "record_kind": "memory_update",
+                "conversation_id": conversation_id,
+                "session_id": session_id,
+                "gold_memory_index": gold_memory_index,
+                "metric_name": self.metric_name,
+                "score": 1.0 if update_type == "Correct" else 0.0,
+                "memory_update_type": update_type,
+                "memory_content": memory_point.get("memory_content"),
+                "memory_type": memory_point.get("memory_type"),
+                "importance": memory_point.get("importance"),
+                "raw_judge_response": result,
+            }
+
+        score_records, sink = self._map_artifact_judge_units(
+            units=units,
+            evaluate_unit=evaluate_unit,
+            max_workers=max_workers,
+        )
 
         overall = {
             "memory_update": count_ratios(

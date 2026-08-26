@@ -48,16 +48,30 @@ class HalumemQAEvaluator(HalumemJudgeEvaluatorBase):
                 "evaluator_private_labels",
             )
         )
-        sink = self._new_efficiency_observation_sink()
-        score_records: list[dict[str, Any]] = []
+        units: list[
+            tuple[str, dict[str, Any], dict[str, Any], dict[str, Any]]
+        ] = []
         for question_id in public_by_id:
             if question_id not in prediction_by_id:
                 continue
             if question_id not in private_by_id:
                 raise ConfigurationError(f"missing private label for {question_id}")
-            public_record = public_by_id[question_id]
-            prediction_record = prediction_by_id[question_id]
-            private_record = private_by_id[question_id]
+            units.append(
+                (
+                    question_id,
+                    public_by_id[question_id],
+                    prediction_by_id[question_id],
+                    private_by_id[question_id],
+                )
+            )
+
+        def evaluate_unit(
+            unit: tuple[str, dict[str, Any], dict[str, Any], dict[str, Any]],
+            unit_sink: Any,
+        ) -> dict[str, Any]:
+            """评测一个公开 QA，并保留其独立 efficiency scope。"""
+
+            question_id, public_record, prediction_record, private_record = unit
             prompt = _QUESTION_PROMPT.format(
                 question=public_record.get("question_text", ""),
                 reference_answer=private_record.get("gold_answer", ""),
@@ -66,21 +80,25 @@ class HalumemQAEvaluator(HalumemJudgeEvaluatorBase):
             )
             conversation_id = public_record.get("conversation_id")
             # 每个公开 QA 问题一个真实 conversation/question scope，覆盖其单次 judge 调用。
-            with sink.unit_scope(conversation_id, question_id):
+            with unit_sink.unit_scope(conversation_id, question_id):
                 result = self._judge_json(prompt)
             result_type = result.get("evaluation_result")
-            score_records.append(
-                {
-                    "record_kind": "question_answering",
-                    "question_id": question_id,
-                    "conversation_id": conversation_id,
-                    "metric_name": self.metric_name,
-                    "score": 1.0 if result_type == "Correct" else 0.0,
-                    "result_type": result_type,
-                    "question_type": _question_type(private_record),
-                    "raw_judge_response": result,
-                }
-            )
+            return {
+                "record_kind": "question_answering",
+                "question_id": question_id,
+                "conversation_id": conversation_id,
+                "metric_name": self.metric_name,
+                "score": 1.0 if result_type == "Correct" else 0.0,
+                "result_type": result_type,
+                "question_type": _question_type(private_record),
+                "raw_judge_response": result,
+            }
+
+        score_records, sink = self._map_artifact_judge_units(
+            units=units,
+            evaluate_unit=evaluate_unit,
+            max_workers=max_workers,
+        )
 
         overall = {
             "question_answering": count_ratios(

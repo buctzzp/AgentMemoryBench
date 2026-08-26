@@ -43,7 +43,6 @@ class HalumemExtractionEvaluator(HalumemJudgeEvaluatorBase):
     ) -> dict[str, Any]:
         """读取 operation-level artifacts 并计算 extraction 指标。"""
 
-        sink = self._new_efficiency_observation_sink()
         session_labels = read_session_labels(paths)
         labels_by_session = index_session_labels(session_labels)
         session_reports = read_required_jsonl(
@@ -66,6 +65,7 @@ class HalumemExtractionEvaluator(HalumemJudgeEvaluatorBase):
             report for report in session_reports if report.get("status") == "ok"
         ]
         if not evaluable_reports:
+            sink = self._new_efficiency_observation_sink()
             return self._finalize_artifact_payload(
                 _extraction_payload(
                     score_records=[],
@@ -77,7 +77,12 @@ class HalumemExtractionEvaluator(HalumemJudgeEvaluatorBase):
                 sink,
             )
 
-        for report in evaluable_reports:
+        def evaluate_unit(
+            report: dict[str, Any],
+            unit_sink: Any,
+        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+            """评测一个 session report 的 integrity 与 accuracy 单元。"""
+
             session_key, session_label = resolve_session_label(
                 labels_by_session,
                 report,
@@ -86,17 +91,20 @@ class HalumemExtractionEvaluator(HalumemJudgeEvaluatorBase):
             extracted_memories = _string_list(report.get("memories"))
             extracted_memories_str = "\n".join(extracted_memories)
             memory_points = _memory_points(session_label)
+            unit_integrity_records: list[dict[str, Any]] = []
+            unit_accuracy_records: list[dict[str, Any]] = []
+            unit_routed_update_count = 0
             # 每个 session 一个 judge scope：conversation 用 session 私有标签的真实
             # conversation_id，unit id 是含 metric + session id 的稳定 evaluator-unit id
             # （非公开 QA id，见实现 note），覆盖该 session 的全部 integrity/accuracy 调用。
-            with sink.unit_scope(
+            with unit_sink.unit_scope(
                 conversation_id,
                 _extraction_scope_unit_id(self.metric_name, session_id),
             ):
                 for memory_point in memory_points:
                     key = (session_key, memory_point.get("index"))
                     if memory_point.get("is_update") == "True" and key in update_memory_keys:
-                        routed_update_count += 1
+                        unit_routed_update_count += 1
                         continue
                     integrity_record = self._evaluate_integrity(
                         conversation_id=conversation_id,
@@ -104,8 +112,7 @@ class HalumemExtractionEvaluator(HalumemJudgeEvaluatorBase):
                         extracted_memories_str=extracted_memories_str,
                         memory_point=memory_point,
                     )
-                    integrity_records.append(integrity_record)
-                    score_records.append(integrity_record)
+                    unit_integrity_records.append(integrity_record)
 
                 dialogue_str = build_halumem_dialogue_str(session_label)
                 golden_memories_str = build_halumem_golden_memories_str(session_label)
@@ -117,8 +124,24 @@ class HalumemExtractionEvaluator(HalumemJudgeEvaluatorBase):
                         golden_memories_str=golden_memories_str,
                         candidate_memory=candidate_memory,
                     )
-                    accuracy_records.append(accuracy_record)
-                    score_records.append(accuracy_record)
+                    unit_accuracy_records.append(accuracy_record)
+            return (
+                unit_integrity_records,
+                unit_accuracy_records,
+                unit_routed_update_count,
+            )
+
+        unit_results, sink = self._map_artifact_judge_units(
+            units=evaluable_reports,
+            evaluate_unit=evaluate_unit,
+            max_workers=max_workers,
+        )
+        for unit_integrity, unit_accuracy, unit_routed in unit_results:
+            integrity_records.extend(unit_integrity)
+            accuracy_records.extend(unit_accuracy)
+            score_records.extend(unit_integrity)
+            score_records.extend(unit_accuracy)
+            routed_update_count += unit_routed
 
         return self._finalize_artifact_payload(
             _extraction_payload(

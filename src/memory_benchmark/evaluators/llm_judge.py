@@ -7,9 +7,16 @@
 from __future__ import annotations
 
 import json
+import sys
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Iterator
+from threading import Lock
+from typing import Any, Iterator, TypeVar
+
+from rich.console import Console
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from memory_benchmark.config import (
     CHAT_COMPLETIONS_JUDGE_TRANSPORT,
@@ -28,6 +35,10 @@ from memory_benchmark.observability.efficiency import (
     ModelDescriptor,
     resolve_token_usage,
 )
+
+
+_ArtifactUnit = TypeVar("_ArtifactUnit")
+_ArtifactResult = TypeVar("_ArtifactResult")
 
 
 class EvaluatorEfficiencyObservationSink:
@@ -84,6 +95,20 @@ class EvaluatorEfficiencyObservationSink:
         """返回按建立顺序累积的全部 judge LLM observation 副本。"""
 
         return list(self._records)
+
+    def extend_observations(
+        self,
+        observations: Sequence[EfficiencyObservation],
+    ) -> None:
+        """由 coordinator 按输入顺序合并并行评测单元的 observation。"""
+
+        if not self.enabled:
+            return
+        if any(not isinstance(item, EfficiencyObservation) for item in observations):
+            raise ConfigurationError(
+                "artifact judge sink accepts only EfficiencyObservation instances"
+            )
+        self._records.extend(observations)
 
 
 @dataclass(frozen=True)
@@ -191,6 +216,7 @@ class LLMJudgeEvaluator:
         self.mode = mode
         self.model = model
         self._client = client
+        self._client_lock = Lock()
         self._project_root = project_root
         self._env_file = env_file
         self._settings = None
@@ -266,6 +292,67 @@ class LLMJudgeEvaluator:
         if sink.enabled:
             payload["efficiency_observations"] = sink.observations()
         return payload
+
+    def _map_artifact_judge_units(
+        self,
+        *,
+        units: Sequence[_ArtifactUnit],
+        evaluate_unit: Callable[
+            [_ArtifactUnit, EvaluatorEfficiencyObservationSink],
+            _ArtifactResult,
+        ],
+        max_workers: int,
+    ) -> tuple[list[_ArtifactResult], EvaluatorEfficiencyObservationSink]:
+        """有界并行评测 artifact 单元，并按输入顺序归并结果与 token 观测。
+
+        每个单元建立独立 sink，因此共享 ``EfficiencyCollector`` 的 ContextVar 作用域
+        不会串写；coordinator 等全部 future 完成后按原始 index 排序，保证 score row 与
+        observation 的逻辑顺序不受远端响应快慢影响。终端只显示一条轻量进度条，不新增
+        artifact 或改变评分内容。
+        """
+
+        if isinstance(max_workers, bool) or max_workers < 1:
+            raise ConfigurationError("artifact judge max_workers must be positive")
+        aggregate_sink = self._new_efficiency_observation_sink()
+        indexed_units = list(enumerate(units))
+        if not indexed_units:
+            return [], aggregate_sink
+
+        worker_count = min(max_workers, len(indexed_units))
+        def execute(
+            indexed_unit: tuple[int, _ArtifactUnit],
+        ) -> tuple[int, _ArtifactResult, list[EfficiencyObservation]]:
+            """在线程内评测一个带稳定输入序号的 artifact 单元。"""
+
+            index, unit = indexed_unit
+            local_sink = self._new_efficiency_observation_sink()
+            result = evaluate_unit(unit, local_sink)
+            return index, result, local_sink.observations()
+
+        completed: list[
+            tuple[int, _ArtifactResult, list[EfficiencyObservation]]
+        ] = []
+        with _artifact_judge_progress(self.metric_name, len(indexed_units)) as advance:
+            if worker_count == 1:
+                for indexed_unit in indexed_units:
+                    completed.append(execute(indexed_unit))
+                    advance()
+            else:
+                with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                    futures = [
+                        executor.submit(execute, indexed_unit)
+                        for indexed_unit in indexed_units
+                    ]
+                    for future in as_completed(futures):
+                        completed.append(future.result())
+                        advance()
+
+        completed.sort(key=lambda item: item[0])
+        results: list[_ArtifactResult] = []
+        for _, result, observations in completed:
+            results.append(result)
+            aggregate_sink.extend_observations(observations)
+        return results, aggregate_sink
 
     def efficiency_model_inventory(self) -> tuple[ModelDescriptor, ...]:
         """返回 judge evaluator 会写入 observation 的模型身份。"""
@@ -426,9 +513,13 @@ class LLMJudgeEvaluator:
         """
 
         if self._client is None:
-            from openai import OpenAI
+            with self._client_lock:
+                if self._client is None:
+                    from openai import OpenAI
 
-            self._client = OpenAI(**self._get_openai_settings().to_client_kwargs())
+                    self._client = OpenAI(
+                        **self._get_openai_settings().to_client_kwargs()
+                    )
         return self._client
 
     def _resolve_invocation_settings(self) -> OpenAISettings:
@@ -472,6 +563,34 @@ class LLMJudgeEvaluator:
                 env_file=self._env_file,
             )
         return self._settings
+
+
+@contextmanager
+def _artifact_judge_progress(
+    metric_name: str,
+    total: int,
+) -> Iterator[Callable[[], None]]:
+    """为 artifact judge 显示单条终端进度，不写 prediction progress artifact。"""
+
+    console = Console(file=sys.__stdout__ or sys.stdout)
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeElapsedColumn(),
+        console=console,
+        disable=not console.is_terminal,
+    )
+    with progress:
+        task_id = progress.add_task(f"Evaluate {metric_name}", total=total)
+
+        def advance() -> None:
+            """推进一个已完成的 artifact 评测单元。"""
+
+            progress.advance(task_id)
+
+        yield advance
 
 
 def _parse_compact_response(text: str) -> JudgeDecision:

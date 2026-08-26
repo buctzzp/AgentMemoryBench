@@ -9,7 +9,8 @@ created: 2026-07-05
 ## Codex 恢复胶囊（2026-08-26）
 
 - **当前目标**：runtime/观测、十家参数/source/embedding provenance、isolation 并行门与 formal
-  精确 cohort 选择已关闭；真实 API 仍暂停。[QA task aggregation v3](branches/qa-task-aggregation/README.md) 的 taxonomy、
+  精确 cohort 选择已关闭；用户已批准 LightMem Mimo calibration 按既有 identity 推进第二批
+  resume。[QA task aggregation v3](branches/qa-task-aggregation/README.md) 的 taxonomy、
   answer-only abstention M0、BEAM 三档题分、题目级 pooled micro 与 M1 receipt/write surface 已
   实现。用户已说明还会给出一项开跑前任务；收到前不自行进入 M2 或恢复实验。
 - **当前批次**：
@@ -48,7 +49,10 @@ created: 2026-07-05
   prediction 已全部完成且 conversation/question 零失败；HaluMem operation-level 进度、效率
   派生汇总与五格 artifact 字段门已闭合。HaluMem top-k、分批 evaluator 子集合同与 artifact
   瘦身已完成预检；除用户明确裁掉的 HaluMem extraction/memory-type 外，首批 evaluator 已
-  完成并通过 582 次 judge 的 token/失败成本机器门。下一步验收首批结果，再裁第二批 resume。
+  完成并通过 582 次 judge 的 token/失败成本机器门；artifact judge 内部有界并行与逐单元进度
+  已由 barrier 强反例闭合，current 零 API 全量为
+  `2360 passed, 3 deselected, 25 warnings, 29 subtests passed`。下一步只按 cohort note 的
+  2 / 8 增量预算 resume，不进入全量。
   M11 前的 method state 不 resume；作者校准、Mimo calibration
   与主 controlled run 分开。
 
@@ -163,6 +167,10 @@ created: 2026-07-05
   按 ohmygpt 实价离线计算（`memory_benchmark.analysis`；严格区分
   api_usage / method_native / tokenizer_estimate）；给出分 benchmark、
   分 method 的全量费用与时间预估区间。
+- [ ] 目标模型经费分层：低价 calibration 必须保存逐 method/benchmark/stage 的真实
+  `api_usage` 与失败尝试；按运行时点目标模型价格离线外推。GPT-4o-mini 经费优先用于
+  LightMem、SimpleMem 及后续由 observation 证明效率较高的方法；A-Mem 等高调用方法允许只给
+  低价模型 token 外推，但报告必须标明“非目标模型实测”，不能外推分数或速度。
 - [ ] `ox-alpha-free` transport/efficiency 资格门：十家 build LLM + framework answer/judge
   均使用 model-aware 请求参数；最小真实 run 的 prediction efficiency artifact 含非空
   API usage、model identity 与 latency；旧 Mimo artifact 精确回读不退化。
@@ -215,4 +223,6 @@ created: 2026-07-05
 
 - 2026-07-05 用户：先 smoke 矩阵攒成本表 → 导师批预算 → 才跑全量；
   全量前兜底机制必须做好，不能中途失败从零开始或 API 空烧。
+- 2026-08-26 用户：目标模型预算可能不足以覆盖十家 full；先用低价模型精确记录 token，
+  正式经费优先覆盖效率较高的方法，其余只做带假设与身份披露的成本外推。
 - 既定：真实费用按 ohmygpt 实价离线算，不用 OpenAI 官方价做结论。
