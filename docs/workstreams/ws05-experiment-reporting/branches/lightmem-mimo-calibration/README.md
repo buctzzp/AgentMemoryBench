@@ -87,4 +87,5 @@ artifact 瘦身/分批 evaluator 合同后的 current 全量零 API 门为
 LightMem 五格 calibration 已在自适应停表点闭合：累计真实 SDK API token 8,620,622，五格
 conversation/question 零失败，适用 evaluator、paid score 增量复用和零新增幂等均通过。
 HaluMem extraction/memory-type 继续按用户裁决不运行；现有 run 不再追加 p10/p90 或更换 runtime。
-下一条实验支线为 [SimpleMem × Mimo calibration](../simplemem-mimo-calibration/README.md)。
+后继 [SimpleMem × Mimo calibration](../simplemem-mimo-calibration/README.md) 也已使用同一 paired
+cohort 完成并冻结；两家现转入 ws05 离线目标模型成本组装，不再追加真实 API run。

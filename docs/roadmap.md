@@ -1,6 +1,6 @@
 # 项目路线图
 
-更新日期：2026-08-26。本文件是唯一方向文档：Phase 1 目标、workstream 索引与
+更新日期：2026-08-27。本文件是唯一方向文档：Phase 1 目标、workstream 索引与
 全局约束。逐任务状态见各 workstream README；2026-06 的历史阶段记录（Phase E-S）
 已归档到 `archive/status/2026-07-04-current-roadmap.md` 与
 `archive/status/2026-07-04-task-ledger.md`。
@@ -103,7 +103,10 @@ provenance：论文完整算法、官方 benchmark effective config、current pr
 并行门已关闭，真实 pilot 继续暂停。QA task taxonomy/aggregation 的逐家调查与用户裁决已闭合为
 v3：answer-only abstention M0、BEAM 三档题分与题目级 pooled micro 已锁定，M0-R2 可执行合同
 升级也已关闭；M1 显式 cohort receipt 与 JSON/Markdown 写出面已经零 API 实现。真正 10×5
-`status=ok` 收据只能由首批 formal artifact 生成；paired bootstrap 与 staged calibration 仍未启动。
+`status=ok` 收据只能由首批 formal artifact 生成；paired bootstrap 仍等待更多 method 的同 cohort
+结果。LightMem 与 SimpleMem 已用同一 Mimo paired cohort 完成 staged calibration：分别累计
+8,620,622 与 30,894,972 个真实 SDK `api_usage` tokens，conversation/question 零失败；当前不再
+启动真实 API run，先离线组装目标模型成本区间并决定下一批授权。
 
 ## Workstream 索引
 
@@ -120,7 +123,7 @@ v3：answer-only abstention M0、BEAM 三档题分与题目级 pooled micro 已�
 | [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | done | P0 | 5×10 smoke matrix 与 A-Mem B5/GRID 精确 closure 均关闭；无在途施工 |
 | [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | done | P0 | M1-A→E 已关闭：依赖方向、TOML profile、worker transport、prediction 拆责与 legacy 退役 |
 | [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | done | P0 | isolated heartbeat 与第三方输出治理已关闭；完整诊断进 method.log |
-| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | in-progress | P0 | profile provenance、并行门、QA M0-R2 与 M1 receipt/write surface 已闭合；实物 receipt 待 formal artifact，真实 pilot 暂停 |
+| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | in-progress | P0 | profile provenance、并行门、QA M0-R2/M1 已闭合；LightMem/SimpleMem paired calibration 收据已完成，下一步离线成本区间与后续预算裁决 |
 | [ws05.1](workstreams/ws05.1-method-profile-provenance/README.md) | method-profile-provenance | done | P1 | 十家纵向机制卡 + M11 source/embedding/run identity v2 已闭合；零 author profile，真实 pilot 待用户批准 |
 | [ws06](workstreams/ws06-tests-restructure/README.md) | tests-restructure | open | P2 | tests 分组重组、大文件拆分、过时断言排查 |
 

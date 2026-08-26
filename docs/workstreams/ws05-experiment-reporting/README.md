@@ -9,8 +9,9 @@ created: 2026-07-05
 ## Codex 恢复胶囊（2026-08-27）
 
 - **当前目标**：runtime/观测、十家参数/source/embedding provenance、isolation 并行门与 formal
-  精确 cohort 选择已关闭；LightMem Mimo calibration 已在自适应样本门收口，当前唯一真实实验
-  主线是 [SimpleMem Mimo calibration](branches/simplemem-mimo-calibration/README.md)。
+  精确 cohort 选择已关闭；LightMem 与 SimpleMem 两家 Mimo calibration 均已在自适应样本门收口，
+  当前没有获授权的真实 API run 在途。下一步是用两份 SDK usage 收据离线组装目标模型成本区间，
+  再与用户决定其余八家或少量 GPT-4o-mini 校准，不抢跑。
   [QA task aggregation v3](branches/qa-task-aggregation/README.md) 的 taxonomy、
   answer-only abstention M0、BEAM 三档题分、题目级 pooled micro 与 M1 receipt/write surface 已
   实现；M2 paired bootstrap 仍等待更多 method 的 paired formal 结果，不抢跑。
@@ -40,12 +41,14 @@ created: 2026-07-05
 - **禁止事项**：当前真实 API 授权只覆盖完成 LightMem 与 SimpleMem calibration；不得顺带启动
   其余八家、改写旧 artifact、把旧 embedding build 重标为新 controlled identity，或用 lineage
   伪造 metric 资格。
-- **当前动作**：LightMem 最终五格累计 8,620,622 个 SDK `api_usage` tokens，conversation/question
-  零失败；LoCoMo/LME/BEAM/HaluMem 停在 p25/p50/p75，MemBench 因四 lane 异质性补齐五点，详见
-  [最终收据](branches/lightmem-mimo-calibration/notes/second-batch-receipt.md)。SimpleMem 逐字复用
-  paired cohort：Mimo streaming exact-usage 探针已通过，HaluMem 三点关键路径与 LongMemEval-S
-  三点短 run 正在资源门下并行；任何成功 API LLM observation 若不是 `api_usage`，立即把 token
-  receipt 标 incomplete，不能用估算补账。
+- **当前动作**：LightMem 最终五格累计 8,620,622 个 SDK `api_usage` tokens，详见
+  [LightMem 收据](branches/lightmem-mimo-calibration/notes/second-batch-receipt.md)；SimpleMem 同一
+  paired cohort 累计 30,894,972 tokens，12,787 次 API LLM observation 全部为 `api_usage`，详见
+  [SimpleMem 收据](branches/simplemem-mimo-calibration/notes/calibration-receipt.md)。SimpleMem 的
+  retrieval planning/reflection 占约 73.9% token；LME/BEAM/LoCoMo/HaluMem 三点 max/min 仅
+  1.21×–1.34×，首轮停表，MemBench 20 点达 11.45×，保留分层样本。目标模型费用只按运行时点
+  实价离线外推，不能外推 Mimo 分数或速度；任何未来成功 API LLM observation 若不是
+  `api_usage`，对应收据仍须标 incomplete。
   M11 前的 method state 不 resume；作者校准、Mimo calibration
   与主 controlled run 分开。
 
@@ -65,6 +68,11 @@ created: 2026-07-05
   8,620,622 个真实 SDK `api_usage` tokens。下一家 SimpleMem 使用同一 paired cohort，HaluMem
   先启动；目标模型经费优先覆盖 LightMem/SimpleMem 等效率候选，其余方法允许低价 token 外推，
   但不得外推分数或速度。
+- 2026-08-27：SimpleMem 同一 paired cohort 也已完成。五格累计 12,787 次 API LLM call /
+  30,894,972 个真实 SDK `api_usage` tokens，所有 conversation/question 零失败；HaluMem
+  prediction 单格即占 19,666,880 tokens，五格 retrieval planning/reflection 合计约占 73.9%。
+  LME/BEAM/LoCoMo/HaluMem 三点 max/min 为 1.21×–1.34×，首轮预算停表；MemBench 20 点为
+  11.45×，继续保留分层样本。两家真实 API 授权到此用尽，下一步只离线算目标模型成本区间。
 - 2026-08-26：用户最终确认 QA v3：固定题池逐题一票，不再五 benchmark 等权；update、HaluMem
   错误前提、BEAM 历史内部矛盾拆分；personalization/instruction 分开；lowlevel_rec 归事实回顾，
   noisy 与 LoCoMo category 5 排除；abstention M0 只看 fixed answer LLM；BEAM 十类均可进入聚合，

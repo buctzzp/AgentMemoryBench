@@ -1,6 +1,6 @@
 # SimpleMem × Mimo calibration 实验支线
 
-状态：`in-progress`
+状态：`done`
 
 父任务：[ws05 experiment reporting](../../README.md)
 
@@ -53,9 +53,7 @@ incomplete，不能拿估算值补账。受控本地 MiniLM embedding 的 tokeni
 - [x] SimpleMem × Mimo streaming exact-usage 最小探针通过：SDK usage tail 为
   input=254、output=2，模型 `mimo-v2.5`，未回退 tokenizer estimate。
 - [x] 五个新 run id 均确认不存在；current SimpleMem 定向零 API门沿用已验收的 201 passed。
-- [ ] HaluMem 优先启动，其余四格在资源门下推进。
-  - MemBench 20/20、LongMemEval-S 3/3、BEAM-100K 3/3 已完成且零失败；适用 evaluator 也已
-    收口；
-  - LoCoMo 与 HaluMem 各三个 isolation 继续运行，外部并发已自然降到六路。
-- [ ] 完成适用 evaluator、SDK usage/failed-attempt/幂等门与预算敏感性判断。
-- [ ] 写最终实验收据并同步父 README。
+- [x] HaluMem 最先启动，其余四格在资源门下填充；五格最终均 conversation/question 零失败。
+- [x] 适用 evaluator、SDK usage、paid evaluator 幂等门与预算敏感性判断全部完成。
+- [x] [最终实验收据](notes/calibration-receipt.md) 已闭合：12,787 次 API LLM call / 30,894,972
+  个真实 SDK `api_usage` tokens；四个普通 benchmark 在三点停表，MemBench 保留四 lane 五点。
