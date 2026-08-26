@@ -99,9 +99,9 @@ provenance：论文完整算法、官方 benchmark effective config、current pr
 配置不得混为一谈；缺失的独立官方评测仓库要主动定位，实在不可得才标 unavailable。
 [ws05.1 method profile provenance](workstreams/ws05.1-method-profile-provenance/README.md) 已关闭：
 `第三方框架参考/` 的 repo-default/跨 benchmark 固定/逐格调参策略，以及逐家官方论文/仓库裁决
-均已沉淀。当前执行入口回到 [ws05](workstreams/ws05-experiment-reporting/README.md) 的开跑前
-isolation 并行门；真实 pilot 继续暂停，下一步是
-Letta/MemOS/HaluMem 的新 run 多 isolation sentinel 与 staged calibration 命令身份。
+均已沉淀。当前执行入口回到 [ws05](workstreams/ws05-experiment-reporting/README.md)；isolation
+并行门与 QA task taxonomy/aggregation v2 已关闭，真实 pilot 继续暂停。当前进入 cohort
+receipt、paired bootstrap 与 staged calibration 命令身份。
 
 ## Workstream 索引
 
@@ -118,7 +118,7 @@ Letta/MemOS/HaluMem 的新 run 多 isolation sentinel 与 staged calibration 命
 | [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | done | P0 | 5×10 smoke matrix 与 A-Mem B5/GRID 精确 closure 均关闭；无在途施工 |
 | [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | done | P0 | M1-A→E 已关闭：依赖方向、TOML profile、worker transport、prediction 拆责与 legacy 退役 |
 | [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | done | P0 | isolated heartbeat 与第三方输出治理已关闭；完整诊断进 method.log |
-| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | in-progress | P0 | profile provenance、isolation 并行门与 QA aggregation M0 已闭合；当前补 cohort receipt/bootstrap 报告面，再恢复 staged calibration；真实 pilot 暂停 |
+| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | in-progress | P0 | profile provenance、isolation 并行门与 QA aggregation v2 已闭合；当前补 cohort receipt/bootstrap 报告面，再恢复 staged calibration；真实 pilot 暂停 |
 | [ws05.1](workstreams/ws05.1-method-profile-provenance/README.md) | method-profile-provenance | done | P1 | 十家纵向机制卡 + M11 source/embedding/run identity v2 已闭合；零 author profile，真实 pilot 待用户批准 |
 | [ws06](workstreams/ws06-tests-restructure/README.md) | tests-restructure | open | P2 | tests 分组重组、大文件拆分、过时断言排查 |
 

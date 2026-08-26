@@ -1,5 +1,8 @@
 # 2026-08-26 QA 任务聚合研究与裁决证据
 
+> 历史 v1 证据：聚合方法学仍有效；capability 名称与映射已被
+> [v2 裁决](2026-08-26-qa-task-taxonomy-v2-ruling.md) 取代，禁止按本文 §4 的旧表启动新报告。
+
 ## 1. 为什么不能直接平均五个分数
 
 五家 QA primary 的测量尺度不同：token-F1、二元/分级 LLM judge、MCQ accuracy、HaluMem

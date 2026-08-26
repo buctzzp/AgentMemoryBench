@@ -10,6 +10,7 @@ import pytest
 
 from memory_benchmark.analysis.qa_task_aggregation import (
     PHASE1_QA_BENCHMARKS,
+    QA_TASK_AGGREGATION_CONTRACT_VERSION,
     QACapabilitySlice,
     QANativeTaskScore,
     QAQuestionScore,
@@ -64,13 +65,13 @@ def test_taxonomy_keeps_personalization_and_instruction_following_separate() -> 
         "beam", "instruction_following", question_id="q-instruction"
     )
 
-    assert preference == "memory_grounded_inference_application"
+    assert preference == "personalization"
     assert instruction == "instruction_following"
     assert preference != instruction
 
 
 def test_longmemeval_abstention_suffix_overrides_native_question_type_once() -> None:
-    """_abs 题只进入 epistemic boundary，原 question_type 不重复计权。"""
+    """_abs 题只进入 answerability boundary，原 question_type 不重复计权。"""
 
     native_task, capability = classify_qa_task(
         "longmemeval",
@@ -79,7 +80,56 @@ def test_longmemeval_abstention_suffix_overrides_native_question_type_once() -> 
     )
 
     assert native_task == "abstention"
-    assert capability == "epistemic_boundary"
+    assert capability == "answerability_boundary"
+
+
+def test_conflict_and_update_share_memory_revision_parent() -> None:
+    """Conflict 保留 native task，但不另造第二个跨 benchmark 父能力。"""
+
+    _, beam_conflict = classify_qa_task(
+        "beam", "contradiction_resolution", question_id="q-conflict"
+    )
+    _, beam_update = classify_qa_task(
+        "beam", "knowledge_update", question_id="q-update"
+    )
+    _, halumem_conflict = classify_qa_task(
+        "halumem", "Memory Conflict", question_id="q-memory-conflict"
+    )
+
+    assert beam_conflict == beam_update == halumem_conflict == "memory_revision"
+
+
+def test_generalization_is_not_collapsed_into_personalization() -> None:
+    """常识/新场景应用与偏好个性化保留不同失败语义。"""
+
+    _, locomo = classify_qa_task("locomo", "3", question_id="q-commonsense")
+    _, halumem = classify_qa_task(
+        "halumem",
+        "Generalization & Application",
+        question_id="q-application",
+    )
+    _, preference = classify_qa_task(
+        "longmemeval",
+        "single-session-preference",
+        question_id="q-preference",
+    )
+
+    assert locomo == halumem == "generalization_application"
+    assert preference == "personalization"
+
+
+def test_membench_recommendation_memory_keeps_recall_granularity() -> None:
+    """单域推荐回顾是事实回顾，跨域多会话推荐才进入多证据能力。"""
+
+    _, single = classify_qa_task(
+        "membench", "lowlevel_rec", question_id="q-single-recommendation"
+    )
+    _, cross_session = classify_qa_task(
+        "membench", "RecMultiSession", question_id="q-multi-recommendation"
+    )
+
+    assert single == "factual_recall_extraction"
+    assert cross_session == "multi_evidence_recall_reasoning"
 
 
 def test_unknown_native_task_fails_loud() -> None:
@@ -134,7 +184,7 @@ def test_beam_loader_uses_tau_norm_for_event_ordering(tmp_path: Path) -> None:
     temporal_slice = next(
         item
         for item in result.capability_slices
-        if item.capability == "temporal_sequence_reasoning"
+        if item.capability == "temporal_event_reasoning"
     )
     assert event.score == 1.0
     assert result.benchmark_score == pytest.approx(0.1)
@@ -180,13 +230,14 @@ def test_capability_slice_macro_averages_native_tasks_not_question_counts(
     reasoning = next(
         item
         for item in result.capability_slices
-        if item.capability == "multi_evidence_reasoning"
+        if item.capability == "multi_evidence_recall_reasoning"
     )
 
-    # 六个 native tasks 等权：conditional=1，其余五类=0，所以是 1/6；
-    # 若错误按题 micro-average，会得到 10/15。
-    assert reasoning.score == pytest.approx(1 / 6)
-    assert reasoning.question_count == 15
+    # 五个 native tasks 等权：conditional=1，其余四类=0，所以是 1/5；
+    # lowlevel_rec 已按显式回顾归入 factual，不再混进推理分母。若错误按题
+    # micro-average，这里会得到 10/14。
+    assert reasoning.score == pytest.approx(1 / 5)
+    assert reasoning.question_count == 14
 
 
 def test_overall_gives_each_benchmark_one_vote_not_each_question() -> None:
@@ -209,6 +260,8 @@ def test_overall_gives_each_benchmark_one_vote_not_each_question() -> None:
     )
 
     assert report["status"] == "ok"
+    assert report["contract_version"] == QA_TASK_AGGREGATION_CONTRACT_VERSION
+    assert report["contract_version"] == "qa-task-aggregation-v2"
     assert report["overall"][0]["method"] == "amem"
     assert report["overall"][0]["overall_qa_score"] == pytest.approx(60.0)
     assert report["overall"][1]["overall_qa_score"] == pytest.approx(40.0)

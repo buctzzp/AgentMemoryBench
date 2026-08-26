@@ -1,6 +1,6 @@
 # LongMemEval Benchmark 调研卡片
 
-更新日期：2026-07-16（retrieval gold/分母定点解冻；旧冻结记录见
+更新日期：2026-08-26（QA task taxonomy 与真实例子刷新；retrieval gold/分母定点解冻见
 `docs/workstreams/ws02.6-first-smoke-hardening/notes/longmemeval-frozen-v1.md`，
 逐文件来源锁见同目录 `longmemeval-source-lock.json`）
 
@@ -23,6 +23,25 @@ S/M variant 的成本差异主要来自 history 长度：官方称 S 约 115k to
 题型分布在 S/M 中一致：`knowledge-update` 78、`multi-session` 133、`single-session-assistant` 56、`single-session-preference` 30、`single-session-user` 70、`temporal-reasoning` 133；其中 30 条 question_id 以 `_abs` 结尾，对应 abstention。证据：本卡验收命令；官方 README 对 question_type 与 `_abs` 规则的定义见 `third_party/benchmarks/LongMemEval-main/README.md:81`。
 
 私有边界：`answer`、`answer_session_ids` 和 turn 级 `has_answer` 是 evaluator / retrieval-eval 标签；method 不能看到这些私有标签。官方 README 说明 `has_answer` 用于 turn-level memory recall，`answer_session_ids` 用于 session-level memory recall；当前 adapter 已过滤 message metadata 中这些私有键。证据：`third_party/benchmarks/LongMemEval-main/README.md:87`、`third_party/benchmarks/LongMemEval-main/README.md:88`、`src/memory_benchmark/benchmark_adapters/longmemeval.py:47`、`src/memory_benchmark/benchmark_adapters/longmemeval.py:460`。
+
+### 2.1 QA 任务类型与真实例子（2026-08-26）
+
+S/M 两个 cleaned variant 的 500 个 question identity 与题型计数一致。`_abs` 是覆盖普通
+`question_type` 的有效 abstention 身份：同一道题只进入边界能力一次，原类型仅保留为诊断轴。
+
+| effective task | 定义 | current S 数据例子 | QA 聚合能力 |
+| --- | --- | --- | --- |
+| `single-session-user` | 从一个 session 的 user 发言直接回忆事实 | item 0 / `e47becba`：“我取得什么学位？”→ `Business Administration` | `factual_recall_extraction` |
+| `single-session-assistant` | 从一个 session 的 assistant 回复回忆建议/安排 | item 444 / `7161e7e2`：回忆 Admon 周日轮班→`8 am - 4 pm` | `factual_recall_extraction`；`source_role=assistant` 另作诊断 |
+| `multi-session` | 综合多个 session 的事实 | item 70 / `0a995998`：“需要取回或退回几件衣服？”→`3`，答案跨三个 session | `multi_evidence_recall_reasoning` |
+| `temporal-reasoning` | 根据多次事件日期计算间隔或先后 | item 233 / `gpt4_59149c77`：MoMA 与 Metropolitan Museum 参观间隔→`7 days` | `temporal_event_reasoning` |
+| `knowledge-update` | 旧信息后来被更新，问题要求当前/最终值 | item 366 / `6a1eabeb`：5K 最佳成绩由 `27:12` 更新为 `25:50` | `memory_revision` |
+| `single-session-preference` | 根据用户偏好生成合适的建议，不是短事实复述 | item 132 / `8a2466db`：推荐 video-editing 资源；gold rubric 偏向 Adobe Premiere Pro 高级设置 | `personalization` |
+| `abstention` (`*_abs`) | 历史没有所问信息，应说明未提及 | item 64 / `0862e8bf_abs`：“我的仓鼠叫什么？”；历史只提到猫 Luna | `answerability_boundary` |
+
+官方 judge 对 temporal、update、preference、abstention 使用不同判定模板：temporal 允许特定
+off-by-one，update 必须包含更新后的答案，preference 以偏好 rubric 判定，abstention 判断是否正确
+识别不可回答。因此这些题即使最终都落成 `0/1`，也不等于共享同一题级测量语义。
 
 ## 3. 官方评测流程
 

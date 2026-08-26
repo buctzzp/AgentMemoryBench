@@ -35,6 +35,10 @@
 
 ## 2. Phase 1 五 benchmark 四联入口
 
+五家 QA 原生任务如何归并、为什么不能直接按题数混池、总榜与能力榜如何计算，统一看
+[QA 任务类型与跨 benchmark 聚合](qa-task-taxonomy-and-aggregation.md)。单家任务定义与真实例子
+仍落在下表对应 benchmark 卡，避免总表复制所有样例。
+
 | Benchmark | 总览 | Dataset schema | 异常详账 | 官方/框架 workflow | 当前 gold evidence unit 摘要 |
 |---|---|---|---|---|---|
 | LoCoMo | [benchmark](benchmarks/LoCoMo.md) | [dataset](datasets/locomo.md) | [anomalies](异常情况/locomo.md) | [workflow](workflows/locomo.md) | 单 utterance `dia_id`；9 个 turn-unmatched unit，1 个重复 occurrence 稳定去重 |

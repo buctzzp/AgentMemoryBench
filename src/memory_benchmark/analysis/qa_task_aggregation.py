@@ -14,7 +14,7 @@ from memory_benchmark.core import ConfigurationError
 from memory_benchmark.storage import ExperimentPaths, read_jsonl
 
 
-QA_TASK_AGGREGATION_CONTRACT_VERSION = "qa-task-aggregation-v1"
+QA_TASK_AGGREGATION_CONTRACT_VERSION = "qa-task-aggregation-v2"
 
 PHASE1_QA_BENCHMARKS: tuple[str, ...] = (
     "locomo",
@@ -47,54 +47,52 @@ PRIMARY_QA_METRIC_BY_BENCHMARK: Mapping[str, str] = {
 
 _TASK_TO_CAPABILITY: Mapping[str, Mapping[str, str]] = {
     "locomo": {
-        "1": "multi_evidence_reasoning",
-        "2": "temporal_sequence_reasoning",
-        "3": "memory_grounded_inference_application",
-        "4": "direct_recall",
+        "1": "multi_evidence_recall_reasoning",
+        "2": "temporal_event_reasoning",
+        "3": "generalization_application",
+        "4": "factual_recall_extraction",
     },
     "longmemeval": {
-        "single-session-user": "direct_recall",
-        "single-session-assistant": "direct_recall",
-        "single-session-preference": "memory_grounded_inference_application",
-        "multi-session": "multi_evidence_reasoning",
-        "knowledge-update": "dynamic_update",
-        "temporal-reasoning": "temporal_sequence_reasoning",
-        "abstention": "epistemic_boundary",
+        "single-session-user": "factual_recall_extraction",
+        "single-session-assistant": "factual_recall_extraction",
+        "single-session-preference": "personalization",
+        "multi-session": "multi_evidence_recall_reasoning",
+        "knowledge-update": "memory_revision",
+        "temporal-reasoning": "temporal_event_reasoning",
+        "abstention": "answerability_boundary",
     },
     "beam": {
-        "abstention": "epistemic_boundary",
-        "contradiction_resolution": "conflict_resolution",
-        "event_ordering": "temporal_sequence_reasoning",
-        "information_extraction": "direct_recall",
+        "abstention": "answerability_boundary",
+        "contradiction_resolution": "memory_revision",
+        "event_ordering": "temporal_event_reasoning",
+        "information_extraction": "factual_recall_extraction",
         "instruction_following": "instruction_following",
-        "knowledge_update": "dynamic_update",
-        "multi_session_reasoning": "multi_evidence_reasoning",
-        "preference_following": "memory_grounded_inference_application",
-        "summarization": "summarization",
-        "temporal_reasoning": "temporal_sequence_reasoning",
+        "knowledge_update": "memory_revision",
+        "multi_session_reasoning": "multi_evidence_recall_reasoning",
+        "preference_following": "personalization",
+        "summarization": "long_horizon_summarization",
+        "temporal_reasoning": "temporal_event_reasoning",
     },
     "membench": {
-        "simple": "direct_recall",
-        "conditional": "multi_evidence_reasoning",
-        "comparative": "multi_evidence_reasoning",
-        "aggregative": "multi_evidence_reasoning",
-        "post_processing": "multi_evidence_reasoning",
-        "lowlevel_rec": "multi_evidence_reasoning",
-        "RecMultiSession": "multi_evidence_reasoning",
-        "knowledge_update": "dynamic_update",
-        "highlevel": "memory_grounded_inference_application",
-        "highlevel_rec": "memory_grounded_inference_application",
+        "simple": "factual_recall_extraction",
+        "conditional": "multi_evidence_recall_reasoning",
+        "comparative": "multi_evidence_recall_reasoning",
+        "aggregative": "multi_evidence_recall_reasoning",
+        "post_processing": "multi_evidence_recall_reasoning",
+        "lowlevel_rec": "factual_recall_extraction",
+        "RecMultiSession": "multi_evidence_recall_reasoning",
+        "knowledge_update": "memory_revision",
+        "highlevel": "personalization",
+        "highlevel_rec": "personalization",
         "noisy": "noise_robustness",
     },
     "halumem": {
-        "Basic Fact Recall": "direct_recall",
-        "Multi-hop Inference": "multi_evidence_reasoning",
-        "Dynamic Update": "dynamic_update",
-        "Memory Boundary": "epistemic_boundary",
-        "Memory Conflict": "conflict_resolution",
-        "Generalization & Application": (
-            "memory_grounded_inference_application"
-        ),
+        "Basic Fact Recall": "factual_recall_extraction",
+        "Multi-hop Inference": "multi_evidence_recall_reasoning",
+        "Dynamic Update": "memory_revision",
+        "Memory Boundary": "answerability_boundary",
+        "Memory Conflict": "memory_revision",
+        "Generalization & Application": "generalization_application",
     },
 }
 

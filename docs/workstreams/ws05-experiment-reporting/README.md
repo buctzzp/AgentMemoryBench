@@ -8,10 +8,10 @@ created: 2026-07-05
 
 ## Codex 恢复胶囊（2026-08-26）
 
-- **当前目标**：runtime/观测、十家参数/source/embedding provenance 与 isolation 并行门已关闭；
-  真实 API 仍暂停。当前先关闭
-  [QA task aggregation v1](branches/qa-task-aggregation/README.md)，再恢复“公开输入代表
-  isolation → 分批预算 → 同 run resume”的成本校准身份与命令面。
+- **当前目标**：runtime/观测、十家参数/source/embedding provenance、isolation 并行门与
+  [QA task aggregation v2](branches/qa-task-aggregation/README.md) 已关闭；真实 API 仍暂停。
+  当前先补正式 cohort receipt 与 paired bootstrap，再恢复“公开输入代表 isolation → 分批预算 →
+  同 run resume”的成本校准身份与命令面。
 - **当前批次**：
   [runtime 配置与观测 M0-M5](branches/runtime-config-and-observability/plan.md) 已完成无 API验收；
   [ws05.1 method profile provenance](../ws05.1-method-profile-provenance/README.md) 的 M0/M0.5、
@@ -32,8 +32,8 @@ created: 2026-07-05
   授权/执行。
 - **禁止事项**：用户重新批准规模/run_id 前，不恢复真实 pilot；不得改写旧
   artifact、把旧 embedding build 重标为新 controlled identity，或用 lineage 伪造 metric 资格。
-- **当前动作**：QA artifact-only M0 已验收；下一步完成正式 cohort identity receipt、报告写出面与
-  paired cluster bootstrap，再继续零 API 核对 staged calibration 设计。现有 `predict pilot` 只含固定首 isolation，
+- **当前动作**：QA artifact-only M0/M0-R1 v2 已验收；下一步完成正式 cohort identity receipt、
+  报告写出面与 paired cluster bootstrap，再继续零 API核对 staged calibration 设计。现有 `predict pilot` 只含固定首 isolation，
   `predict formal --conversation-budget` 虽可续跑却绑定正式 runtime；两者均不能直接冒充用户提出的
   “代表 isolation 先跑 1 个、随后同 cheap-runtime run 继续”的身份。模型、规模、run-id 与新命令面
   未经用户裁定前不创建 run。M11 前的 method state 不 resume；作者校准与主 controlled run 分开。
@@ -54,6 +54,11 @@ created: 2026-07-05
   [QA task aggregation](branches/qa-task-aggregation/README.md)：五 benchmark 总榜各一票；能力榜
   使用唯一 primary capability 映射和 benchmark 内 native-task macro；固定十家 roster 缺格即
   incomplete。pilot/smoke 只能验管线，正式排名要求完整 `formal` cohort。
+- 2026-08-26：M0-R1 进一步锁定七个跨 benchmark 能力与三个单 benchmark diagnostic：
+  Conflict 并入 memory revision；personalization 与 instruction following 分离；boundary 看最终
+  可答性而非空检索；题级 pooled micro 因异构 scorer 与 73.78% MemBench+HaluMem 隐含权重，
+  只能作 supplementary。稳定入口见
+  [`qa-task-taxonomy-and-aggregation.md`](../../survey/qa-task-taxonomy-and-aggregation.md)。
 - 2026-08-25：用户提出成本校准应先按 public input shape 选择有代表性的完整 isolation，以每次
   一个未完成 isolation 的预算运行，并在同一 run 上 resume，兼顾成本外推与真实续跑验收；实际
   provider/model 在 API 前另行指定。架构核对确认内部字段仍为 `max_new_conversations`，当前正式
@@ -121,7 +126,7 @@ created: 2026-07-05
 
 ### 开跑前 QA 聚合合同
 
-- [x] QA task taxonomy v1：五家原生 task、互斥 primary capability、secondary diagnostic axes。
+- [x] QA task taxonomy v2：五家原生 task、真实例子、七类跨 benchmark 能力与三个 diagnostic。
 - [x] 五 benchmark 等权 overall + capability rank-score artifact-only 内核与强反例。
 - [ ] 正式 cohort identity receipt、isolation-level paired bootstrap 与报告表面。
 

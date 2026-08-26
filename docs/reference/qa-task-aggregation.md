@@ -1,7 +1,8 @@
 # Phase 1 QA 任务类型与聚合契约
 
-> 当前版本：`qa-task-aggregation-v1`（2026-08-26）。这是主实验报告的稳定入口；研究证据与
-> 备选方案见 [ws05 支线 note](../workstreams/ws05-experiment-reporting/branches/qa-task-aggregation/notes/2026-08-26-qa-task-aggregation-research.md)。
+> 当前版本：`qa-task-aggregation-v2`（2026-08-26）。这是主实验报告的稳定计算入口；五家
+> task 的定义、真实例子与权重解释见
+> [survey 横向入口](../survey/qa-task-taxonomy-and-aggregation.md)，研究证据与旧 v1 见 ws05 支线。
 
 ## 1. 主榜边界
 
@@ -21,20 +22,20 @@ N/A 不扣 QA 分，也不得为填榜伪造能力。
 
 | capability | LoCoMo | LongMemEval | BEAM | MemBench | HaluMem |
 |---|---|---|---|---|---|
-| direct recall | 4 | single-session-user, single-session-assistant | information_extraction | simple | Basic Fact Recall |
-| multi-evidence reasoning | 1 | multi-session | multi_session_reasoning | conditional, comparative, aggregative, post_processing, lowlevel_rec, RecMultiSession | Multi-hop Inference |
-| temporal/sequence reasoning | 2 | temporal-reasoning | temporal_reasoning, event_ordering | — | — |
-| dynamic update | — | knowledge-update | knowledge_update | knowledge_update | Dynamic Update |
-| memory-grounded inference/application | 3 | single-session-preference | preference_following | highlevel, highlevel_rec | Generalization & Application |
-| conflict resolution | — | — | contradiction_resolution | — | Memory Conflict |
-| epistemic boundary | — | question_id suffix `_abs` | abstention | — | Memory Boundary |
+| factual recall / extraction | 4 | single-session-user, single-session-assistant | information_extraction | simple, lowlevel_rec | Basic Fact Recall |
+| multi-evidence recall / reasoning | 1 | multi-session | multi_session_reasoning | conditional, comparative, aggregative, post_processing, RecMultiSession | Multi-hop Inference |
+| temporal / event reasoning | 2 | temporal-reasoning | temporal_reasoning, event_ordering | — | — |
+| memory revision | — | knowledge-update | knowledge_update, contradiction_resolution | knowledge_update | Dynamic Update, Memory Conflict |
+| personalization | — | single-session-preference | preference_following | highlevel, highlevel_rec | — |
+| answerability boundary | — | question_id suffix `_abs` | abstention | — | Memory Boundary |
+| generalization / application | 3 | — | — | — | Generalization & Application |
 | instruction following | — | — | instruction_following | — | — |
-| summarization | — | — | summarization | — | — |
+| long-horizon summarization | — | — | summarization | — | — |
 | noise robustness | — | — | — | noisy | — |
 
-每题恰好一个 primary capability。instruction following 不与 personalization 合并；role、speaker、
-单/多 session、source role、fact/preference/event 和 noise/conflict/abstention 只作为 secondary
-diagnostic axis。
+每题恰好一个 primary capability。Conflict 保留 native 名但并入 memory revision；instruction
+following 不与 personalization 合并；`highlevel/emotion` 等 scenario 只作 secondary diagnostic。
+边界题的正确性不要求 method 检索为空，只要求最终回答在证据不足时不编造。
 
 ## 4. 公式
 
@@ -48,6 +49,10 @@ overall_qa            = 100 * 五个 benchmark_rank_score 的平均
 能力族先在每个 benchmark 内对原生 task 做宏平均，再在该 benchmark 内对十家 method 排名，
 最后对 contributing benchmarks 等权平均。一个 benchmark 对一个能力族最多一票。只有一家
 benchmark 的能力只作 diagnostic，不产生 cross-benchmark capability score。
+
+禁止把五家逐题分数直接混池。完整题池会让 MemBench 与 HaluMem 因发布题量合计获得 73.78%
+权重，同时把 LoCoMo F1、BEAM 0/0.5/1 rubric/tau 与三种 accuracy 当成同一尺度。题级 pooled
+micro 只可作为明确标注的 “released-item population” sensitivity，不能替代五 benchmark 等权主榜。
 
 ## 5. QA primary score
 

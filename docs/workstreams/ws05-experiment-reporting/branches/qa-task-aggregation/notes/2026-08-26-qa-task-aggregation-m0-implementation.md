@@ -1,5 +1,8 @@
 # 2026-08-26 QA task aggregation M0 实现验收
 
+> 历史 v1 实现收据：artifact/identity/rank 机制仍有效；taxonomy 与 contract version 已由
+> [M0-R1 v2](2026-08-26-qa-task-taxonomy-v2-ruling.md) 取代。
+
 ## 1. 交付
 
 - `memory_benchmark.analysis.qa_task_aggregation` 从标准不可变 artifact 重建逐题 QA 分数、原生

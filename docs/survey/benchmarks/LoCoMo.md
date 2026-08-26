@@ -1,6 +1,6 @@
 # LoCoMo Benchmark 调研卡片
 
-更新日期：2026-07-17
+更新日期：2026-08-26（QA task taxonomy 与真实例子刷新）
 
 ## 1. 一句话结论
 
@@ -77,6 +77,23 @@ QA category 实测映射：
 `qa.answer` 与 `qa.evidence` 是 evaluator-only 私有字段。evidence 为 `dia_id` 列表；
 1,986 题全部是 list，其中 4 题为空列表。当前 Phase 1 既有决策跳过 category 5，故
 正式 QA 分母为 1,540，而非官方五类总计 1,986。
+
+### 2.3 QA 任务类型与真实例子（2026-08-26）
+
+数字到语义的映射来自论文任务定义、官方 scorer 分支和 current 数据三方交叉核验；不是仅凭
+category 数字猜测。下表的 answer/evidence 只用于解释 evaluator 语义，运行时仍是私有标签。
+
+| category | 定义 | current 数据例子 | QA 聚合能力 |
+| --- | --- | --- | --- |
+| `4` | Single-hop：从一个局部对话事实直接作答 | `conv-26 / qa[82]`：“慈善赛为何提高意识？”→ `mental health`，evidence=`D2:2` | `factual_recall_extraction` |
+| `1` | Multi-hop：综合多个 session/utterance 的证据 | `conv-42 / qa[1]`：“Joanna 和 Nate 有哪些共同兴趣？”→ `Watching movies, making desserts`，evidence 横跨 D1/D3/D4/D10/D20 | `multi_evidence_recall_reasoning` |
+| `2` | Temporal：利用日期、先后或时间线回答 | `conv-43 / qa[20]`：“John 去 Chicago 前在哪座城市？”→ `Seattle` | `temporal_event_reasoning` |
+| `3` | Open-domain/commonsense：把人物记忆与常识结合，答案不在原文中逐字出现 | `conv-26 / qa[22]`：“Caroline 的书架上可能有 Dr. Seuss 吗？”→ 根据她收藏经典童书推断 `Yes` | `generalization_application` |
+| `5` | Adversarial/unanswerable：故意把人物或事实错配，期待指出未提及 | `conv-26 / qa[192]` 询问 `Caroline's son`，但相关对话实际属于 Melanie | Phase 1 当前排除；若未来恢复，候选 `answerability_boundary` |
+
+category 3 有 4 条 `evidence=[]`：仍保留在原生 QA 分母，但报告应标注其 memory grounding 不充分。
+category 5 的 446 条多数使用 `adversarial_answer` 而非普通 `answer`，恢复前必须单独处理 schema 与
+拒答 scorer，不能直接塞进现行 1–4 聚合。
 
 ## 3. Evaluation 流程
 

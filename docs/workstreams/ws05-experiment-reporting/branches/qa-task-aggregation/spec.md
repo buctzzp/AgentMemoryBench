@@ -1,4 +1,4 @@
-# QA Task Aggregation v1 Spec
+# QA Task Aggregation v2 Spec
 
 ## 1. 研究问题
 
@@ -6,8 +6,8 @@
 
 1. **整体 QA**：在固定五 benchmark、固定十家 method、相同 controlled 运行身份下，哪家 method
    的总体 QA/readout 表现更好？
-2. **能力画像**：哪家 method 在直接回忆、多证据整合、时间/顺序推理、动态更新等可跨数据集复现的
-   能力上更强？
+2. **能力画像**：哪家 method 在事实回顾、多证据整合、时间/顺序、记忆修订、个性化、可答性
+   边界和泛化应用等可跨数据集复现的能力上更强？
 
 检索级 lineage、HaluMem session extraction/update 和 memory-type 不属于这两个 estimand。
 
@@ -57,6 +57,10 @@ capability(m,t)    = 100 * mean_b(rank_score(slice(m,b,t)))
 这避免某 benchmark 因题量或映射进来的子类型更多而增权。一个跨 benchmark capability 至少需要
 两家 benchmark；否则只输出 native diagnostic。
 
+现行 v2 共七类跨 benchmark 能力；instruction following、长期总结和 noise robustness 因仅有
+一家 benchmark 覆盖，只输出 diagnostic。Conflict 不另立跨 benchmark 父类，而是作为 native
+task 进入 memory revision；preference/personalization 与显式 instruction 仍保持分离。
+
 ## 5. 统计与解释
 
 - 95% 区间按 benchmark 的 isolation unit 做**配对 cluster bootstrap**；同一次抽样对十家 method
@@ -79,3 +83,4 @@ capability(m,t)    = 100 * mean_b(rank_score(slice(m,b,t)))
 6. 缺格后缩小分母、补 0 或用 table min/max normalization；
 7. pilot/smoke 与 formal，或不同 model/prompt/judge identity 混成一个 cohort；
 8. 把单 benchmark diagnostic 宣称成跨 benchmark 能力分。
+9. 把“检索结果非空”直接判成 boundary 失败，或把题级 pooled micro 冒充五 benchmark 等权主榜。

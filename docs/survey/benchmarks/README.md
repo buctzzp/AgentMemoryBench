@@ -65,13 +65,13 @@ metric 覆盖和成本评估准备：
 | --- | --- |
 | Benchmark | LoCoMo、LongMemEval、HaluMem、BEAM、MemBench |
 | 学术/论文型 Method | A-Mem、MemoryOS、MemOS、LightMem、SimpleMem |
-| 工程/生产生态型 Method | Mem0、Letta/MemGPT、Cognee、LangMem、Supermemory |
-| 明确排除 | Zep；Graphiti 也不作为替代，因为仍属于 Zep 体系 |
+| 工程/生产生态型 Method | Mem0、Letta/MemGPT、EverOS、LangMem、Graphiti OSS |
+| source-gate 退出 | Cognee、Supermemory；历史审计保留但不进入当前十家 roster |
+| 身份边界 | Graphiti 只代表 Apache-2.0 OSS，不代表 Zep hosted product，也不宣称 Zep parity |
 
-该范围是目标矩阵，不表示上述 benchmark / method 均已完成 adapter 或真实实验。
-Supermemory 已纳入 Phase 1，但只评估 self-host/local OSS 版本；如果 local API 对某些
-benchmark 的 provenance、session/update trace 或效率观测支持不足，需要记录为 gap，
-再与用户讨论取舍。
+该范围是当前目标矩阵，不表示已经完成正式实验。旧 Cognee/Supermemory roster 属 source-gate
+前的历史；2026-08-09 复核后由 EverOS 与 Graphiti OSS 填入工程型五格，具体 identity 以
+`AGENTS.md` 与 method integration 稳定页为准。
 
 ## 汇报简报
 

@@ -24,14 +24,18 @@ Recall@K、Precision@K、HaluMem Extraction、HaluMem Updating 或 memory-type�
 - 缺 run、失败 run、identity 不可比都记 incomplete；不补零、不按剩余格平均。最终榜只接受
   10 method × 5 benchmark 全覆盖的正式 cohort。
 - 单 benchmark 独有能力只作 diagnostic，不伪装成“跨 benchmark 能力分”。
+- v2 把 Conflict 合并进 memory revision，把 personalization 与 instruction following 分离，并把
+  LoCoMo commonsense/HaluMem generalization 从偏好类中拆成 generalization/application。
+- 逐题 pooled micro 不是主榜：五家 metric/rubric 语义不同，且发布题量会让 MemBench+HaluMem
+  获得 73.78% 隐含权重。主榜继续五 benchmark 等权；题多只通过 cluster CI 提高精度。
 - 现行算法与映射见 [稳定契约](../../../../reference/qa-task-aggregation.md)。
 
 ## 当前断点
 
-M0 已验收：稳定 taxonomy、artifact-only 聚合内核、BEAM event-ordering 有效 score selector、
-固定 roster/identity 完成门和强反例均已落盘。真实 API 与 pilot 仍暂停；下一步是 M1，在首批
-formal 前补 machine-readable cohort receipt 与报告写出面，再把 paired cluster bootstrap 接到
-完整 cohort，而不是让 smoke/pilot 先生成方法排名。
+M0-R1 已验收：五张 benchmark 卡、survey 横向入口与 v2 计算合同同步升级，强反例锁住
+Conflict/update、personalization/instruction、generalization 和 MemBench recommendation recall
+边界。当前回到 M1：首批 formal 前补 machine-readable cohort receipt 与报告写出面，再把
+paired cluster bootstrap 接到完整 cohort；真实 API 与 pilot 仍暂停。
 
 ## 文档索引
 
@@ -40,3 +44,5 @@ formal 前补 machine-readable cohort receipt 与报告写出面，再把 paired
 - [研究与裁决证据](notes/2026-08-26-qa-task-aggregation-research.md)：五家 task census、外部方法学、
   备选方案与取舍。
 - [M0 实现验收](notes/2026-08-26-qa-task-aggregation-m0-implementation.md)：实现范围、测试与发布边界。
+- [M0-R1 v2 裁决](notes/2026-08-26-qa-task-taxonomy-v2-ruling.md)：五家逐类型一手复核、用户问题与
+  v1→v2 变更理由。
