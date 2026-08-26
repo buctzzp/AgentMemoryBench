@@ -29,7 +29,7 @@ from memory_benchmark.core.provider_protocol import (
     UnitRef,
 )
 from memory_benchmark.core.validators import validate_dataset, validate_no_private_keys
-from memory_benchmark.observability import RunContext, method_log_scope
+from memory_benchmark.observability import ProgressReporter, RunContext, method_log_scope
 from memory_benchmark.observability.efficiency import (
     EfficiencyArtifactStore,
     EfficiencyCollector,
@@ -61,6 +61,15 @@ from memory_benchmark.runners.prediction import (
     _record_framework_answer_llm_call,
     _validate_consume_granularity,
     _validate_protocol_version,
+)
+from memory_benchmark.runners.prediction_parallel import (
+    _WORKER_HEARTBEAT_POLL_SECONDS,
+    _WorkerHeartbeat,
+    _drain_worker_heartbeats,
+    _refresh_worker_heartbeats,
+)
+from memory_benchmark.runners.prediction_observability import (
+    _write_prediction_efficiency_summaries,
 )
 from memory_benchmark.storage import (
     ExperimentPaths,
@@ -258,97 +267,229 @@ def run_operation_level_predictions(
             conversation_status=conversation_status,
             policy=policy,
         )
-        needs_provider = bool(pending_conversations)
-        if uses_factory_workers:
-            _run_parallel_operation_conversations(
-                pending_conversations=pending_conversations,
-                selected_conversations=selected_conversations,
-                conversation_status=conversation_status,
-                prediction_records=prediction_records,
-                session_report_records=session_report_records,
-                update_probe_records=update_probe_records,
-                answer_prompt_records=answer_prompt_records,
-                provider_factory=provider_factory,
-                build_context_template=build_context_template,
-                run_context=run_context,
-                policy=policy,
-                answer_reader=answer_reader,
-                unified_prompt_builder=unified_prompt_builder,
-                efficiency_collector=efficiency_collector,
-                efficiency_store=efficiency_store,
-                protocol_version=protocol_version,
-                consume_granularity=consume_granularity,
-                paths=paths,
-                logger=logger,
-            )
-        elif needs_provider:
-            assert provider is not None
-            try:
-                provider.prepare(run_context)
-            except Exception:
-                provider.cleanup()
-                raise
+        completed_before = [
+            conversation
+            for conversation in selected_conversations
+            if conversation_status.get(conversation.conversation_id, {}).get("status")
+            == _STATUS_COMPLETED
+        ]
+        progress_conversations = completed_before + pending_conversations
+        progress_question_ids = _selected_operation_question_ids(
+            progress_conversations
+        )
+        logger.info(
+            "[bold]Prediction run[/bold] "
+            f"benchmark={dataset.dataset_name} method={run_context.method_name} "
+            f"conversations={len(progress_conversations)} "
+            f"questions={len(progress_question_ids)}"
+        )
 
-        if not uses_factory_workers:
-            assert provider is not None
-            for conversation in pending_conversations:
+        with ProgressReporter(
+            paths.progress_path,
+            enabled=policy.progress_enabled,
+        ) as progress:
+            progress.start_conversations(len(progress_conversations))
+            progress.start_questions(len(progress_question_ids))
+            progress.update_conversations(
+                completed=len(completed_before),
+                total=len(progress_conversations),
+                current_conversation_id=None,
+            )
+            progress.update_questions(
+                completed=sum(
+                    1
+                    for question_id in progress_question_ids
+                    if question_id in prediction_records
+                ),
+                total=len(progress_question_ids),
+                current_conversation_id=None,
+                current_question_id=None,
+            )
+            progress.set_stage(
+                "Operation ingest + probes + answer",
+                step_index=1,
+                step_count=2,
+            )
+
+            needs_provider = bool(pending_conversations)
+            if uses_factory_workers:
+                _run_parallel_operation_conversations(
+                    pending_conversations=pending_conversations,
+                    selected_conversations=selected_conversations,
+                    conversation_status=conversation_status,
+                    prediction_records=prediction_records,
+                    session_report_records=session_report_records,
+                    update_probe_records=update_probe_records,
+                    answer_prompt_records=answer_prompt_records,
+                    provider_factory=provider_factory,
+                    build_context_template=build_context_template,
+                    run_context=run_context,
+                    policy=policy,
+                    answer_reader=answer_reader,
+                    unified_prompt_builder=unified_prompt_builder,
+                    efficiency_collector=efficiency_collector,
+                    efficiency_store=efficiency_store,
+                    protocol_version=protocol_version,
+                    consume_granularity=consume_granularity,
+                    paths=paths,
+                    logger=logger,
+                    progress=progress,
+                    progress_conversation_ids={
+                        conversation.conversation_id
+                        for conversation in progress_conversations
+                    },
+                    progress_question_ids=set(progress_question_ids),
+                )
+            elif needs_provider:
+                assert provider is not None
                 try:
-                    failure_context: dict[str, str] = {
-                        "stage": "operation_conversation",
+                    provider.prepare(run_context)
+                except Exception:
+                    provider.cleanup()
+                    raise
+
+            if not uses_factory_workers:
+                assert provider is not None
+
+                def direct_heartbeat(heartbeat: _WorkerHeartbeat) -> None:
+                    """在非 factory 路径直接刷新公开进度与事件日志。"""
+
+                    progress.update_worker_heartbeat(
+                        **heartbeat.to_payload(),
+                        phase_elapsed_seconds=0.0,
+                    )
+                    logger.log_event(
+                        "isolated_worker_heartbeat",
+                        heartbeat.to_payload(),
+                    )
+
+                for conversation in pending_conversations:
+                    try:
+                        failure_context: dict[str, str] = {
+                            "stage": "operation_conversation",
+                        }
+                        conversation_observations = _run_operation_conversation(
+                            conversation=conversation,
+                            provider=provider,
+                            run_id=run_context.run_id,
+                            answer_reader=answer_reader,
+                            unified_prompt_builder=unified_prompt_builder,
+                            supports_extraction=provider.session_memory_report,
+                            session_report_records=session_report_records,
+                            update_probe_records=update_probe_records,
+                            prediction_records=prediction_records,
+                            answer_prompt_records=answer_prompt_records,
+                            efficiency_collector=efficiency_collector,
+                            failure_context=failure_context,
+                            worker_idx=0,
+                            heartbeat_sink=direct_heartbeat,
+                        )
+                    except Exception as exc:
+                        direct_heartbeat(
+                            _WorkerHeartbeat(
+                                worker_idx=0,
+                                phase="failed",
+                                conversation_id=conversation.conversation_id,
+                            )
+                        )
+                        conversation_status[conversation.conversation_id] = {
+                            "status": _STATUS_FAILED_INGEST,
+                            **failure_context,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                            "ingested": False,
+                        }
+                        atomic_write_json(
+                            paths.conversation_status_path,
+                            conversation_status,
+                        )
+                        logger.log_event(
+                            "conversation_failed",
+                            {
+                                "conversation_id": conversation.conversation_id,
+                                **failure_context,
+                                "error_type": type(exc).__name__,
+                                "error": str(exc),
+                            },
+                        )
+                        if failure_context.get("stage") != "provider_cleanup":
+                            try:
+                                provider.cleanup()
+                            except Exception as cleanup_exc:
+                                raise cleanup_exc from exc
+                        raise
+                    if efficiency_store is not None:
+                        efficiency_store.merge_observations(conversation_observations)
+                    conversation_status[conversation.conversation_id] = {
+                        "status": _STATUS_COMPLETED,
+                        "ingested": True,
                     }
-                    conversation_observations = _run_operation_conversation(
-                        conversation=conversation,
-                        provider=provider,
-                        run_id=run_context.run_id,
-                        answer_reader=answer_reader,
-                        unified_prompt_builder=unified_prompt_builder,
-                        supports_extraction=provider.session_memory_report,
+                    atomic_write_json(
+                        paths.conversation_status_path,
+                        conversation_status,
+                    )
+                    _write_operation_output_artifacts(
+                        paths=paths,
                         session_report_records=session_report_records,
                         update_probe_records=update_probe_records,
                         prediction_records=prediction_records,
                         answer_prompt_records=answer_prompt_records,
-                        efficiency_collector=efficiency_collector,
-                        failure_context=failure_context,
+                        selected_conversations=selected_conversations,
                     )
-                except Exception as exc:
-                    conversation_status[conversation.conversation_id] = {
-                        "status": _STATUS_FAILED_INGEST,
-                        **failure_context,
-                        "error_type": type(exc).__name__,
-                        "error": str(exc),
-                        "ingested": False,
-                    }
-                    atomic_write_json(paths.conversation_status_path, conversation_status)
-                    logger.log_event(
-                        "conversation_failed",
-                        {
-                            "conversation_id": conversation.conversation_id,
-                            **failure_context,
-                            "error_type": type(exc).__name__,
-                            "error": str(exc),
-                        },
+                    progress.update_conversations(
+                        completed=sum(
+                            1
+                            for item in progress_conversations
+                            if conversation_status.get(
+                                item.conversation_id,
+                                {},
+                            ).get("status")
+                            == _STATUS_COMPLETED
+                        ),
+                        total=len(progress_conversations),
+                        current_conversation_id=conversation.conversation_id,
                     )
-                    if failure_context.get("stage") != "provider_cleanup":
-                        try:
-                            provider.cleanup()
-                        except Exception as cleanup_exc:
-                            raise cleanup_exc from exc
-                    raise
-                if efficiency_store is not None:
-                    efficiency_store.merge_observations(conversation_observations)
-                conversation_status[conversation.conversation_id] = {
-                    "status": _STATUS_COMPLETED,
-                    "ingested": True,
-                }
-                atomic_write_json(paths.conversation_status_path, conversation_status)
-                _write_operation_output_artifacts(
-                    paths=paths,
-                    session_report_records=session_report_records,
-                    update_probe_records=update_probe_records,
-                    prediction_records=prediction_records,
-                    answer_prompt_records=answer_prompt_records,
-                    selected_conversations=selected_conversations,
-                )
+                    progress.update_questions(
+                        completed=sum(
+                            1
+                            for question_id in progress_question_ids
+                            if question_id in prediction_records
+                        ),
+                        total=len(progress_question_ids),
+                        current_conversation_id=conversation.conversation_id,
+                        current_question_id=None,
+                    )
+
+            progress.update_conversations(
+                completed=sum(
+                    1
+                    for conversation in progress_conversations
+                    if conversation_status.get(
+                        conversation.conversation_id,
+                        {},
+                    ).get("status")
+                    == _STATUS_COMPLETED
+                ),
+                total=len(progress_conversations),
+                current_conversation_id=None,
+            )
+            progress.update_questions(
+                completed=sum(
+                    1
+                    for question_id in progress_question_ids
+                    if question_id in prediction_records
+                ),
+                total=len(progress_question_ids),
+                current_conversation_id=None,
+                current_question_id=None,
+            )
+            progress.set_stage("Completed", step_index=2, step_count=2)
+
+        if efficiency_store is not None:
+            _write_prediction_efficiency_summaries(
+                paths=paths,
+                efficiency_store=efficiency_store,
+            )
 
         completed_conversations = sum(
             1
@@ -464,8 +605,15 @@ def _operation_worker_lane(
         | _OperationWorkerFailure
     ],
     cancellation_event: Event,
+    heartbeat_sink: Callable[[_WorkerHeartbeat], None] | None = None,
 ) -> None:
     """一个 worker 独占一份 runtime，并在 lane 内串行处理 UUID。"""
+
+    def emit(heartbeat: _WorkerHeartbeat) -> None:
+        """向 coordinator 发送公开 heartbeat；未启用时保持零副作用。"""
+
+        if heartbeat_sink is not None:
+            heartbeat_sink(heartbeat)
 
     worker_context = MethodBuildContext(
         config=build_context_template.config,
@@ -479,6 +627,7 @@ def _operation_worker_lane(
     )
     if cancellation_event.is_set():
         return
+    emit(_WorkerHeartbeat(worker_idx=worker_idx, phase="starting"))
     provider: MemoryProvider | None = None
     failure_context: dict[str, str] = {"stage": "provider_factory"}
     failure_conversation_id = conversations[0].conversation_id
@@ -515,6 +664,8 @@ def _operation_worker_lane(
                 efficiency_collector=efficiency_collector,
                 failure_context=failure_context,
                 cleanup_provider=False,
+                worker_idx=worker_idx,
+                heartbeat_sink=emit,
             )
             result_queue.put(
                 _OperationConversationBatch(
@@ -528,6 +679,13 @@ def _operation_worker_lane(
                 )
             )
     except BaseException as exc:
+        emit(
+            _WorkerHeartbeat(
+                worker_idx=worker_idx,
+                phase="failed",
+                conversation_id=failure_conversation_id,
+            )
+        )
         if provider is not None and failure_context.get("stage") != "provider_cleanup":
             try:
                 provider.cleanup()
@@ -547,6 +705,7 @@ def _operation_worker_lane(
     try:
         provider.cleanup()
     except BaseException as exc:
+        emit(_WorkerHeartbeat(worker_idx=worker_idx, phase="failed"))
         result_queue.put(
             _OperationWorkerFailure(
                 worker_idx=worker_idx,
@@ -578,6 +737,9 @@ def _run_parallel_operation_conversations(
     consume_granularity: str | None,
     paths: ExperimentPaths,
     logger: RunLogger,
+    progress: ProgressReporter,
+    progress_conversation_ids: set[str],
+    progress_question_ids: set[str],
 ) -> None:
     """并行调度 UUID；worker 不写 artifact，coordinator 稳定合并。"""
 
@@ -595,8 +757,33 @@ def _run_parallel_operation_conversations(
         | _OperationConversationFailure
         | _OperationWorkerFailure
     ] = Queue()
+    heartbeat_queue: Queue[_WorkerHeartbeat] = Queue()
     cancellation_event = Event()
     first_error: BaseException | None = None
+
+    def update_global_progress(current_conversation_id: str | None) -> None:
+        """按已提交 checkpoint 刷新 run 级 conversation/question 计数。"""
+
+        progress.update_conversations(
+            completed=sum(
+                1
+                for conversation_id in progress_conversation_ids
+                if conversation_status.get(conversation_id, {}).get("status")
+                == _STATUS_COMPLETED
+            ),
+            total=len(progress_conversation_ids),
+            current_conversation_id=current_conversation_id,
+        )
+        progress.update_questions(
+            completed=sum(
+                1
+                for question_id in progress_question_ids
+                if question_id in prediction_records
+            ),
+            total=len(progress_question_ids),
+            current_conversation_id=current_conversation_id,
+            current_question_id=None,
+        )
 
     def persist_result(
         result: (
@@ -643,6 +830,7 @@ def _run_parallel_operation_conversations(
                     "error": str(result.error),
                 },
             )
+            update_global_progress(result.conversation_id)
             return
         session_report_records.extend(result.session_reports)
         update_probe_records.extend(result.update_probes)
@@ -682,6 +870,7 @@ def _run_parallel_operation_conversations(
                 "conversation_id": result.conversation_id,
             },
         )
+        update_global_progress(result.conversation_id)
 
     with ThreadPoolExecutor(max_workers=len(chunks)) as executor:
         futures: set[Future[None]] = {
@@ -699,12 +888,28 @@ def _run_parallel_operation_conversations(
                 consume_granularity=consume_granularity,
                 result_queue=result_queue,
                 cancellation_event=cancellation_event,
+                heartbeat_sink=heartbeat_queue.put,
             )
             for worker_idx, conversations in chunks
         }
         pending = set(futures)
+        latest_by_worker: dict[int, tuple[_WorkerHeartbeat, float]] = {}
         while pending:
-            _, pending = wait(pending, timeout=0.1)
+            _, pending = wait(
+                pending,
+                timeout=_WORKER_HEARTBEAT_POLL_SECONDS,
+            )
+            _drain_worker_heartbeats(
+                heartbeat_queue=heartbeat_queue,
+                latest_by_worker=latest_by_worker,
+                progress=progress,
+                logger=logger,
+            )
+            if pending:
+                _refresh_worker_heartbeats(
+                    latest_by_worker=latest_by_worker,
+                    progress=progress,
+                )
             while True:
                 try:
                     persist_result(result_queue.get_nowait())
@@ -715,6 +920,12 @@ def _run_parallel_operation_conversations(
                 persist_result(result_queue.get_nowait())
             except Empty:
                 break
+        _drain_worker_heartbeats(
+            heartbeat_queue=heartbeat_queue,
+            latest_by_worker=latest_by_worker,
+            progress=progress,
+            logger=logger,
+        )
         for future in futures:
             future.result()
     if first_error is not None:
@@ -776,6 +987,8 @@ def _run_operation_conversation(
     efficiency_collector: EfficiencyCollector | None = None,
     failure_context: dict[str, str],
     cleanup_provider: bool = True,
+    worker_idx: int = 0,
+    heartbeat_sink: Callable[[_WorkerHeartbeat], None] | None = None,
 ) -> list[EfficiencyObservation]:
     """按 spec S4.2 驱动单个 HaluMem user，并采集效率 observation。
 
@@ -786,12 +999,34 @@ def _run_operation_conversation(
     conversation 采集到的全部 observation，由调用方合并进 EfficiencyArtifactStore。
     """
 
+    def emit(heartbeat: _WorkerHeartbeat) -> None:
+        """发送公开 session/turn/question 进度，不携带 evaluator 私有字段。"""
+
+        if heartbeat_sink is not None:
+            heartbeat_sink(heartbeat)
+
     observations: list[EfficiencyObservation] = []
     enabled = efficiency_collector is not None and efficiency_collector.enabled
     isolation_key = default_isolation_key(run_id, conversation.conversation_id)
     questions_by_session = _questions_by_session(conversation)
     aggregator = GranularityAggregator(provider.consume_granularity)
+    turn_total = sum(len(session.turns) for session in conversation.sessions)
+    question_total = len(_selected_operation_question_ids([conversation]))
+    turn_completed = 0
+    question_completed = 0
     for session in conversation.sessions:
+        emit(
+            _WorkerHeartbeat(
+                worker_idx=worker_idx,
+                phase="ingesting",
+                conversation_id=conversation.conversation_id,
+                current_session_id=session.session_id,
+                turn_completed=turn_completed,
+                turn_total=turn_total,
+                question_completed=question_completed,
+                question_total=question_total,
+            )
+        )
         if enabled:
             with efficiency_collector.conversation_scope(
                 conversation.conversation_id,
@@ -823,6 +1058,19 @@ def _run_operation_conversation(
                 failure_context=failure_context,
                 efficiency_collector=None,
             )
+        turn_completed += len(session.turns)
+        emit(
+            _WorkerHeartbeat(
+                worker_idx=worker_idx,
+                phase="ingesting",
+                conversation_id=conversation.conversation_id,
+                current_session_id=session.session_id,
+                turn_completed=turn_completed,
+                turn_total=turn_total,
+                question_completed=question_completed,
+                question_total=question_total,
+            )
+        )
         if generated:
             continue
 
@@ -834,6 +1082,19 @@ def _run_operation_conversation(
                 stage="question_answer",
                 session_id=session.session_id,
                 question_id=question.question_id,
+            )
+            emit(
+                _WorkerHeartbeat(
+                    worker_idx=worker_idx,
+                    phase="answering",
+                    conversation_id=conversation.conversation_id,
+                    current_session_id=session.session_id,
+                    turn_completed=turn_completed,
+                    turn_total=turn_total,
+                    question_completed=question_completed,
+                    question_total=question_total,
+                    current_question_id=question.question_id,
+                )
             )
             if enabled:
                 with efficiency_collector.question_scope(
@@ -862,6 +1123,19 @@ def _run_operation_conversation(
                     prediction_records=prediction_records,
                     answer_prompt_records=answer_prompt_records,
                 )
+            question_completed += 1
+            emit(
+                _WorkerHeartbeat(
+                    worker_idx=worker_idx,
+                    phase="answering",
+                    conversation_id=conversation.conversation_id,
+                    current_session_id=session.session_id,
+                    turn_completed=turn_completed,
+                    turn_total=turn_total,
+                    question_completed=question_completed,
+                    question_total=question_total,
+                )
+            )
 
     _set_operation_failure_context(
         failure_context,
@@ -886,6 +1160,17 @@ def _run_operation_conversation(
             stage="provider_cleanup",
         )
         provider.cleanup()
+    emit(
+        _WorkerHeartbeat(
+            worker_idx=worker_idx,
+            phase="completed",
+            conversation_id=conversation.conversation_id,
+            turn_completed=turn_completed,
+            turn_total=turn_total,
+            question_completed=question_completed,
+            question_total=question_total,
+        )
+    )
     return observations
 
 

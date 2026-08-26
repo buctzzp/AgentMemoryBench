@@ -44,9 +44,11 @@ created: 2026-07-05
   [formal isolation selection](notes/2026-08-26-formal-isolation-selection.md)。真正 QA 收据仍须显式
   输入 formal run 目录，不能用 smoke/pilot 伪造；M2 paired cluster bootstrap 尚未开工。真实 API
   LightMem 首批五格现已按公开 shape 锁定 Mimo calibration cohort、run id 与 `workers=10` 分批预算，
-  见 [LightMem Mimo cohort](notes/2026-08-26-lightmem-mimo-calibration-cohort.md)。开跑前只剩用户确认
-  完整 isolation 规模（尤其 HaluMem 3,156 turns/169 QA 与 LoCoMo 158 QA）并明确授权真实 API。
-  M11 前的 method state 不 resume；作者校准、Mimo calibration 与主 controlled run 分开。
+  见 [LightMem Mimo calibration 支线](branches/lightmem-mimo-calibration/README.md)。首批五格
+  prediction 已全部完成且 conversation/question 零失败；HaluMem operation-level 进度、效率
+  派生汇总与五格 artifact 字段门已闭合，下一步是先核 metric/N/A 与 judge call 数，再由用户
+  确认 calibration evaluator。M11 前的 method state 不 resume；作者校准、Mimo calibration
+  与主 controlled run 分开。
 
 ## 目标
 

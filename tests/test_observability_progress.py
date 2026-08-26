@@ -244,6 +244,7 @@ class ProgressReporterTests(unittest.TestCase):
                     worker_idx=1,
                     phase="answering",
                     conversation_id="conv-2",
+                    current_session_id="session-7",
                     turn_completed=4,
                     turn_total=4,
                     question_completed=0,
@@ -255,11 +256,22 @@ class ProgressReporterTests(unittest.TestCase):
             snapshot = self._read_snapshot(progress_path)
             worker = snapshot["workers"]["1"]
             self.assertEqual(worker["phase"], "answering")
+            self.assertEqual(worker["current_session_id"], "session-7")
             self.assertEqual(worker["phase_elapsed_seconds"], 1.235)
             self.assertEqual(snapshot["active_worker_count"], 1)
             self.assertEqual(snapshot["current_worker_idx"], 1)
             self.assertEqual(snapshot["conversation_completed"], 0)
             self.assertEqual(snapshot["question_completed"], 0)
+            activity = next(
+                task
+                for task in reporter.progress.tasks
+                if task.description.startswith("Activity |")
+            )
+            self.assertIn("session=session-7", activity.description)
+            self.assertIn("question=conv-2:q1", activity.description)
+            self.assertIn("questions", activity.description)
+            self.assertEqual(activity.completed, 0)
+            self.assertEqual(activity.total, 1)
 
 
 if __name__ == "__main__":

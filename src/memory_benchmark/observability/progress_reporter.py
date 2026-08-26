@@ -76,6 +76,7 @@ class ProgressReporter:
             "question_completed": 0,
             "question_total": 0,
             "current_conversation_id": None,
+            "current_session_id": None,
             "current_question_id": None,
             "current_worker_idx": None,
             "active_worker_count": 0,
@@ -97,6 +98,7 @@ class ProgressReporter:
         self._stage_task_id: TaskID | None = None
         self._conversation_task_id: TaskID | None = None
         self._question_task_id: TaskID | None = None
+        self._activity_task_id: TaskID | None = None
 
     def __enter__(self) -> "ProgressReporter":
         """启动 Rich 进度条上下文。
@@ -273,6 +275,7 @@ class ProgressReporter:
         question_total: int,
         current_question_id: str | None,
         phase_elapsed_seconds: float,
+        current_session_id: str | None = None,
     ) -> None:
         """更新一个 isolated worker 的公开活性快照。
 
@@ -286,6 +289,7 @@ class ProgressReporter:
         workers[str(worker_idx)] = {
             "phase": phase,
             "conversation_id": conversation_id,
+            "current_session_id": current_session_id,
             "turn_completed": turn_completed,
             "turn_total": turn_total,
             "question_completed": question_completed,
@@ -296,6 +300,7 @@ class ProgressReporter:
         terminal_phases = {"completed", "failed", "cancelled"}
         self.snapshot["current_worker_idx"] = worker_idx
         self.snapshot["current_conversation_id"] = conversation_id
+        self.snapshot["current_session_id"] = current_session_id
         self.snapshot["current_question_id"] = current_question_id
         self.snapshot["active_worker_count"] = sum(
             1
@@ -313,6 +318,34 @@ class ProgressReporter:
             if conversation_id is not None:
                 description += f" conversation={conversation_id}"
             self.progress.update(self._stage_task_id, description=description)
+
+        activity_total = turn_total
+        activity_completed = turn_completed
+        activity_unit = "turns"
+        if phase == "answering":
+            activity_total = question_total
+            activity_completed = question_completed
+            activity_unit = "questions"
+        if activity_total > 0:
+            activity_description = f"Activity | worker={worker_idx} phase={phase}"
+            if current_session_id is not None:
+                activity_description += f" session={current_session_id}"
+            if current_question_id is not None:
+                activity_description += f" question={current_question_id}"
+            activity_description += f" | {activity_unit}"
+            if self._activity_task_id is None:
+                self._activity_task_id = self.progress.add_task(
+                    activity_description,
+                    total=activity_total,
+                    completed=activity_completed,
+                )
+            else:
+                self.progress.update(
+                    self._activity_task_id,
+                    description=activity_description,
+                    total=activity_total,
+                    completed=activity_completed,
+                )
         self._persist_snapshot()
 
     def flush(self) -> None:

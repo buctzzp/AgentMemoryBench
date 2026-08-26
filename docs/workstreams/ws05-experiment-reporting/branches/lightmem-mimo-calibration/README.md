@@ -1,0 +1,69 @@
+# LightMem × Mimo calibration 实验支线
+
+状态：`in-progress`
+
+父任务：[ws05 experiment reporting](../../README.md)
+
+## 目标与边界
+
+本支线负责 LightMem 在五个 Phase 1 benchmark 上的 `calibration` 实验：固定公开
+shape cohort，分批推进 prediction/resume，验收运行身份、公开 artifact 与效率观测，
+再执行适用的 evaluator 并形成预算外推收据。
+
+这不是 LightMem 第三方源码整治支线。只要 upstream 瑕疵不改变当前实验结果、成本或
+框架公开契约，就记录边界而不扩修；框架自己的进度、artifact、resume 与 evaluator
+缺口必须闭合。
+
+## 稳定身份
+
+- method：`lightmem`
+- API runtime：`opencodego/mimo-v2.5`，thinking disabled
+- profile：`calibration`，复用 LightMem 主 `[method]` 算法参数
+- execution identity：`workers=10`
+- ordered cohort、run id、分批预算与完整命令：见 [cohort](notes/cohort.md)
+- 首批 prediction 只推进 p50；MemBench 为四条 source lane 各推进一个 isolation。
+
+## 当前进度（2026-08-26）
+
+### 首批 prediction
+
+| benchmark | run id | 首批完成 | 问题 | 失败 | 状态 |
+| --- | --- | ---: | ---: | ---: | --- |
+| MemBench 0-10k | `lm-cal-mimo25-membench-0-10k-p5x4-v1-0-10k` | 4 | 4 | 0 | completed |
+| LongMemEval-S | `lm-cal-mimo25-lme-s-p5-v1-s-cleaned` | 1 | 1 | 0 | completed |
+| BEAM-100k | `lm-cal-mimo25-beam-100k-p5-v1-100k` | 1 | 20 | 0 | completed |
+| LoCoMo | `lm-cal-mimo25-locomo-p5-v1` | 1 | 158 | 0 | completed |
+| HaluMem-Medium | `lm-cal-mimo25-halumem-medium-p5-v1-medium` | 1 | 169 | 0 | completed |
+
+HaluMem 同时写出 70 条 session memory report、171 条 update probe 与 4,855 条
+prediction efficiency observation。五个 manifest 均已初验为 `calibration`、
+`opencodego/mimo-v2.5`、thinking disabled、workers 10；完整字段合理性验收已通过，
+current 全量零 API 门为 `2350 passed, 3 deselected, 25 warnings, 29 subtests passed`。
+
+### 当前施工
+
+- [x] 锁定公开 shape cohort、run id 与 `1 + 2 (+2)` / `4 + 8 (+8)` 预算。
+- [x] 完成首批五格 prediction，全部 conversation/question 零失败。
+- [x] 给通用 Rich progress 增加轻量 activity 细节。
+- [x] 给 HaluMem operation-level runner 接入 session/turn/question 进度与
+  `checkpoints/progress.json`。
+- [x] 完成五格 manifest、answer/readout、效率、时间/speaker、空值与边界字段
+  [验货收据](notes/first-batch-prediction-receipt.md)。
+- [ ] 字段门通过后执行适用 evaluator；此前不启动 judge API。
+- [ ] evaluator 验收后再裁定第二批 resume，不提前扩大。
+
+## 已知边界
+
+- 当前 vendored LightMem 在多 extraction batch 时会把合法全局 `source_id` 用错误的
+  局部上界修正后解析 `topic_id`。原始 `source_id` 仍用于 time、speaker 与 external
+  lineage，且 `topic_id` 在当前 profile 只写 payload、不参与更新、检索或 answer readout。
+  用户已裁定不扩修不影响结果的 method 内部瑕疵；本支线只保留此审计边界。
+- HaluMem operation-level 首批运行约 40 分钟。旧终端黑屏来自 runner 没接
+  `ProgressReporter`，不是 API 或 method 停滞；该框架缺口正在本批修复。
+
+## 当前断点
+
+进度 M0 与首批 artifact 字段门已通过。下一动作是生成同一 calibration identity 下的
+evaluate 命令、先核适用 metric/N/A 与 judge call 数，再由用户确认后调用 API；不得改变
+既有 run 的 profile、worker、cohort 顺序或 runtime 后强行 resume。HaluMem 当前分数只表示
+LightMem product top-60 calibration，不宣称 benchmark 官方 top-20/top-10 parity。

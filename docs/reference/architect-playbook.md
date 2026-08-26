@@ -184,6 +184,10 @@
     不应为“以后任意扩缩 worker”重写调度与状态迁移。优先把 runner 已有的有序 isolation 白名单
     以薄 CLI seam 暴露，锁 cohort 后分批 resume；产品发布时再让 method service 自己承担并发、
     namespace 与扩缩容。只有当前实验正确性或可完成性被阻断时，才升级为主线重构。
+38. **长任务不得黑屏**：任何新增或特殊 runner 在扩大真实 API 前，都必须复用公开
+    `ProgressReporter`；终端最少显示 isolation、当前 phase/session/question 与计数，并持续写
+    `checkpoints/progress.json`。heartbeat 只证明活性，conversation/question 的全局完成数只能在
+    coordinator 提交 checkpoint 后推进；历史 run 没采集的进度不得事后伪造。
 
 完整历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

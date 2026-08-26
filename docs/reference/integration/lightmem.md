@@ -9,7 +9,7 @@
 > 2026-08-26 的首批完整-isolation 预算实验另用 `calibration` profile：
 > `opencodego/mimo-v2.5`、thinking disabled、`workers=10` 上限；仍复用下述同一 LightMem
 > `[method]` 算法参数与 benchmark 统一 answer builder。固定 cohort 与 run id 见
-> [`../../workstreams/ws05-experiment-reporting/notes/2026-08-26-lightmem-mimo-calibration-cohort.md`](../../workstreams/ws05-experiment-reporting/notes/2026-08-26-lightmem-mimo-calibration-cohort.md)。
+> [`../../workstreams/ws05-experiment-reporting/branches/lightmem-mimo-calibration/README.md`](../../workstreams/ws05-experiment-reporting/branches/lightmem-mimo-calibration/README.md)。
 > 2026-08-24 ws05.1 M1 参数 provenance 复核：论文 v4 的完整 LightMem 流水线必须包含
 > pre-compress、topic segmentation、STM 聚合抽取与 LTM direct insert；主配置的
 > `true/true/r=0.7/th=512` 有论文支撑。原 `extract_threshold` 在 current product 中没有

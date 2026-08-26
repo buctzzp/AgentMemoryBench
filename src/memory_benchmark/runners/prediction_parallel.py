@@ -99,6 +99,7 @@ class _WorkerHeartbeat:
     question_completed: int = 0
     question_total: int = 0
     current_question_id: str | None = None
+    current_session_id: str | None = None
 
     def __post_init__(self) -> None:
         """拒绝非法阶段、负数、越界计数和空白公开 id。"""
@@ -120,7 +121,11 @@ class _WorkerHeartbeat:
             raise ValueError("turn_completed cannot exceed turn_total")
         if self.question_completed > self.question_total:
             raise ValueError("question_completed cannot exceed question_total")
-        for field_name in ("conversation_id", "current_question_id"):
+        for field_name in (
+            "conversation_id",
+            "current_session_id",
+            "current_question_id",
+        ):
             value = getattr(self, field_name)
             if value is not None and not value.strip():
                 raise ValueError(f"{field_name} must be None or non-blank")
@@ -137,6 +142,7 @@ class _WorkerHeartbeat:
             "question_completed": self.question_completed,
             "question_total": self.question_total,
             "current_question_id": self.current_question_id,
+            "current_session_id": self.current_session_id,
         }
 
 

@@ -573,6 +573,45 @@ def test_operation_level_runner_drives_three_stages_and_writes_artifacts(
     # 未传 contract version 时 manifest 不盖章（本 fake 非注册 method）。
     assert "retrieval_evidence_contract_version" not in manifest["method"]
 
+    progress = json.loads(
+        (_context(tmp_path).run_dir / "checkpoints" / "progress.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert progress["stage"] == "Completed"
+    assert progress["conversation_completed"] == 1
+    assert progress["conversation_total"] == 1
+    assert progress["question_completed"] == 2
+    assert progress["question_total"] == 2
+    assert progress["workers"]["0"] == {
+        "phase": "completed",
+        "conversation_id": "halu-user-1",
+        "current_session_id": None,
+        "turn_completed": 4,
+        "turn_total": 4,
+        "question_completed": 2,
+        "question_total": 2,
+        "current_question_id": None,
+        "phase_elapsed_seconds": 0.0,
+    }
+    heartbeat_rows = [
+        row["payload"]
+        for row in read_jsonl(_context(tmp_path).run_dir / "logs" / "events.jsonl")
+        if row["event"] == "isolated_worker_heartbeat"
+    ]
+    assert {row["phase"] for row in heartbeat_rows} == {
+        "ingesting",
+        "answering",
+        "completed",
+    }
+    assert {row["current_session_id"] for row in heartbeat_rows} >= {
+        "s1",
+        "s-generated",
+        "s-no-question",
+        "s2",
+    }
+    assert all("gold" not in json.dumps(row).lower() for row in heartbeat_rows)
+
 
 def test_operation_level_w2_parallelizes_uuid_not_sessions_and_resumes_stably(
     tmp_path: Path,
@@ -644,6 +683,26 @@ def test_operation_level_w2_parallelizes_uuid_not_sessions_and_resumes_stably(
     )
     assert len(worker_zero.prepare_contexts) == 1
     assert [call[0] for call in worker_zero.calls].count("end_conversation") == 2
+    progress = json.loads(paths.progress_path.read_text(encoding="utf-8"))
+    assert progress["stage"] == "Completed"
+    assert progress["conversation_completed"] == 3
+    assert progress["question_completed"] == 3
+    assert set(progress["workers"]) == {"0", "1"}
+    assert all(
+        worker["phase"] == "completed"
+        for worker in progress["workers"].values()
+    )
+    heartbeat_rows = [
+        row["payload"]
+        for row in read_jsonl(paths.logs_dir / "events.jsonl")
+        if row["event"] == "isolated_worker_heartbeat"
+    ]
+    assert {row["worker_idx"] for row in heartbeat_rows} == {0, 1}
+    assert {row["current_session_id"] for row in heartbeat_rows} >= {
+        "s1",
+        "s2",
+        "s3",
+    }
 
     before_resume = len(providers)
     resumed = run_operation_level_predictions(
@@ -939,6 +998,13 @@ def test_operation_level_update_probe_tolerates_self_recording_provider(
     assert manifest["efficiency_observability"] == expected_identity
     assert redacted_config["efficiency_observability"] == expected_identity
     assert "instrumentation_identity" not in manifest
+    for summary_path in (
+        paths.prediction_efficiency_overall_summary_path,
+        paths.prediction_efficiency_by_conversation_summary_path,
+        paths.prediction_efficiency_by_question_summary_path,
+    ):
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        assert payload["schema_version"] == 1
 
 
 def test_operation_level_runner_writes_extraction_na_when_no_session_report(

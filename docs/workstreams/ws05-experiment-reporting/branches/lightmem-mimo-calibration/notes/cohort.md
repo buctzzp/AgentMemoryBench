@@ -134,8 +134,8 @@ conversation 有 158 QA；`conversation-budget=1` 不会把它们裁成 1 个 qu
 
 ## 7. 首批 prediction 命令
 
-以下命令已经完成零 API argv 归一化，但**尚未执行**。每条建议在独立终端运行；先验收一条再启动
-下一条，而不是一次放飞五格。
+以下命令是首批实际执行命令的冻结收据。五格 prediction 已于 2026-08-26 完成；执行后字段验货、
+框架进度修复与效率汇总见 [首批 prediction 验货收据](first-batch-prediction-receipt.md)。
 
 ```bash
 uv run memory-benchmark predict formal --root . \
