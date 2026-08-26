@@ -207,6 +207,16 @@
     由显式、强类型的 evaluator artifact projector 只落 scorer 实际消费字段；随后同时证明完整
     dataset hash、method-visible records 与紧凑 private records 守恒。禁止为赶进度放宽 SHA 比较
     或硬编码迁移白名单。
+42. **API 预算账只认 SDK 返回的 usage，不用 tokenizer 补猜**：成功 API LLM 调用的 input/output
+    token 必须来自 OpenAI-compatible SDK response usage，并逐 observation 标为 `api_usage`；任一成功
+    调用缺 usage 时，本 run 的 API token 收据应标 incomplete，而不是用 tokenizer estimate 冒充。
+    本地 embedding 没有供应商账单时仍可用 `tokenizer_estimate` 描述工作量，但必须与 API 成本表
+    分栏，不能相加后统称“真实 API token”。
+43. **预算样本量按异质性自适应，方法间复用同一 paired cohort**：先用公开输入形状锁 p25/p50/p75
+    三个完整 isolation；小而集中或形状近似的数据可在 n=3 停止首轮外推。多 source lane 至少每 lane
+    三个，公开形状或实测 API token/runtime 的敏感性区间足以改变预算决策时，再补 p10/p90 或对应
+    strata；单纯多跑相似样本不会自动修复抽样偏差。调度时在资源门允许下优先启动最长关键路径
+    （当前 HaluMem），再用短 run 填充等待时间；这只是 makespan 优化，不改变 run identity 或算法。
 
 完整历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

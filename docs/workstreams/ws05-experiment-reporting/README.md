@@ -6,13 +6,14 @@ created: 2026-07-05
 ---
 # ws05 全量实验申请材料与前置工程
 
-## Codex 恢复胶囊（2026-08-26）
+## Codex 恢复胶囊（2026-08-27）
 
 - **当前目标**：runtime/观测、十家参数/source/embedding provenance、isolation 并行门与 formal
-  精确 cohort 选择已关闭；用户已批准 LightMem Mimo calibration 按既有 identity 推进第二批
-  resume。[QA task aggregation v3](branches/qa-task-aggregation/README.md) 的 taxonomy、
+  精确 cohort 选择已关闭；LightMem Mimo calibration 已在自适应样本门收口，当前唯一真实实验
+  主线是 [SimpleMem Mimo calibration](branches/simplemem-mimo-calibration/README.md)。
+  [QA task aggregation v3](branches/qa-task-aggregation/README.md) 的 taxonomy、
   answer-only abstention M0、BEAM 三档题分、题目级 pooled micro 与 M1 receipt/write surface 已
-  实现。用户已说明还会给出一项开跑前任务；收到前不自行进入 M2 或恢复实验。
+  实现；M2 paired bootstrap 仍等待更多 method 的 paired formal 结果，不抢跑。
 - **当前批次**：
   [runtime 配置与观测 M0-M5](branches/runtime-config-and-observability/plan.md) 已完成无 API验收；
   [ws05.1 method profile provenance](../ws05.1-method-profile-provenance/README.md) 的 M0/M0.5、
@@ -29,30 +30,21 @@ created: 2026-07-05
   `125 passed`；M1 同批已机械同步五份 ledger 的两条模板 requirement，定向 ledger+QA 门为
   `31 passed`，最终文档门为 `38 passed`；artifact 瘦身/分批 evaluator 合同后的 current 全量为
   `2358 passed, 3 deselected, 25 warnings, 29 subtests passed`；该 current 数包含 formal 精确
-  isolation 选择与 Mimo calibration profile 的 CLI/config/十家 registry/full-scope 强反例。扩大真实
-  实验尚未恢复。
+  isolation 选择与 Mimo calibration profile 的 CLI/config/十家 registry/full-scope 强反例。
+  LightMem 最终 current 零 API门为 `2364 passed, 3 deselected, 25 warnings, 29 subtests passed`。
 - **并行断点**：[开跑前 isolation 并行门](notes/2026-08-25-pre-experiment-parallelism-gate.md)
   已实现 HaluMem UUID 级稳定 worker lane、Letta 独立 product runtime、MemOS v6 独立
   runtime/embedder；W2 是最小竞态哨兵，不是能力天花板，显式 worker 接受任意正整数，实际
-  数量由 selected isolation 与 execution/resource policy 控制。零 API全量为
-  `2304 passed, 3 deselected, 25 warnings, 29 subtests passed`；真实多 isolation sentinel 尚未
-  授权/执行。
-- **禁止事项**：用户重新批准规模/run_id 前，不恢复真实 pilot；不得改写旧
-  artifact、把旧 embedding build 重标为新 controlled identity，或用 lineage 伪造 metric 资格。
-- **当前动作**：M1 机制已关闭；`predict formal --isolation-id` 已把既有 ordered
-  `conversation_ids` policy 暴露为薄 CLI seam，首轮即可锁定完整代表 cohort，再用
-  `--conversation-budget 1` 与后续 resume 的 `2 (+2)` 逐步推进；实现收据见
-  [formal isolation selection](notes/2026-08-26-formal-isolation-selection.md)。真正 QA 收据仍须显式
-  输入 formal run 目录，不能用 smoke/pilot 伪造；M2 paired cluster bootstrap 尚未开工。真实 API
-  LightMem 首批五格现已按公开 shape 锁定 Mimo calibration cohort、run id 与 `workers=10` 分批预算，
-  见 [LightMem Mimo calibration 支线](branches/lightmem-mimo-calibration/README.md)。首批五格
-  prediction 已全部完成且 conversation/question 零失败；HaluMem operation-level 进度、效率
-  派生汇总与五格 artifact 字段门已闭合。HaluMem top-k、分批 evaluator 子集合同与 artifact
-  瘦身已完成预检；除用户明确裁掉的 HaluMem extraction/memory-type 外，首批 evaluator 已
-  完成并通过 582 次 judge 的 token/失败成本机器门；artifact judge 内部有界并行与逐单元进度
-  已由 barrier 强反例闭合，current 零 API 全量为
-  `2360 passed, 3 deselected, 25 warnings, 29 subtests passed`。下一步只按 cohort note 的
-  2 / 8 增量预算 resume，不进入全量。
+  数量由 selected isolation 与 execution/resource policy 控制。真实 LightMem HaluMem W10 run
+  已证明 3 个 UUID 稳定分到独立 worker lane，UUID 内 session 顺序守恒。
+- **禁止事项**：当前真实 API 授权只覆盖完成 LightMem 与 SimpleMem calibration；不得顺带启动
+  其余八家、改写旧 artifact、把旧 embedding build 重标为新 controlled identity，或用 lineage
+  伪造 metric 资格。
+- **当前动作**：LightMem 最终五格累计 8,620,622 个 SDK `api_usage` tokens，conversation/question
+  零失败；LoCoMo/LME/BEAM/HaluMem 停在 p25/p50/p75，MemBench 因四 lane 异质性补齐五点，详见
+  [最终收据](branches/lightmem-mimo-calibration/notes/second-batch-receipt.md)。SimpleMem 逐字复用
+  paired cohort：先做 Mimo streaming exact-usage 探针，再优先启动 HaluMem；任何成功 API LLM
+  observation 若不是 `api_usage`，立即把 token receipt 标 incomplete，不能用估算补账。
   M11 前的 method state 不 resume；作者校准、Mimo calibration
   与主 controlled run 分开。
 
@@ -67,6 +59,11 @@ created: 2026-07-05
 运行账：
 [`ox 完整 isolation pilot 矩阵账`](notes/2026-08-21-ox-complete-isolation-pilot-ledger.md)。
 
+- 2026-08-27：LightMem Mimo calibration 在自适应停表点完成。四个普通 benchmark 各三个完整
+  isolation；MemBench 基于 lane 内 1.6×–5.2× 的三点差异条件补齐四 lane 五点；最终五格累计
+  8,620,622 个真实 SDK `api_usage` tokens。下一家 SimpleMem 使用同一 paired cohort，HaluMem
+  先启动；目标模型经费优先覆盖 LightMem/SimpleMem 等效率候选，其余方法允许低价 token 外推，
+  但不得外推分数或速度。
 - 2026-08-26：用户最终确认 QA v3：固定题池逐题一票，不再五 benchmark 等权；update、HaluMem
   错误前提、BEAM 历史内部矛盾拆分；personalization/instruction 分开；lowlevel_rec 归事实回顾，
   noisy 与 LoCoMo category 5 排除；abstention M0 只看 fixed answer LLM；BEAM 十类均可进入聚合，
@@ -171,6 +168,11 @@ created: 2026-07-05
   `api_usage` 与失败尝试；按运行时点目标模型价格离线外推。GPT-4o-mini 经费优先用于
   LightMem、SimpleMem 及后续由 observation 证明效率较高的方法；A-Mem 等高调用方法允许只给
   低价模型 token 外推，但报告必须标明“非目标模型实测”，不能外推分数或速度。
+- [ ] 自适应样本门：方法间复用同一 public-shape paired cohort；LoCoMo/LME 等先以
+  p25/p50/p75 三个完整 isolation 形成首轮外推，MemBench 至少四 lane×三条。只有 shape/token/
+  runtime 敏感性足以影响预算决策时才补 p10/p90，不机械要求每个 benchmark 同样 n。
+- [ ] API token 完整性门：计费表只纳入 SDK response 的 `api_usage`；任何成功 API LLM call
+  缺 usage 都标 incomplete，不用 tokenizer estimate 回填。本地 embedding estimate 单独报告。
 - [ ] `ox-alpha-free` transport/efficiency 资格门：十家 build LLM + framework answer/judge
   均使用 model-aware 请求参数；最小真实 run 的 prediction efficiency artifact 含非空
   API usage、model identity 与 latency；旧 Mimo artifact 精确回读不退化。
@@ -225,4 +227,7 @@ created: 2026-07-05
   全量前兜底机制必须做好，不能中途失败从零开始或 API 空烧。
 - 2026-08-26 用户：目标模型预算可能不足以覆盖十家 full；先用低价模型精确记录 token，
   正式经费优先覆盖效率较高的方法，其余只做带假设与身份披露的成本外推。
+- 2026-08-27 用户：预算样本量不再一刀切；低异质 benchmark 先跑三个代表 isolation，分布不均或
+  多 source 的 benchmark 分层追加。多 method 调度先启动 HaluMem 等最长关键路径，再并行填短 run；
+  API token 只接受 OpenAI-compatible SDK 返回的真实 usage。
 - 既定：真实费用按 ohmygpt 实价离线算，不用 OpenAI 官方价做结论。

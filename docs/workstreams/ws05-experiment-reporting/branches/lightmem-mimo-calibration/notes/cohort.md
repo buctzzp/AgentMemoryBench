@@ -102,10 +102,20 @@ lane 公平推进：
 `workers=10` 固定在 manifest。首批只有 1 或 4 个 pending isolation，所以不会为凑 W10 空启动十份
 业务工作；后续按固定 cohort index 映射到稳定 `worker_N` state root。
 
+第二批达到 p25/p50/p75 后是首个自适应停点，不自动执行第三批：LoCoMo、LongMemEval、BEAM、
+HaluMem 先比较三个 isolation 的 public shape、真实 API token 与 runtime；MemBench 比较四条 lane
+各三个。只有敏感性区间足以改变预算选择，才补 p10/p90。跨 method 必须复用相同 isolation 与顺序，
+避免样本构成差异冒充 method 成本差异。更大的 n 一般能降低抽样误差，但若新增样本仍来自同一狭窄
+shape、忽略已有 strata，就不能修复代表性偏差。
+
 特别注意：完整 isolation 不等于小调用。首个 HaluMem UUID 有 3,156 turns / 169 QA，首个 LoCoMo
 conversation 有 158 QA；`conversation-budget=1` 不会把它们裁成 1 个 question。本轮应先逐 run
 执行 prediction 并验货，再决定是否调用 API judge，避免把 answer/build 与 evaluator 成本混在一个
 无法定位的失败里。
+
+多 method 批次的执行顺序优先启动 HaluMem 等最长关键路径，再在资源 admission control 允许时并行
+填充短 benchmark；这只缩短整体 makespan，不允许同时盲放整个矩阵，也不改变每个 isolation 内的
+session 顺序或 method 参数。
 
 ## 5. 开跑门
 

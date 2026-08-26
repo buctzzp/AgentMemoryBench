@@ -1,6 +1,6 @@
 # LightMem × Mimo calibration 实验支线
 
-状态：`in-progress`
+状态：`done`
 
 父任务：[ws05 experiment reporting](../../README.md)
 
@@ -23,7 +23,7 @@ shape cohort，分批推进 prediction/resume，验收运行身份、公开 arti
 - ordered cohort、run id、分批预算与完整命令：见 [cohort](notes/cohort.md)
 - 首批 prediction 只推进 p50；MemBench 为四条 source lane 各推进一个 isolation。
 
-## 当前进度（2026-08-26）
+## 当前进度（2026-08-27）
 
 ### 首批 prediction
 
@@ -67,7 +67,9 @@ artifact 瘦身/分批 evaluator 合同后的 current 全量零 API 门为
 - [x] 合并后的 current 全量零 API 门：
   `2364 passed, 3 deselected, 25 warnings, 29 subtests passed`；LongMemEval 真实 1→3 题增量
   judge 与零新增幂等复跑均通过。
-- [ ] 按既有 identity 推进第二批 prediction resume，并形成增量成本/波动收据。
+- [x] 按既有 identity 推进第二批 prediction resume，并形成增量成本/波动收据；四个普通
+  benchmark 与 HaluMem 均停在三点，MemBench 因 lane 内异质性条件补齐五点。最终收据见
+  [第二批/条件第三批收据](notes/second-batch-receipt.md)。
 
 ## 已知边界
 
@@ -80,10 +82,9 @@ artifact 瘦身/分批 evaluator 合同后的 current 全量零 API 门为
 - 首批 artifact-level BEAM/HaluMem judge 曾接收但未消费 `max_workers`；M1 已闭合内部
   有界并行与逐单元进度。该修复不改变首批分数，也未用付费重跑来证明。
 
-## 当前断点
+## 最终断点
 
-进度 M0、首批 artifact 字段门、首批 evaluate 与 artifact judge 并行 M1 均已通过。HaluMem 的 20/10 已核实为官方
-Mem0 wrapper 参数而非 benchmark-wide scorer contract；LightMem product top-60 是本 method
-的自然 `formatted_memory`，无需另做 parity 裁决或重跑 prediction。用户已批准按既有 cohort
-identity 推进第二批 prediction resume；下一步先做 resume 预检再启动真实 API，而不是补跑不可横向比较的
-extraction；不得改变既有 run 的 profile、worker、cohort 顺序或 runtime 后强行 resume。
+LightMem 五格 calibration 已在自适应停表点闭合：累计真实 SDK API token 8,620,622，五格
+conversation/question 零失败，适用 evaluator、paid score 增量复用和零新增幂等均通过。
+HaluMem extraction/memory-type 继续按用户裁决不运行；现有 run 不再追加 p10/p90 或更换 runtime。
+下一条实验支线为 [SimpleMem × Mimo calibration](../simplemem-mimo-calibration/README.md)。
