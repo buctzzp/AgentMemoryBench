@@ -12,10 +12,11 @@
 | --- | --- | --- | --- | --- | --- |
 | `smoke` | `opencodego` | `ox-alpha-free` | Chat Completions | Chat Completions | 极小裁剪的流通验证 |
 | `pilot` | `opencodego` | `ox-alpha-free` | Chat Completions | Chat Completions | 一个完整 isolation 的调用拓扑与成本 observation |
+| `calibration` | `opencodego` | `mimo-v2.5` | Chat Completions | Chat Completions | 显式完整 cohort 的预算与扩大稳定性实验 |
 | `official_full` | `primary` | `gpt-4o-mini` | Chat Completions | Responses；官方 evaluator 自带 Chat 路径时保持其路径 | 主配置正式实验 |
 
 这是**运行身份差异**，不是暗中 fallback。新 `smoke` 与旧
-历史 `deepseek-v4-flash`/`muse-spark-1.2-contributor`/`mimo-v2.5` smoke、旧 `gpt-4o-mini` smoke 与
+历史 `deepseek-v4-flash`/`muse-spark-1.2-contributor`/旧 `mimo-v2.5` smoke、旧 `gpt-4o-mini` smoke 与
 `official_full` 的分数均不得
 直接比较；smoke 只证明当前 method、
 benchmark、artifact、resume 和 evaluator 链路在声明的 provider/model 上可运行。
@@ -45,6 +46,8 @@ opencode_model_name_4 / OPENCODE_MODEL_NAME_4
 identity `ox-alpha-free`；第一槽保留旧 `deepseek-v4-flash`，第二槽保留旧
 `muse-spark-1.2-contributor`，第三槽保留旧 `mimo-v2.5` artifact 的 evaluate/readback。
 四个槽都是可审计 identity，不是失败后自动轮询的 fallback 列表。
+第三槽当前同时供新 `calibration` profile 精确选择 `mimo-v2.5`；它仍可回读同模型的旧 artifact，
+但 run scope/profile/manifest 不同，不会因此混成同一实验。
 任何 key 值与 base URL 都不得写入 TOML、manifest、artifact、note 或测试 stdout。
 tracked TOML 只声明公开模型身份。prediction 在 secret load 前用 tracked identity 预检，
 evaluate 则按旧 run manifest 的模型在已配置 slot 中精确匹配；找不到就 fail-fast，不能用
@@ -70,6 +73,14 @@ judge 继续走 Responses，LoCoMo/LongMemEval 等已有官方 Chat Completions 
 `{"ok": true}`、`finish_reason=stop`，usage 为 263 prompt / 6 completion tokens。由此新
 smoke 默认从 Muse 迁到 Mimo。框架不会在某个 run 请求失败后静默换模型：迁移发生在 run
 创建前，旧 Muse run 仍只能按原 manifest 回读或用新 run_id 重跑。
+
+2026-08-26 用户为完整 isolation 预算实验重新选择 `mimo-v2.5`。该选择进入独立
+`calibration` profile；OpenCodeGo transport 显式发送
+`thinking={"type":"disabled"}`，manifest 写 `thinking_mode="disabled"`。method 算法参数继续
+读取单一 `[method]`，answer role/temperature/max_tokens/top_p 继续按 benchmark 统一 resolver；
+只有既有的 OpenCodeGo×LoCoMo 4096 completion 安全阀继续作为公开 provider compatibility 生效。
+`predict formal --profile calibration` 使用 FULL run scope、完整问题集、显式 isolation cohort 与
+严格 resume identity；不是旧 `predict pilot` 固定首 isolation 的别名。
 
 同日稍后，用户新增第四槽限时免费 `ox-alpha-free` 并恢复 ws05。实测该模型始终启用
 reasoning：`thinking={"type":"disabled"}` 与把 low 写进 thinking body 都返回 HTTP 400；

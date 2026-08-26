@@ -56,10 +56,13 @@
   验证；`pilot` 复用 TOML `[smoke]` 参数但保留一个完整 isolation、全部问题和独立 manifest/
   输出目录，不得用 smoke 裁剪或 `official_full` 冒充。该模型
   必须发送 `reasoning_effort="low"`，不得发送 thinking disabled。历史
-  `opencodego/deepseek-v4-flash`、`muse-spark-1.2-contributor` 与 `mimo-v2.5` artifact 保持按 manifest
-  回读，`official_full` 与作者正式校准仍使用
+  `opencodego/deepseek-v4-flash` 与 `muse-spark-1.2-contributor` artifact 保持按 manifest
+  回读。2026-08-26 新增独立 `calibration` profile：使用
+  `opencodego/mimo-v2.5` + `thinking={type:disabled}`，只配合 `predict formal` 的完整、显式
+  isolation cohort 做预算/扩大稳定性实验；它不改变 method 主算法和 benchmark answer 参数，也
+  不与 ox 或正式分数混算。`official_full` 与作者正式校准仍使用
   `primary/gpt-4o-mini`。provider/model/answer transport/judge transport 必须进入
-  manifest/resume identity；两条 runtime 的分数不得直接比较。secret/base URL 只从
+  manifest/resume identity；不同 runtime 的分数不得直接比较。secret/base URL 只从
   `.env` 读取、不落 artifact。现行细则见
   `docs/reference/api-runtime-profiles.md`。
 

@@ -27,8 +27,9 @@ created: 2026-07-05
   `2297 passed, 3 deselected, 25 warnings, 29 subtests passed`。M0-R2 承重集为
   `125 passed`；M1 同批已机械同步五份 ledger 的两条模板 requirement，定向 ledger+QA 门为
   `31 passed`，最终文档门为 `38 passed`，current 全量为
-  `2338 passed, 3 deselected, 25 warnings, 29 subtests passed`；该 current 数包含 formal 精确
-  isolation 选择的 CLI/双 runner/resume 强反例。扩大真实实验尚未恢复。
+  `2350 passed, 3 deselected, 25 warnings, 29 subtests passed`；该 current 数包含 formal 精确
+  isolation 选择与 Mimo calibration profile 的 CLI/config/十家 registry/full-scope 强反例。扩大真实
+  实验尚未恢复。
 - **并行断点**：[开跑前 isolation 并行门](notes/2026-08-25-pre-experiment-parallelism-gate.md)
   已实现 HaluMem UUID 级稳定 worker lane、Letta 独立 product runtime、MemOS v6 独立
   runtime/embedder；W2 是最小竞态哨兵，不是能力天花板，显式 worker 接受任意正整数，实际
@@ -42,8 +43,10 @@ created: 2026-07-05
   `--conversation-budget 1` 与后续 resume 的 `2 (+2)` 逐步推进；实现收据见
   [formal isolation selection](notes/2026-08-26-formal-isolation-selection.md)。真正 QA 收据仍须显式
   输入 formal run 目录，不能用 smoke/pilot 伪造；M2 paired cluster bootstrap 尚未开工。真实 API
-  开跑前只剩用户确认 LightMem 首批 benchmark/variant、公开 shape 选出的 isolation id、runtime/model、
-  run_id 与预算授权。M11 前的 method state 不 resume；作者校准与主 controlled run 分开。
+  LightMem 首批五格现已按公开 shape 锁定 Mimo calibration cohort、run id 与 `workers=10` 分批预算，
+  见 [LightMem Mimo cohort](notes/2026-08-26-lightmem-mimo-calibration-cohort.md)。开跑前只剩用户确认
+  完整 isolation 规模（尤其 HaluMem 3,156 turns/169 QA 与 LoCoMo 158 QA）并明确授权真实 API。
+  M11 前的 method state 不 resume；作者校准、Mimo calibration 与主 controlled run 分开。
 
 ## 目标
 
@@ -85,6 +88,11 @@ created: 2026-07-05
   可重复 `--isolation-id`，把代表 cohort 的选择从隐式 dataset 顺序升级为显式、可审计、严格 resume
   identity；`--conversation-budget` 仍是可变的单次推进预算。本批零 API，不改变 runner、provider 或
   method 算法。
+- 2026-08-26：用户选择本轮 LightMem 五格使用 `.env` 第三槽 `mimo-v2.5`、禁用 thinking、
+  `workers=10`。新增独立 `calibration` runtime/execution profile，不改 `smoke` ox 或
+  `official_full` GPT-4o-mini；method `[method]` 与 benchmark answer resolver 原样复用。cohort 在首轮
+  manifest 即锁 5 个代表 isolation（MemBench 每 lane 5 个、轮次交错），首批实际推进 1 或 4，保留
+  `1+2(+2)` / `4+8(+8)` resume 能力。本条尚未授权/调用真实 API。
 - W1/W2/W10 只是单个 run 的 isolation worker 数示例，不是 method 内部算法并行。HaluMem 已改为
   UUID 级 worker lane，UUID 内 session 顺序不变；Letta 与 MemOS 也使用每 worker 独立 runtime，
   不再需要另造“W1 child run + artifact 合并”旁路。execution profile 的 W1/W10 是默认值，

@@ -36,10 +36,11 @@ answer_builder = "<method>_longmemeval_official"
 
 1. “跨五个 benchmark 固定”指**同一 method** 的主配置固定，不要求十个 method 使用
    相同的内部数值。
-2. `smoke`/`pilot`/`official_full` 首先是 runtime 与 execution scope，不是三套 method 算法。
+2. `smoke`/`pilot`/`calibration`/`official_full` 首先是 runtime 与 execution scope，不是四套 method 算法。
    smoke 不为省钱篡改 embedding、检索、update、summary、storage 等 method 算法参数；成本
    优先靠数据、conversation/question/turn 范围和并发缩小。低预算 runtime 使用
-   `opencodego/ox-alpha-free`，正式 `official_full` 保持
+   `opencodego/ox-alpha-free`；完整显式 cohort 的预算校准使用独立
+   `opencodego/mimo-v2.5` calibration identity；正式 `official_full` 保持
    `primary/gpt-4o-mini`。这是流通验证而非效果对比，provider/model/transport 与必要的
    reasoning completion floor 必须进入 manifest/resume；细则见
    [`api-runtime-profiles.md`](api-runtime-profiles.md)。

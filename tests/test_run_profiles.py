@@ -64,6 +64,11 @@ def test_current_profiles_resolve_without_method_algorithm_config() -> None:
         profile_name="pilot",
         method_max_workers_cap=10,
     )
+    calibration = load_run_composition(
+        project_root=PROJECT_ROOT,
+        profile_name="calibration",
+        method_max_workers_cap=None,
+    )
     official = load_run_composition(
         project_root=PROJECT_ROOT,
         profile_name="official-full",
@@ -115,6 +120,15 @@ def test_current_profiles_resolve_without_method_algorithm_config() -> None:
         model="ox-alpha-free",
         structured_output_mode="json_object",
     )
+    assert calibration.runtime == smoke.runtime.__class__(
+        profile_name="calibration",
+        provider="opencodego",
+        model="mimo-v2.5",
+        structured_output_mode="json_object",
+    )
+    assert calibration.runtime.to_manifest_dict()["thinking_mode"] == "disabled"
+    assert calibration.execution.default_max_workers == 10
+    assert calibration.resolved_max_workers == 10
     assert official.runtime.provider == "primary"
     assert official.runtime.model == "gpt-4o-mini"
     assert official.execution.default_max_workers == 10

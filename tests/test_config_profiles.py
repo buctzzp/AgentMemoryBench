@@ -542,6 +542,12 @@ def test_formal_and_author_profiles_use_primary_provider(profile_name: str) -> N
     assert resolve_api_provider_for_profile(profile_name) == "primary"
 
 
+def test_calibration_profile_uses_opencodego_provider() -> None:
+    """低价完整 isolation 校准必须有独立 OpenCodeGo runtime identity。"""
+
+    assert resolve_api_provider_for_profile("calibration") == "opencodego"
+
+
 def test_load_typed_profile_builds_memoryos_official_full_profile_from_project_toml() -> None:
     """公开 official-full 应把单一 method 参数与正式 runtime/execution 组合。"""
 

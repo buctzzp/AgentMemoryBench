@@ -1054,6 +1054,12 @@ def test_lightmem_method_manifest_uses_concrete_registered_consume_granularity(
     assert manifest["consume_granularity"] == expected
 
 
+def test_calibration_profile_uses_full_run_scope() -> None:
+    """低价 calibration 只换 runtime，不得退化为 pilot 的首 isolation crop。"""
+
+    assert prediction_cli._resolve_profile_run_scope("calibration") is RunScope.FULL
+
+
 def test_lightmem_beam_pair_manifest_breaks_resume_against_legacy_turn() -> None:
     """BEAM 由 turn 改判 pair 后，旧 turn manifest 必须 resume mismatch。
 

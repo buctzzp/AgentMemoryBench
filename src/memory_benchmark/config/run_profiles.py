@@ -191,7 +191,7 @@ def _profile_section_name(profile_name: str) -> str:
     """把公开 run profile 映射到 runtime/execution TOML section。"""
 
     normalized = profile_name.strip().lower()
-    if normalized in {"smoke", "pilot"}:
+    if normalized in {"smoke", "pilot", "calibration"}:
         return normalized
     if normalized in {"official-full", "official_full"}:
         return "official_full"

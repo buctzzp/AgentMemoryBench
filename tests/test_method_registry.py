@@ -53,18 +53,20 @@ def test_registry_lists_conversation_qa_methods() -> None:
 
 
 @pytest.mark.parametrize("method_name", list_methods())
-def test_pilot_profile_reuses_smoke_section_with_distinct_public_identity(
+@pytest.mark.parametrize("profile_name", ("pilot", "calibration"))
+def test_non_main_runtime_profiles_reuse_method_section_with_distinct_identity(
     method_name: str,
+    profile_name: str,
 ) -> None:
-    """pilot 应复用十家统一的 method 参数并保留独立公开身份。"""
+    """pilot/calibration 应复用 method 参数并保留独立 runtime 身份。"""
 
     resolved = resolve_method_profile(
         method_name,
-        "pilot",
+        profile_name,
         project_root=load_path_settings().project_root,
     )
 
-    assert resolved.public_name == "pilot"
+    assert resolved.public_name == profile_name
     assert resolved.section_name == "method"
     assert resolved.config.profile_name == "method"
 
@@ -82,7 +84,7 @@ def test_mem0_registration_declares_capabilities_factory_and_api_boundary() -> N
         }
     )
     assert registration.profile_names == frozenset(
-        {"smoke", "pilot", "official-full"}
+        {"smoke", "pilot", "calibration", "official-full"}
     )
     assert registration.requires_api is True
     assert registration.profile_relative_path == Path("configs/methods/mem0.toml")
@@ -122,7 +124,7 @@ def test_memoryos_registration_uses_generic_contract() -> None:
 
     assert registration.config_type is MemoryOSConfig
     assert registration.profile_names == frozenset(
-        {"smoke", "pilot", "official-full"}
+        {"smoke", "pilot", "calibration", "official-full"}
     )
     assert registration.task_families == frozenset({TaskFamily.CONVERSATION_QA})
     assert registration.provided_capabilities == frozenset(
@@ -142,7 +144,7 @@ def test_simplemem_registration_declares_text_backend_contract() -> None:
 
     assert registration.config_type is SimpleMemConfig
     assert registration.profile_names == frozenset(
-        {"smoke", "pilot", "official-full"}
+        {"smoke", "pilot", "calibration", "official-full"}
     )
     assert registration.task_families == frozenset({TaskFamily.CONVERSATION_QA})
     assert registration.provided_capabilities == frozenset(
@@ -323,7 +325,7 @@ def test_graphiti_registration_declares_direct_core_product_contract() -> None:
 
     assert isinstance(config, GraphitiConfig)
     assert registration.profile_names == frozenset(
-        {"smoke", "pilot", "official-full"}
+        {"smoke", "pilot", "calibration", "official-full"}
     )
     assert registration.profile_relative_path == Path("configs/methods/graphiti.toml")
     assert registration.requires_api is True
@@ -365,7 +367,7 @@ def test_letta_registration_declares_sleeptime_product_contract() -> None:
 
     assert isinstance(config, LettaConfig)
     assert registration.profile_names == frozenset(
-        {"smoke", "pilot", "official-full"}
+        {"smoke", "pilot", "calibration", "official-full"}
     )
     assert registration.profile_relative_path == Path("configs/methods/letta.toml")
     assert registration.requires_api is True
@@ -399,7 +401,7 @@ def test_langmem_registration_declares_background_product_contract() -> None:
 
     assert isinstance(config, LangMemConfig)
     assert registration.profile_names == frozenset(
-        {"smoke", "pilot", "official-full"}
+        {"smoke", "pilot", "calibration", "official-full"}
     )
     assert registration.profile_relative_path == Path("configs/methods/langmem.toml")
     assert registration.requires_api is True
@@ -438,7 +440,7 @@ def test_everos_registration_declares_typed_product_session_contract() -> None:
 
     assert isinstance(config, EverOSConfig)
     assert registration.profile_names == frozenset(
-        {"smoke", "pilot", "official-full"}
+        {"smoke", "pilot", "calibration", "official-full"}
     )
     assert registration.profile_relative_path == Path("configs/methods/everos.toml")
     assert registration.requires_api is True
@@ -777,7 +779,7 @@ def test_memos_registration_declares_product_typed_handler_contract() -> None:
 
     assert registration.config_type is MemOSConfig
     assert registration.profile_names == frozenset(
-        {"smoke", "pilot", "official-full"}
+        {"smoke", "pilot", "calibration", "official-full"}
     )
     assert registration.protocol_version == "v3"
     assert registration.profile_relative_path == Path("configs/methods/memos.toml")

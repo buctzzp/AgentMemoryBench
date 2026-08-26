@@ -197,7 +197,7 @@ def _add_prediction_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "Registered TOML profile name. With 'predict formal' this may be "
-            "official-full or an explicitly registered author profile."
+            "official-full, calibration or an explicitly registered author profile."
         ),
     )
     parser.add_argument(

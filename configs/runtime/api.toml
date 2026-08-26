@@ -18,6 +18,16 @@ retry_backoff_multiplier = 2.0
 retry_max_wait_seconds = 60.0
 structured_output_mode = "json_object"
 
+[calibration]
+provider = "opencodego"
+model = "mimo-v2.5"
+timeout_seconds = 60.0
+max_retries = 8
+retry_wait_seconds = 5.0
+retry_backoff_multiplier = 2.0
+retry_max_wait_seconds = 60.0
+structured_output_mode = "json_object"
+
 [official_full]
 provider = "primary"
 model = "gpt-4o-mini"

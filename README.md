@@ -423,6 +423,10 @@ uv run memory-benchmark predict formal \
 `--isolation-id` 则是实验 cohort identity：按参数出现顺序选择，未知、空白或重复 id 会
 fail-fast；resume 必须原样重复同一份有序名单。精确选择时建议显式传一个 concrete
 `--variant`，避免把一个 variant 的 id 误用于另一个 child run。
+预算/扩大稳定性实验可显式传 `--profile calibration`：当前身份是
+`opencodego/mimo-v2.5` + thinking disabled，仍使用 FULL isolation 和 benchmark 统一 answer
+参数；它与默认 `official-full` 的 `primary/gpt-4o-mini` 是两套不可混分、不可互相 resume 的
+runtime identity。
 如果某个 conversation 已在 `checkpoints/conversation_status.json` 中标记为 `failed`，默认
 `--resume` 不会再次处理它；确认资源和修复原因后，可用 `--retry-failed` 显式重试。
 

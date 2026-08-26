@@ -601,7 +601,7 @@ def resolve_api_provider_for_profile(profile_name: str) -> str:
     """把运行 profile 映射到显式 API provider，不读取 secret。"""
 
     normalized = profile_name.strip().lower()
-    if normalized in {"smoke", "pilot"}:
+    if normalized in {"smoke", "pilot", "calibration"}:
         return OPENCODEGO_API_PROVIDER
     if (
         normalized in {"official-full", "official_full"}

@@ -1982,6 +1982,7 @@ def _simplemem_build_identity(config_manifest: dict[str, Any]) -> BuildIdentityD
 _MAIN_PROFILE_SECTIONS = (
     ("smoke", "method"),
     ("pilot", "method"),
+    ("calibration", "method"),
     ("official-full", "method"),
 )
 
