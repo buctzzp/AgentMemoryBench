@@ -27,7 +27,7 @@ created: 2026-07-05
   `2297 passed, 3 deselected, 25 warnings, 29 subtests passed`。M0-R2 承重集为
   `125 passed`；M1 同批已机械同步五份 ledger 的两条模板 requirement，定向 ledger+QA 门为
   `31 passed`，最终文档门为 `38 passed`；artifact 瘦身/分批 evaluator 合同后的 current 全量为
-  `2357 passed, 3 deselected, 25 warnings, 29 subtests passed`；该 current 数包含 formal 精确
+  `2358 passed, 3 deselected, 25 warnings, 29 subtests passed`；该 current 数包含 formal 精确
   isolation 选择与 Mimo calibration profile 的 CLI/config/十家 registry/full-scope 强反例。扩大真实
   实验尚未恢复。
 - **并行断点**：[开跑前 isolation 并行门](notes/2026-08-25-pre-experiment-parallelism-gate.md)
@@ -47,8 +47,9 @@ created: 2026-07-05
   见 [LightMem Mimo calibration 支线](branches/lightmem-mimo-calibration/README.md)。首批五格
   prediction 已全部完成且 conversation/question 零失败；HaluMem operation-level 进度、效率
   派生汇总与五格 artifact 字段门已闭合。HaluMem top-k、分批 evaluator 子集合同与 artifact
-  瘦身已完成预检，judge 调用量已展开；下一步由用户执行 calibration evaluator。M11 前的
-  method state 不 resume；作者校准、Mimo calibration
+  瘦身已完成预检；除用户明确裁掉的 HaluMem extraction/memory-type 外，首批 evaluator 已
+  完成并通过 582 次 judge 的 token/失败成本机器门。下一步验收首批结果，再裁第二批 resume。
+  M11 前的 method state 不 resume；作者校准、Mimo calibration
   与主 controlled run 分开。
 
 ## 目标

@@ -92,16 +92,61 @@ def session_key_from_ref(record: dict[str, Any]) -> str:
 
 def index_session_labels(
     session_labels: list[dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    """按 session_id 索引 session 私有标签。"""
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """按 `(conversation_id, session_id)` 索引 session 私有标签。"""
 
-    indexed: dict[str, dict[str, Any]] = {}
+    indexed: dict[tuple[str, str], dict[str, Any]] = {}
     for label in session_labels:
+        conversation_id = _required_text(
+            label.get("conversation_id"),
+            "conversation_id",
+        )
         session_id = _required_text(label.get("session_id"), "session_id")
-        if session_id in indexed:
-            raise ConfigurationError(f"duplicate HaluMem session label: {session_id}")
-        indexed[session_id] = label
+        key = (conversation_id, session_id)
+        if key in indexed:
+            raise ConfigurationError(
+                "duplicate HaluMem session label: "
+                f"{conversation_id}/{session_id}"
+            )
+        indexed[key] = label
     return indexed
+
+
+def resolve_session_label(
+    indexed: dict[tuple[str, str], dict[str, Any]],
+    record: dict[str, Any],
+) -> tuple[tuple[str, str], dict[str, Any]]:
+    """由 output record 的 isolation key 定位唯一 session 私有标签。
+
+    HaluMem 的 `s1` 等 session id 只在单个 UUID 内唯一，而 formal cohort 会预写
+    多个 UUID 的完整标签。`session_ref.isolation_key` 由
+    `<run_id>_<conversation_id>` 构造；这里用稳定后缀匹配当前 conversation，并对
+    零匹配或多匹配 fail-fast。旧测试/artifact 使用其他 run-id 前缀也仍可读取。
+    """
+
+    session_ref = record.get("session_ref")
+    if not isinstance(session_ref, dict):
+        raise ConfigurationError("session_ref must be a JSON object")
+    isolation_key = _required_text(
+        session_ref.get("isolation_key"),
+        "session_ref.isolation_key",
+    )
+    session_id = session_key_from_ref(record)
+    candidates = [
+        (key, label)
+        for key, label in indexed.items()
+        if key[1] == session_id
+        and (
+            isolation_key == key[0]
+            or isolation_key.endswith(f"_{key[0]}")
+        )
+    ]
+    if len(candidates) != 1:
+        raise ConfigurationError(
+            "HaluMem session label resolution requires exactly one match for "
+            f"{isolation_key}/{session_id}, got {len(candidates)}"
+        )
+    return candidates[0]
 
 
 def memory_points_by_index(

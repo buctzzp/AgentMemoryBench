@@ -16,8 +16,8 @@ from .halumem_common import (
     read_jsonl_or_empty,
     read_required_jsonl,
     read_session_labels,
+    resolve_session_label,
     safe_div,
-    session_key_from_ref,
 )
 from memory_benchmark.prompts.benchmarks.halumem_judge import (
     EVALUATION_PROMPT_FOR_MEMORY_ACCURACY as _ACCURACY_PROMPT,
@@ -54,7 +54,10 @@ class HalumemExtractionEvaluator(HalumemJudgeEvaluatorBase):
             paths.artifacts_dir / "update_probe_results.jsonl",
             "update_probe_results",
         )
-        update_memory_keys = _update_memory_keys(update_records)
+        update_memory_keys = _update_memory_keys(
+            update_records,
+            labels_by_session=labels_by_session,
+        )
         score_records: list[dict[str, Any]] = []
         integrity_records: list[dict[str, Any]] = []
         accuracy_records: list[dict[str, Any]] = []
@@ -75,27 +78,28 @@ class HalumemExtractionEvaluator(HalumemJudgeEvaluatorBase):
             )
 
         for report in evaluable_reports:
-            session_id = session_key_from_ref(report)
-            session_label = labels_by_session.get(session_id)
-            if session_label is None:
-                continue
+            session_key, session_label = resolve_session_label(
+                labels_by_session,
+                report,
+            )
+            conversation_id, session_id = session_key
             extracted_memories = _string_list(report.get("memories"))
             extracted_memories_str = "\n".join(extracted_memories)
             memory_points = _memory_points(session_label)
             # 每个 session 一个 judge scope：conversation 用 session 私有标签的真实
             # conversation_id，unit id 是含 metric + session id 的稳定 evaluator-unit id
             # （非公开 QA id，见实现 note），覆盖该 session 的全部 integrity/accuracy 调用。
-            conversation_id = session_label.get("conversation_id")
             with sink.unit_scope(
                 conversation_id,
                 _extraction_scope_unit_id(self.metric_name, session_id),
             ):
                 for memory_point in memory_points:
-                    key = (session_id, memory_point.get("index"))
+                    key = (session_key, memory_point.get("index"))
                     if memory_point.get("is_update") == "True" and key in update_memory_keys:
                         routed_update_count += 1
                         continue
                     integrity_record = self._evaluate_integrity(
+                        conversation_id=conversation_id,
                         session_id=session_id,
                         extracted_memories_str=extracted_memories_str,
                         memory_point=memory_point,
@@ -107,6 +111,7 @@ class HalumemExtractionEvaluator(HalumemJudgeEvaluatorBase):
                 golden_memories_str = build_halumem_golden_memories_str(session_label)
                 for candidate_memory in extracted_memories:
                     accuracy_record = self._evaluate_accuracy(
+                        conversation_id=conversation_id,
                         session_id=session_id,
                         dialogue_str=dialogue_str,
                         golden_memories_str=golden_memories_str,
@@ -129,6 +134,7 @@ class HalumemExtractionEvaluator(HalumemJudgeEvaluatorBase):
     def _evaluate_integrity(
         self,
         *,
+        conversation_id: str,
         session_id: str,
         extracted_memories_str: str,
         memory_point: dict[str, Any],
@@ -148,6 +154,7 @@ class HalumemExtractionEvaluator(HalumemJudgeEvaluatorBase):
             raw_result = {"score": "0", "reasoning": "empty extracted memories"}
         return {
             "record_kind": "memory_integrity",
+            "conversation_id": conversation_id,
             "session_id": session_id,
             "gold_memory_index": memory_point.get("index"),
             "metric_name": self.metric_name,
@@ -163,6 +170,7 @@ class HalumemExtractionEvaluator(HalumemJudgeEvaluatorBase):
     def _evaluate_accuracy(
         self,
         *,
+        conversation_id: str,
         session_id: str,
         dialogue_str: str,
         golden_memories_str: str,
@@ -180,6 +188,7 @@ class HalumemExtractionEvaluator(HalumemJudgeEvaluatorBase):
         included = str(result.get("is_included_in_golden_memories", "false"))
         return {
             "record_kind": "memory_accuracy",
+            "conversation_id": conversation_id,
             "session_id": session_id,
             "metric_name": self.metric_name,
             "score": 0.5 * accuracy_score if accuracy_score is not None else 0.0,
@@ -380,15 +389,20 @@ def _memory_type_breakdown(records: list[dict[str, Any]]) -> list[dict[str, Any]
     return breakdown
 
 
-def _update_memory_keys(update_records: list[dict[str, Any]]) -> set[tuple[str, Any]]:
+def _update_memory_keys(
+    update_records: list[dict[str, Any]],
+    *,
+    labels_by_session: dict[tuple[str, str], dict[str, Any]],
+) -> set[tuple[tuple[str, str], Any]]:
     """返回有检索结果的 update memory key。"""
 
-    keys: set[tuple[str, Any]] = set()
+    keys: set[tuple[tuple[str, str], Any]] = set()
     for record in update_records:
         memories_from_system = record.get("memories_from_system")
         if not memories_from_system:
             continue
-        keys.add((session_key_from_ref(record), record.get("gold_memory_index")))
+        session_key, _label = resolve_session_label(labels_by_session, record)
+        keys.add((session_key, record.get("gold_memory_index")))
     return keys
 
 

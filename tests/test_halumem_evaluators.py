@@ -774,6 +774,34 @@ def test_halumem_update_skips_empty_retrieval_per_official_routing(
     assert payload["skipped_empty_retrieval_count"] == 1
 
 
+def test_halumem_update_resolves_same_session_id_within_completed_uuid(
+    tmp_path: Path,
+) -> None:
+    """完整 cohort 可含多个 s1，update 必须由 isolation key 选中当前 UUID。"""
+
+    run_dir = _build_halumem_run_dir(tmp_path)
+    label_path = run_dir / "artifacts" / "evaluator_private_session_labels.jsonl"
+    labels = read_jsonl(label_path)
+    second = json.loads(json.dumps(labels[0]))
+    second["conversation_id"] = "user-2"
+    second["memory_points"][1]["memory_content"] = "wrong UUID memory"
+    _write_jsonl(label_path, [*labels, second])
+
+    client = FakeHalumemJudgeClient()
+    summary = run_artifact_evaluation(
+        run_dir=run_dir,
+        evaluator=HalumemUpdateEvaluator(model="gpt-4o-mini", client=client),
+        expected_benchmark="halumem",
+    )
+
+    records = read_jsonl(Path(summary.score_path))
+    assert len(client.prompts) == 1
+    assert len(records) == 1
+    assert records[0]["conversation_id"] == "user-1"
+    assert records[0]["session_id"] == "s1"
+    assert "wrong UUID memory" not in client.prompts[0]
+
+
 # ---------------------------------------------------------------------------
 # evaluator efficiency observation（经 runner 的真实 Responses 计量路径）
 # ---------------------------------------------------------------------------

@@ -78,7 +78,10 @@ Long 版本和 Medium 版本共享 memory points / QA pairs 数量，但 Long �
 }
 ```
 
-Long 数据的 session 还可能有 `session_id`。
+Long 数据的 session 还可能有 `session_id`。该字段只在一个 user/UUID 内唯一；不同 UUID
+都会出现 `s1/s2/...`。因此 operation evaluator、session report 与 update probe 必须用
+`(conversation_id, session_id)` 复合身份关联私有标签，不能在完整 cohort 上只按 `session_id`
+建索引。
 
 | 字段 | 是否给 method | 含义 |
 | --- | --- | --- |

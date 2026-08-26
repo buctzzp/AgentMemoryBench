@@ -15,8 +15,8 @@ from .halumem_common import (
     memory_points_by_index,
     read_jsonl_or_empty,
     read_session_labels,
+    resolve_session_label,
     safe_div,
-    session_key_from_ref,
 )
 from memory_benchmark.prompts.benchmarks.halumem_judge import (
     EVALUATION_PROMPT_FOR_UPDATE_MEMORY as _UPDATE_PROMPT,
@@ -48,12 +48,11 @@ class HalumemUpdateEvaluator(HalumemJudgeEvaluatorBase):
         score_records: list[dict[str, Any]] = []
         skipped_empty_retrieval_count = 0
         for update_record in update_records:
-            session_id = session_key_from_ref(update_record)
-            session_label = session_labels.get(session_id)
-            if session_label is None:
-                raise ConfigurationError(
-                    f"missing session label for update session: {session_id}"
-                )
+            session_key, session_label = resolve_session_label(
+                session_labels,
+                update_record,
+            )
+            conversation_id, session_id = session_key
             gold_memory_index = update_record.get("gold_memory_index")
             memory_point = memory_points_by_index(session_label).get(gold_memory_index)
             if memory_point is None:
@@ -79,7 +78,6 @@ class HalumemUpdateEvaluator(HalumemJudgeEvaluatorBase):
             )
             # 每个被实际 judge 的 update point 一个 scope：真实 conversation +
             # 含 metric + session id + gold index 的稳定 evaluator-unit id。
-            conversation_id = session_label.get("conversation_id")
             with sink.unit_scope(
                 conversation_id,
                 _update_scope_unit_id(self.metric_name, session_id, gold_memory_index),
@@ -89,6 +87,7 @@ class HalumemUpdateEvaluator(HalumemJudgeEvaluatorBase):
             score_records.append(
                 {
                     "record_kind": "memory_update",
+                    "conversation_id": conversation_id,
                     "session_id": session_id,
                     "gold_memory_index": gold_memory_index,
                     "metric_name": self.metric_name,

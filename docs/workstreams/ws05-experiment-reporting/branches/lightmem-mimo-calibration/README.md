@@ -39,7 +39,7 @@ HaluMem 同时写出 70 条 session memory report、171 条 update probe 与 4,8
 prediction efficiency observation。五个 manifest 均已初验为 `calibration`、
 `opencodego/mimo-v2.5`、thinking disabled、workers 10；完整字段合理性验收已通过，
 artifact 瘦身/分批 evaluator 合同后的 current 全量零 API 门为
-`2357 passed, 3 deselected, 25 warnings, 29 subtests passed`。
+`2358 passed, 3 deselected, 25 warnings, 29 subtests passed`。
 
 ### 当前施工
 
@@ -54,8 +54,11 @@ artifact 瘦身/分批 evaluator 合同后的 current 全量零 API 门为
   均消费 LightMem 自然 top-60 `formatted_memory`，不套 Mem0 wrapper 的 20/10。
 - [x] 对当前五格 answer artifact 与 BEAM private label 做无 API 确定性瘦身，合计减少
   19,689,199 bytes；未来 prediction 默认写 compact shape。
-- [ ] 用户执行适用 evaluator；judge API 调用量已在预检 note 中展开。
-- [ ] evaluator 验收后再裁定第二批 resume，不提前扩大。
+- [x] 完成除 HaluMem extraction/memory-type 外的全部适用 evaluator；用户基于
+  2,889 次调用成本与跨 method 低覆盖裁定本轮不测 extraction，memory-type 因依赖它同步缺席。
+- [x] 完成 score/summary/model inventory/efficiency/失败成本机器门，见
+  [首批 evaluate 收据](notes/first-batch-evaluation-receipt.md)。
+- [ ] 首批 evaluator 验收后再裁定第二批 resume，不提前扩大。
 
 ## 已知边界
 
@@ -65,11 +68,13 @@ artifact 瘦身/分批 evaluator 合同后的 current 全量零 API 门为
   用户已裁定不扩修不影响结果的 method 内部瑕疵；本支线只保留此审计边界。
 - HaluMem operation-level 首批运行约 40 分钟。旧终端黑屏来自 runner 没接
   `ProgressReporter`，不是 API 或 method 停滞；该框架缺口正在本批修复。
+- artifact-level BEAM/HaluMem judge 当前接收但未消费 `max_workers`，所以本轮通过三个
+  evaluator 进程并行、每个内部串行完成；扩大 judge 前应补内部并行与逐题进度，不影响本轮分数。
 
 ## 当前断点
 
-进度 M0 与首批 artifact 字段门已通过。HaluMem 的 20/10 已核实为官方 Mem0 wrapper
-参数而非 benchmark-wide scorer contract；LightMem product top-60 是本 method 的自然
-`formatted_memory`，无需另做 parity 裁决或重跑 prediction。下一动作是由用户执行同一
-calibration identity 下的 evaluator 命令；不得改变既有 run 的 profile、worker、cohort
-顺序或 runtime 后强行 resume。
+进度 M0、首批 artifact 字段门和首批 evaluate 均已通过。HaluMem 的 20/10 已核实为官方
+Mem0 wrapper 参数而非 benchmark-wide scorer contract；LightMem product top-60 是本 method
+的自然 `formatted_memory`，无需另做 parity 裁决或重跑 prediction。下一步是验收本批结果并
+裁定是否按既有 cohort identity 推进第二批 prediction resume，而不是补跑不可横向比较的
+extraction；不得改变既有 run 的 profile、worker、cohort 顺序或 runtime 后强行 resume。
