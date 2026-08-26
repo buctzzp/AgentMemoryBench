@@ -18,26 +18,28 @@
 前六行合计为 500 个原生 `question_type`；30 个 `_abs` 是覆盖其中原类型的有效身份，不是额外
 30 道题。横向聚合时一题只能计一次，原 question type 可保留为 secondary axis。
 
-## 候选横向理解（未定稿）
+## 横向映射（2026-08-26 裁定）
 
-- user/assistant single-session：事实回顾；source role 另作诊断。
-- multi-session：多证据回忆/推理。
+- user/assistant single-session：事实回顾/信息抽取；source role 另作诊断。
+- multi-session：多证据/跨会话推理。
 - temporal：时间与事件顺序。
-- knowledge-update：记忆更新/修订。
-- preference：个性化。
-- `_abs`：可答性边界候选。
+- knowledge-update：记忆更新。
+- preference：个性化/偏好应用。
+- `_abs`：可答性边界。它覆盖原 question type，一题只进入 boundary 一次。
 
 ## Boundary 的两个观测面
 
 LongMemEval 官方 abstention scorer 只判断**最终回答**是否正确识别不可回答，因此它证明的是
-`answer_abstention`，不证明 memory provider 检索为空。若项目要专门测记忆模块，还应另记：
+`answer_abstention`，不证明 memory provider 检索为空。v3 M0 有意只把固定 framework reader 的
+最终回答纳入 QA 聚合；若项目以后专门测记忆模块，还应另记：
 
 1. `retrieval_boundary`：provider 是否返回 typed `no_relevant_memory`/真实 0-hit；
 2. `answer_abstention`：framework reader 最终是否拒绝编造。
 
-当前协议中 `RetrievalResult.items=None` 与 `items=()` 在 answer artifact 都会被序列化成空 list，
-前者可能只是 method 无结构化 items，后者才是真实 0-hit。因此在修复该可观测性之前，不能仅凭
-artifact `retrieved_items=[]` 给 memory module 边界打满分。
+当前协议中 `RetrievalResult.items=None` 与 `items=()` 在旧 answer artifact 都可能被序列化成空
+list，前者可能只是 method 无结构化 items，后者才是真实 0-hit。因此不能仅凭
+`retrieved_items=[]` 给 memory module 边界打满分；该 retrieval-only 增强后置，不阻塞 answer-only
+M0。
 
 完整数据/异常/流程入口：[benchmark 卡](../benchmarks/LongMemEval.md)、
 [dataset 卡](../datasets/longmemeval.md)、[workflow 卡](../workflows/longmemeval.md)。

@@ -1,4 +1,4 @@
-# QA Task Aggregation v2 Draft Plan
+# QA Task Aggregation v3 Plan
 
 ## M0 — 开跑前合同
 
@@ -9,18 +9,29 @@
 - [x] 增加强反例：重复计权、缺 roster、BEAM event-ordering、tie、宏/微平均、未知类型。
 - [x] 更新 ws05/roadmap/稳定索引并通过定向测试、文档门与 `git diff --check`。
 
-## M0-R1 — 五家任务调查与用户裁决（当前）
+## M0-R1 — 五家任务调查与用户裁决（已完成）
 
 - [x] 五家全量/官方 task taxonomy 复核并给每类补真实 locator 与通俗定义。
 - [x] 建立五份独立 benchmark task 文档与一份 aggregation discussion draft。
 - [x] 修正 MemBench noisy：原生 task 是 query 前缀碎碎念；100K 历史 NoiseData 是另一条轴。
 - [x] 修正 boundary：retrieval boundary 与 answer abstention 分层；记录 `None`/空 tuple 可观测缺口。
-- [ ] 用户确认 Conflict/update 的父能力关系。
-- [ ] 用户确认 personalization/instruction 是否分离。
-- [ ] 用户确认 MemBench recommendation 与 noisy 的归类。
-- [ ] 用户确认 boundary headline 与 retrieval outcome 协议修复范围。
-- [ ] 用户确认主权重方案及 raw/pooled sensitivity。
-- [ ] 根据最终裁决升级正式 contract version、强反例与稳定文档。
+- [x] 用户确认 update、错误前提纠正、历史内部矛盾消解拆分。
+- [x] 用户确认 personalization/instruction 分离。
+- [x] 用户确认 lowlevel_rec=事实回顾，noisy 不进入聚合。
+- [x] 用户确认 abstention M0 只看固定 answer LLM 输出，retrieval boundary 延后。
+- [x] 用户确认题目级 pooled micro，不做 benchmark 等权。
+- [x] 用户确认 BEAM 普通题与 event ordering 均使用 framework-standardized 三档 question credit；
+  event ordering 的整题 judge 同时检查内容与顺序，native F1/tau/rubric 继续保留。
+- [x] 稳定合同、裁决 note 与 spec v3 落盘。
+
+## M0-R2 — 可执行合同升级（当前）
+
+- [ ] 新增 BEAM event-ordering ordered compound-rubric judge 输出与 evaluator identity。
+- [ ] 为 BEAM 普通题实现确定性的 question-level 三档 selector。
+- [ ] 把 executable taxonomy 从 `v2-draft` 升级为 v3：拆分三类 revision/conflict、移除 noisy。
+- [ ] 把主 selector 改为 answer-correctness + question pooled micro；旧 v2 artifact 只读不 resume。
+- [ ] 增加强反例：倒序但内容齐全、部分错序、混合 rubric、abstention 只读 answer、题数权重。
+- [ ] 定向测试、文档门与架构验收通过后才进入 M1。
 
 ## M1 — 正式 cohort 组装（首批 formal 前）
 

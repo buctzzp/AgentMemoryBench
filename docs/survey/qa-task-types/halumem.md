@@ -21,24 +21,25 @@ QA judge 输出 `Correct / Hallucination / Omission`：当前主 score 仅把 Co
 保留 Hallucination/Omission ratio。它与 HaluMem extraction、operation-level update、FMR 是四个
 不同观测面，不能互相代替。
 
-## 候选横向理解（未定稿）
+## 横向映射（2026-08-26 裁定）
 
 - Basic Fact→事实回顾；Multi-hop→多证据推理；Generalization→泛化应用。
-- Dynamic Update 与 Memory Conflict 可考虑共享“memory revision”父类，但两种 native mean
-  必须继续分开；769 个 conflict 不能因题多自动淹没 180 个 update。
-- Memory Boundary 是边界类题，但官方 QA score 只证明 final answer，不证明 retrieval 为空。
+- Dynamic Update→记忆更新；Memory Conflict→错误前提纠正。后者是 question premise 与一致历史
+  冲突，不等同 BEAM 的 history-internal contradiction。
+- Memory Boundary→answer-only 可答性边界；官方 QA score 只证明 final answer，不证明 retrieval
+  为空。
 
 ## Boundary 与 FMR 的区别
 
 - QA Memory Boundary：问一个历史未提供的信息，期望最终回答 unknown。
 - Extraction FMR：检查干扰/假记忆是否被写入 memory；不是 QA refusal。
-- 对“只测记忆模块”的严格 boundary，项目还应观察 retrieve 是否返回 typed 0-hit/
+- 对“只测记忆模块”的严格 boundary，项目以后还应观察 retrieve 是否返回 typed 0-hit/
   `no_relevant_memory`。若检索出无关 memory，即使 reader 最终拒答，也只能算 answer 层正确，不能
   算 memory retrieval boundary 正确。
 
-当前 artifact 会把 `RetrievalResult.items=None`（method 没有结构化 items）和 `items=()`（真实
-0-hit）都写成 `retrieved_items=[]`，因此这个严格指标尚不可直接从旧结果可靠复算；需要先修正
-typed outcome/serialization，再决定是否进入最终聚合。
+旧 artifact 可能把 `RetrievalResult.items=None`（method 没有结构化 items）和 `items=()`（真实
+0-hit）都写成 `retrieved_items=[]`，因此严格 retrieval boundary 尚不可可靠复算；它后置为独立
+增强，不阻塞 v3 answer-only QA 聚合。
 
 完整数据/异常/流程入口：[benchmark 卡](../benchmarks/HaluMem.md)、
 [dataset 卡](../datasets/halumem.md)、[workflow 卡](../workflows/halumem.md)。

@@ -24,14 +24,19 @@ rubric 明确允许 `1.0/0.5/0.0`。官方历史代码对普通 ability 使用 `
 框架保留 float 主分，同时保存 official-int parity。event ordering 另做 LLM 等价对齐和 Kendall
 tau，主报告按官方有效消费面读取 `tau_norm`。
 
-## 候选横向理解（未定稿）
+## 横向映射（2026-08-26 裁定）
 
 - extraction→事实回顾；multi-session→多证据；temporal+ordering→时间/顺序。
-- update 与 contradiction 可考虑共享“memory revision”父类，但保留两个 native score。
+- update→记忆更新；contradiction→历史内部矛盾消解。二者不合并。
 - preference 与 instruction 不合并：官方 preference prompt 也明确只考虑 preference。
-- abstention 的官方得分只说明 answer reader 是否拒答，不自动证明 retrieval boundary。
+- abstention 进入 answer-only 可答性边界；不自动证明 retrieval boundary。
 - summarization 是把长历史压缩成主题、进展、变化、时间线和未决事项的整体叙述，不是一个
-  多跳短答案；当前只有 BEAM 覆盖，最多先作单家 diagnostic。
+  多跳短答案；它进入 overall，同时单列长期总结能力分，不能因只有 BEAM 覆盖而冒充跨家验证。
+
+逐题 credit 分两条路径：普通九类将 rubric item 分数规约为三档——全为 1 得 1、全为 0 得 0、
+其余得 0.5；event ordering 使用 framework-standardized 整题 ordered-rubric judge，同时检查事件
+集合和相对顺序，输出 `0/0.5/1`。原生 rubric mean、F1、`tau_norm`、official `final_score` 全部
+保留旁报；新整题 judge 不冒充 BEAM 官方 `tau_norm`。
 
 ## 需要保留的争议
 
@@ -39,8 +44,8 @@ tau，主报告按官方有效消费面读取 `tau_norm`。
   update 共享父能力，也不能删除其 native task。
 - 100K row 0 的 temporal `answer` 与 rubric 有 4/8 weeks 冲突，正式例子改用 10M；官方 scorer
   身份仍以冻结 rubric 为准。
-- BEAM abstention 同样需要拆分 memory retrieval boundary 与 final answer abstention；前者目前
-  还缺 typed zero-hit/no-relevant-memory artifact。
+- BEAM abstention 同样需要拆分 memory retrieval boundary 与 final answer abstention；v3 M0 只
+  使用后者，前者等待 typed zero-hit/no-relevant-memory artifact 后再独立设计。
 
 完整数据/异常/流程入口：[benchmark 卡](../benchmarks/BEAM.md)、
 [dataset 卡](../datasets/BEAM.md)、[workflow 卡](../workflows/BEAM.md)。

@@ -1,90 +1,85 @@
-# QA Task Aggregation v2 Draft Spec
+# QA Task Aggregation v3 Spec
 
-> 用户尚未确认 taxonomy、boundary 与权重；本 spec 只描述当前候选算法，不是 formal 发布合同。
-> 讨论入口见 `docs/survey/qa-task-types/aggregation-draft.md`。
+状态：**taxonomy/score/weight 已于 2026-08-26 获用户确认；实现与正式 cohort 尚未验收。**
+稳定的人类可读合同见 `docs/survey/qa-task-types/aggregation.md`。
 
-## 1. 研究问题
+## 1. Estimand
 
-本合同回答两个不同问题，禁止混写：
+本合同回答：在固定 Phase 1 question cohort、相同 answer/judge identity 下，从纳入题池随机抽一题，
+method 的期望 QA correctness credit 是多少；以及该期望值在十一项能力上的分解。
 
-1. **整体 QA**：在固定五 benchmark、固定十家 method、相同 controlled 运行身份下，哪家 method
-   的总体 QA/readout 表现更好？
-2. **能力画像**：哪家 method 在事实回顾、多证据整合、时间/顺序、记忆修订、个性化、可答性
-   边界和泛化应用等可跨数据集复现的能力上更强？
+Recall/Precision/NDCG、HaluMem extraction/update/memory-type 与成本效率不属于 QA estimand。
 
-检索级 lineage、HaluMem session extraction/update 和 memory-type 不属于这两个 estimand。
+## 2. 输入资格
 
-## 2. 输入与资格
+- 只读不可变 prediction/evaluation artifacts；聚合本身不调用 method 或 answer LLM。
+- 新增 BEAM event-ordering 三档 judge 属 evaluation 生成步骤，必须在聚合前完成并锁 evaluator
+  identity。
+- 正式 cohort 必须锁 method roster、benchmark variant、dataset/question identity、answer/judge
+  transport、prompt/model/decode identity 与完整 question coverage。
+- 缺格、失败、旧 identity、重复 question 或覆盖不一致均为 `incomplete`，不补零、不缩分母排名。
 
-- 输入只能是不可变 prediction/evaluation artifacts；聚合不重新调用 method、answer LLM 或 judge。
-- 主榜只接受 `formal`、同 benchmark variant/data fingerprint、相同公开 question cohort、相同
-  answer/judge transport 与 prompt identity 的运行。
-- 固定 roster 为 Phase 1 十家 method。缺格、失败、旧 identity 或 question coverage 不一致均为
-  `incomplete`，不得插值、补零或按较小分母排名。
-- 只消费每个 benchmark 的一个 QA primary metric：LoCoMo F1、LongMemEval judge accuracy、
-  MemBench choice accuracy、HaluMem QA Correct rate，以及 BEAM 的 type-aware score。
+## 3. 唯一能力映射
 
-## 3. Score selector
+正式能力为：
 
-所有题分投影到 `[0, 1]`，但数值语义仍不同，因此只在同一 benchmark/task slice 内排序。
+1. `factual_recall_extraction`
+2. `multi_evidence_recall_reasoning`
+3. `temporal_event_reasoning`
+4. `memory_update`
+5. `false_premise_correction`
+6. `history_contradiction_resolution`
+7. `personalization`
+8. `instruction_following`
+9. `answerability_boundary`
+10. `generalization_application`
+11. `long_horizon_summarization`
 
-- LoCoMo：`locomo_f1.score`。
-- LongMemEval：`longmemeval_judge_accuracy.score`。
-- MemBench：`membench_choice_accuracy.score`。
-- HaluMem：`halumem_qa.score`；Hallucination/Omission rate 另作 guardrail。
-- BEAM：九类普通 ability 用保留 0.5 信息的 float rubric `score`；`event_ordering` 按官方
-  `report_results.py` 的有效消费面用 `details.event_ordering_tau_norm`。论文 parity 仍另报官方
-  `int()` 对照值，不把截断缺陷带入 controlled 主榜。
+LoCoMo category 5 与 MemBench noisy 不进入本合同；未知 native task 必须 fail-loud 并 bump 合同。
 
-## 4. 聚合公式
+## 4. Question credit selector
 
-设固定 roster 大小为 `M=10`，method `m` 在 benchmark `b` 的 raw QA 分为 `s[m,b]`。
-同分使用平均名次，名次越小越好：
+- LoCoMo：冻结 semantic judge 的 correct/wrong `0/1`；F1 只作 native metric。
+- LongMemEval：官方 task-specific yes/no `0/1`。
+- HaluMem：Correct=1，Hallucination/Omission=0。
+- MemBench：choice exact `0/1`。
+- BEAM 普通九类：all rubric items=1 → 1；all=0 → 0；其他 → 0.5。
+- BEAM event ordering：整题 ordered-rubric judge 输出 0/0.5/1。输入必须包含问题、完整有序
+  reference criterion 与回答；1=内容完整且顺序完全正确，0.5=部分正确/局部错序，0=根本错误。
+  原生 rubric/F1/tau/final score 不作为该三档分的替代物，但继续并列落盘。
+
+Abstention M0 只按 fixed answer reader 输出判分；retrieval zero-hit/sufficiency 不进入 v3。
+
+## 5. 聚合
 
 ```text
-rank_score(m,b) = (M - rank(m,b)) / (M - 1)
-overall_qa(m)   = 100 * mean_b(rank_score(m,b))
+capability_score(m,c) = sum(q.credit for q in fixed_Q[c]) / len(fixed_Q[c])
+overall_qa(m)          = sum(q.credit for q in fixed_Q)    / len(fixed_Q)
 ```
 
-因此每个 benchmark 恰好 20% 权重。同步报告 `mean_rank`、五个 raw score 和五个 benchmark
-rank；总分不能脱离 roster/version 单独解释。
+- 一题一票，不做 benchmark 等权或 native-task macro。
+- effective abstention 覆盖原 task，一题不得重复进入两个能力。
+- LME S/M、HaluMem Medium/Long 的同 identity variant 在一个 cohort 中不得重复计权。
+- 同屏报告 question/benchmark/capability 构成；题量权重是固定题池 estimand 的显式组成。
 
-能力族 `t` 在 benchmark `b` 内若含多个原生 task，先宏平均原生 task：
+## 6. 不确定性与报告
 
-```text
-native_mean(m,b,c) = mean(question_score for native task c)
-slice(m,b,t)       = mean_c(native_mean(m,b,c))
-capability(m,t)    = 100 * mean_b(rank_score(slice(m,b,t)))
-```
+- 区间按 isolation 做 paired cluster bootstrap：LoCoMo conversation、LME instance、BEAM
+  conversation、MemBench tid、HaluMem UUID。
+- 报告必须含 overall、capability、benchmark-native metrics、task/count/coverage、guardrail 与成本。
+- overall 不替代原生表；framework-standardized BEAM 三档不得重标为官方分。
 
-这避免某 benchmark 因题量或映射进来的子类型更多而增权。一个跨 benchmark capability 至少需要
-两家 benchmark；否则只输出 native diagnostic。
-
-现行 v2 共七类跨 benchmark 能力；instruction following、长期总结和 noise robustness 因仅有
-一家 benchmark 覆盖，只输出 diagnostic。Conflict 不另立跨 benchmark 父类，而是作为 native
-task 进入 memory revision；preference/personalization 与显式 instruction 仍保持分离。
-
-## 5. 统计与解释
-
-- 95% 区间按 benchmark 的 isolation unit 做**配对 cluster bootstrap**；同一次抽样对十家 method
-  使用相同 isolation id，再完整重算 native mean、rank 与 aggregate。
-- LoCoMo=conversation，LongMemEval=instance，BEAM=conversation，MemBench=tid，
-  HaluMem=UUID。不得把同一 isolation 内的题当独立样本。
-- 区间只覆盖数据抽样不确定性；一次 API 生成/judge 的随机性另行通过 repeat/seed sensitivity 报告。
-- 五个顶层 benchmark 对显著性检验功效很低；不把一次 Friedman/Wilcoxon 的 p 值包装成确定性结论。
-- Overall 只是一条 headline；能力画像、原生 task、覆盖率、失败率、H/O guardrail 与成本必须同屏。
-
-## 6. 硬反例
+## 7. 硬反例
 
 实现必须拒绝：
 
-1. 把 Recall/HaluMem extraction/update 混入 QA overall；
-2. 对五个 raw metric 直接算术平均；
-3. BEAM event-ordering 读取普通 rubric score；
-4. 一个问题进入两个 primary capability；
-5. 按问题数给 benchmark 或 capability 隐式加权；
-6. 缺格后缩小分母、补 0 或用 table min/max normalization；
-7. pilot/smoke 与 formal，或不同 model/prompt/judge identity 混成一个 cohort；
-8. 把单 benchmark diagnostic 宣称成跨 benchmark 能力分。
-9. 用 final answer 拒答替代 memory retrieval boundary，或在未区分 `items=None`/真实 0-hit 时计分。
-10. 把题级 pooled micro 冒充五 benchmark 等权主榜。
+1. 把 retrieval/HaluMem operation 指标混进 QA；
+2. 使用旧 benchmark-equal rank 公式；
+3. 同一题按多个 metric 重复投票；
+4. 把 LoCoMo F1 与 judge score直接混合；
+5. 把 BEAM event-ordering 的逐 item rubric mean当成顺序正确性；
+6. 删除 BEAM native F1/tau/rubric receipt；
+7. 把 answer abstention 宣称为 retrieval zero-hit；
+8. 缺格后缩分母，或重复计算同 identity 的不同长度 variant；
+9. 把 MemBench noisy 或 LoCoMo category 5 偷带进固定题池；
+10. 在 evaluator/answer identity 不一致时发布排名。

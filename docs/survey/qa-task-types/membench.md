@@ -6,7 +6,7 @@ source lane，共 3,400 个独立 tid/choice QA。每题主分均为 A/B/C/D exa
 
 ## 原生 task
 
-| task | 数量 | 定义与真实例子 | 候选理解 |
+| task | 数量 | 定义与真实例子 | 横向映射 |
 | --- | ---: | --- | --- |
 | `simple` | 350 | 回忆一个明确事实；First/roles/tid=0：niece 的公司→`TechInnovate Systems LLC` | 事实回顾 |
 | `conditional` | 350 | 先按条件筛选实体，再回答另一属性；Associate Degree 的人多大？→28 | 多证据筛选 |
@@ -14,11 +14,11 @@ source lane，共 3,400 个独立 tid/choice QA。每题主分均为 A/B/C/D exa
 | `aggregative` | 250 | 对满足条件的实体/事件计数；住在 Philadelphia 的有几人？→2 | 聚合推理 |
 | `post_processing` | 350 | 筛选后再做 suffix、字符数、数字求和等派生变换 | 派生推理 |
 | `knowledge_update` | 200 | 旧事实后来更新，回答当前值；sister 的 hobby→`Camping` | 记忆更新 |
-| `lowlevel_rec` | 150 | 回忆助手明确给过的具体 movie/book/dish 推荐列表 | 推荐内容回顾 |
-| `RecMultiSession` | 50 | 跨 movie/book/dish 多段会话汇总所有助手推荐 | 跨会话推荐回顾 |
+| `lowlevel_rec` | 150 | 回忆助手明确给过的具体 movie/book/dish 推荐列表 | 事实回顾/信息抽取 |
+| `RecMultiSession` | 50 | 跨 movie/book/dish 多段会话汇总所有助手推荐 | 多证据/跨会话推理 |
 | `highlevel` | 800 | 从电影/食物/书推断偏好；emotion 子类推断给定时刻附近情绪 | 个性化/反思性推断 |
 | `highlevel_rec` | 300 | 在推荐、拒绝、喜欢/不喜欢交互中推断抽象偏好；不是列推荐清单 | 个性化/反思性推断 |
-| `noisy` | 350 | 在问题前加入无关“碎碎念”，再用转折短语提出真正问题 | noisy-query 鲁棒性诊断 |
+| `noisy` | 350 | 在问题前加入无关“碎碎念”，再用转折短语提出真正问题 | 单家 noisy-query 诊断；不进入 v3 聚合 |
 
 `scenario`（roles/events/items/places/hybrid/movie/food/book/emotion）是 secondary subtype，不是
 另一套 scorer。`highlevel_rec`、`lowlevel_rec`、`RecMultiSession` 名字都带 rec，但输出语义分别
@@ -41,9 +41,9 @@ What position does someone who has rock climbing as a hobby hold?
 Resistance。100K 长度变体还会另外向历史注入 NoiseData；那是 context-length/noise injection
 轴，与原生 `question_type=noisy` 不是同一个概念。
 
-目前把 `noisy` 作为单 benchmark diagnostic 最诚实。是否把它作为 primary task，还是把
-noise 当 overlay 再恢复底层的 factual/conditional 等语义，需等用户与架构师讨论；数据并未提供
-一个可直接消费的 underlying-task 标签，不能靠问题文本猜测。
+v3 已裁定把 `noisy` 保留为单 benchmark diagnostic，不进入 capability 或 overall。数据没有提供
+可直接消费的 underlying-task 标签，不能靠问题文本猜测后把它重新塞进 factual/conditional 等
+能力。
 
 ## Retrieval 补充面
 

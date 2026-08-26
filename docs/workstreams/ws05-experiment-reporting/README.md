@@ -9,16 +9,16 @@ created: 2026-07-05
 ## Codex 恢复胶囊（2026-08-26）
 
 - **当前目标**：runtime/观测、十家参数/source/embedding provenance 与 isolation 并行门已关闭；
-  真实 API 仍暂停。用户已重开 [QA task aggregation](branches/qa-task-aggregation/README.md)：先审阅
-  五份独立 task 调查和聚合草案，确认 taxonomy/boundary/权重后才进入 cohort receipt。
+  真实 API 仍暂停。用户已确认 [QA task aggregation v3](branches/qa-task-aggregation/README.md) 的
+  taxonomy、answer-only abstention M0、BEAM 三档题分与题目级 pooled micro；当前先升级可执行合同。
 - **当前批次**：
   [runtime 配置与观测 M0-M5](branches/runtime-config-and-observability/plan.md) 已完成无 API验收；
   [ws05.1 method profile provenance](../ws05.1-method-profile-provenance/README.md) 的 M0/M0.5、
   M1 LightMem、M2 A-Mem、M3 Mem0、M4 MemoryOS、M5 MemOS、M6 SimpleMem、M7 Letta、M8
   LangMem、M9 EverOS、M10 Graphiti OSS 与 M11 横向实现均已闭合；ws05.1 状态为 done。
-- **当前判据**：[五家任务调查索引](../../survey/qa-task-types/README.md) 中的单家事实已闭合；
-  [aggregation draft](../../survey/qa-task-types/aggregation-draft.md) 只是候选。正式方案必须经用户
-  确认，且 memory retrieval boundary 不能被 final answer abstention 替代。
+- **当前判据**：[正式聚合合同](../../survey/qa-task-types/aggregation.md) 已获用户确认；现有
+  `qa-task-aggregation-v2-draft` 仍只作旧强反例，M0-R2 验收前不得 formal 排名。Abstention v3
+  有意只测 fixed-reader answer，不宣称 retrieval boundary。
 - **现场证据**：十家 method 主 TOML 已单源化，runtime/execution composition 进入严格 resume
   identity v2；九家 controlled MiniLM 锁同一组本地 bytes/tokenizer/runtime，Letta embedding=N/A；
   十家 source closure v2 与 EverOS effective strategy 均已闭合。M11 最终零 API 全量门为
@@ -31,8 +31,9 @@ created: 2026-07-05
   授权/执行。
 - **禁止事项**：用户重新批准规模/run_id 前，不恢复真实 pilot；不得改写旧
   artifact、把旧 embedding build 重标为新 controlled identity，或用 lineage 伪造 metric 资格。
-- **当前动作**：等待用户阅读五份 task 文档并逐项讨论 aggregation draft；`v2-draft` 不得用于
-  formal 排名。裁决后才完成正式 cohort identity receipt、报告写出面与 paired cluster bootstrap。现有 `predict pilot` 只含固定首 isolation，
+- **当前动作**：实现 M0-R2：BEAM event-ordering ordered-rubric 整题 judge、普通题三档 selector、
+  最终 taxonomy 与 pooled-micro artifact；验收后才进入 cohort identity receipt、报告写出面与
+  paired cluster bootstrap。现有 `predict pilot` 只含固定首 isolation，
   `predict formal --conversation-budget` 虽可续跑却绑定正式 runtime；两者均不能直接冒充用户提出的
   “代表 isolation 先跑 1 个、随后同 cheap-runtime run 继续”的身份。模型、规模、run-id 与新命令面
   未经用户裁定前不创建 run。M11 前的 method state 不 resume；作者校准与主 controlled run 分开。
@@ -48,11 +49,12 @@ created: 2026-07-05
 运行账：
 [`ox 完整 isolation pilot 矩阵账`](notes/2026-08-21-ox-complete-isolation-pilot-ledger.md)。
 
-- 2026-08-26：用户裁定主聚合只回答 QA/readout，不把 method 资格不齐的 retrieval metric 或
-  HaluMem Extraction/Updating/memory-type 混入总分。当前支线为
-  [QA task aggregation](branches/qa-task-aggregation/README.md)：五 benchmark 总榜各一票；能力榜
-  使用唯一 primary capability 映射和 benchmark 内 native-task macro；固定十家 roster 缺格即
-  incomplete。pilot/smoke 只能验管线，正式排名要求完整 `formal` cohort。
+- 2026-08-26：用户最终确认 QA v3：固定题池逐题一票，不再五 benchmark 等权；update、HaluMem
+  错误前提、BEAM 历史内部矛盾拆分；personalization/instruction 分开；lowlevel_rec 归事实回顾，
+  noisy 与 LoCoMo category 5 排除；abstention M0 只看 fixed answer LLM；BEAM 十类均可进入聚合，
+  普通题与 event ordering 使用标准化三档 credit，后者由有序整题 rubric judge 同时检查内容和
+  顺序，native F1/tau/rubric 继续并列报告。入口见
+  [aggregation.md](../../survey/qa-task-types/aggregation.md)。
 - 2026-08-26：用户纠正了 M0-R1 的两个越权收口：① boundary 若评测 memory module，检索出
   无关记忆即失败，不能只靠 reader 最终拒答；②交付物应为五份独立 benchmark task 文档 + 一份
   聚合讨论稿，先审阅讨论、再定正式合同。current artifact 又把 `items=None` 与 `items=()` 都写成
@@ -125,8 +127,8 @@ created: 2026-07-05
 
 ### 开跑前 QA 聚合合同
 
-- [ ] QA task taxonomy v2：五家独立调查已完成；跨 benchmark 能力、boundary 与权重待用户确认。
-- [x] 五 benchmark 等权 overall + capability rank-score artifact-only 内核与强反例。
+- [x] QA task taxonomy/score/weight v3 已获用户确认并落稳定合同。
+- [ ] M0-R2 把旧 benchmark-equal `v2-draft` 内核升级为题目级 pooled-micro 可执行合同。
 - [ ] 正式 cohort identity receipt、isolation-level paired bootstrap 与报告表面。
 
 ### 申请材料（依赖 ws02）
