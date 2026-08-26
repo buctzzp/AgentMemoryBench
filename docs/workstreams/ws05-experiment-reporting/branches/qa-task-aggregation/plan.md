@@ -26,12 +26,13 @@
 
 ## M0-R2 — 可执行合同升级（当前）
 
-- [ ] 新增 BEAM event-ordering ordered compound-rubric judge 输出与 evaluator identity。
-- [ ] 为 BEAM 普通题实现确定性的 question-level 三档 selector。
-- [ ] 把 executable taxonomy 从 `v2-draft` 升级为 v3：拆分三类 revision/conflict、移除 noisy。
-- [ ] 把主 selector 改为 answer-correctness + question pooled micro；旧 v2 artifact 只读不 resume。
-- [ ] 增加强反例：倒序但内容齐全、部分错序、混合 rubric、abstention 只读 answer、题数权重。
-- [ ] 定向测试、文档门与架构验收通过后才进入 M1。
+- [x] 新增 BEAM event-ordering ordered compound-rubric judge 输出与 evaluator identity。
+- [x] 为 BEAM 普通题实现确定性的 question-level 三档 selector。
+- [x] 把 executable taxonomy 从 `v2-draft` 升级为 v3：拆分三类 revision/conflict、移除 noisy。
+- [x] 把主 selector 改为 answer-correctness + question pooled micro；旧 v2 artifact 只读不 resume。
+- [x] 增加强反例：倒序但内容齐全、部分错序、混合 rubric、abstention 只读 answer、题数权重。
+- [x] 定向测试、文档门与架构验收通过；全量仅保留基线已复现的两个 ws02.7 ledger 失败，
+  M0-R2 相对基线零回归。下一步可进入 M1。
 
 ## M1 — 正式 cohort 组装（首批 formal 前）
 

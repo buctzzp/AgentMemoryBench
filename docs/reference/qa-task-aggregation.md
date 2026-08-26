@@ -1,71 +1,70 @@
-# Phase 1 QA 任务类型与聚合契约
+# Phase 1 QA 任务类型与聚合执行契约
 
-> 当前版本：`qa-task-aggregation-v2-draft`（2026-08-26）。**用户尚未确认，禁止用于 formal
-> 排名。**先逐一阅读 [五家独立任务类型调查](../survey/qa-task-types/README.md)，再看
-> [聚合讨论稿](../survey/qa-task-types/aggregation-draft.md)。本页只是当前可执行候选合同。
+当前版本：`qa-task-aggregation-v3`（2026-08-26）。用户已确认 taxonomy、逐题 score 与权重；
+M0-R2 可执行内核已实现。正式方法排名仍须等待 M1 锁定完整 10×5 cohort receipt。
 
-## 1. 主榜边界
+人类可读的完整裁决见 [稳定聚合合同](../survey/qa-task-types/aggregation.md)，五家原生题型、
+例子与 scorer 见 [任务类型调查索引](../survey/qa-task-types/README.md)。
 
-主榜只比较五个 benchmark 的 QA/readout 效果：LoCoMo、LongMemEval、BEAM、MemBench、
-HaluMem QA。Recall/Precision/NDCG、HaluMem Extraction/Updating/memory-type 均另表报告；
-N/A 不扣 QA 分，也不得为填榜伪造能力。
+## 1. 聚合边界
 
-## 2. 报告结构
+主榜只比较 LoCoMo、LongMemEval、BEAM、MemBench 与 HaluMem 的 QA/readout。Recall、
+Precision、NDCG、HaluMem extraction/update/memory-type 与成本效率均单独报告，不混入 QA。
 
-1. **Overall QA**：五 benchmark 各一票，固定十家 method 内平均名次归一到 0–100。
-2. **Capability profile**：按下表的 primary capability 跨 benchmark 聚合。
-3. **Native task detail**：保留每家原生命名、raw metric、样本数与原生聚合。
-4. **Coverage/guardrail**：缺 run、失败、parse-failed、HaluMem H/O、身份不一致。
-5. **Efficiency/cost**：单独报告，必要时画 quality-cost Pareto；不混进质量总分。
+可答性边界 M0 只看固定 framework answer reader 的最终输出；它不宣称 provider 检索为空。
+LoCoMo category 5 与 MemBench noisy 明确排除，后者只保留为单家诊断。
 
-## 3. Primary capability 映射
+## 2. 十一项能力
 
-| capability | LoCoMo | LongMemEval | BEAM | MemBench | HaluMem |
-|---|---|---|---|---|---|
-| factual recall / extraction | 4 | single-session-user, single-session-assistant | information_extraction | simple, lowlevel_rec | Basic Fact Recall |
-| multi-evidence recall / reasoning | 1 | multi-session | multi_session_reasoning | conditional, comparative, aggregative, post_processing, RecMultiSession | Multi-hop Inference |
-| temporal / event reasoning | 2 | temporal-reasoning | temporal_reasoning, event_ordering | — | — |
-| memory revision | — | knowledge-update | knowledge_update, contradiction_resolution | knowledge_update | Dynamic Update, Memory Conflict |
-| personalization | — | single-session-preference | preference_following | highlevel, highlevel_rec | — |
-| answerability boundary | — | question_id suffix `_abs` | abstention | — | Memory Boundary |
-| generalization / application | 3 | — | — | — | Generalization & Application |
-| instruction following | — | — | instruction_following | — | — |
-| long-horizon summarization | — | — | summarization | — | — |
-| noise robustness | — | — | — | noisy | — |
+1. `factual_recall_extraction`
+2. `multi_evidence_recall_reasoning`
+3. `temporal_event_reasoning`
+4. `memory_update`
+5. `false_premise_correction`
+6. `history_contradiction_resolution`
+7. `personalization`
+8. `instruction_following`
+9. `answerability_boundary`
+10. `generalization_application`
+11. `long_horizon_summarization`
 
-每题恰好一个 primary capability 的规则、Conflict/update 和 personalization/instruction 映射仍待
-用户确认。边界题必须拆开报告：官方 QA judge 只能证明 final answer abstention；若要声称 memory
-module boundary 正确，还须证明 typed zero-hit/`no_relevant_memory`，返回无关记忆应判 retrieval
-boundary 失败。
+记忆更新、HaluMem 错误前提纠正与 BEAM 历史内部矛盾消解是三个不同成功行为；偏好个性化
+与显式指令遵循也保持分离。
 
-## 4. 公式
+## 3. 逐题 credit
 
-固定 roster 为十家 method；同分取平均名次：
+| benchmark | v3 聚合题分 | 继续旁报的原生面 |
+| --- | --- | --- |
+| LoCoMo | `locomo_judge_accuracy` 的 `0/1` | `locomo_f1` |
+| LongMemEval | 官方 task-specific judge 的 `0/1` | native type accuracy |
+| HaluMem | Correct=1，Hallucination/Omission=0 | C/H/O 比例 |
+| MemBench | choice exact `0/1` | choice/parse diagnostics |
+| BEAM 普通九类 | item 全 1→1、全 0→0、其余→0.5 | float rubric mean、official-int parity |
+| BEAM event ordering | 有序整题 judge 的 `0/0.5/1` | item rubric、F1、`tau_norm`、official final |
+
+BEAM 新字段由 `beam-question-credit-v1` 盖章。旧 score row 缺
+`aggregation_question_credit`、版本或匹配 profile 时 fail-loud，不回落到 rubric mean 或 tau。
+event-ordering 整题 prompt 标为 `framework_ordered_compound_rubric_v1`，不会冒充官方指标。
+
+## 4. 逐题 pooled micro
 
 ```text
-benchmark_rank_score = (10 - rank) / 9
-overall_qa            = 100 * 五个 benchmark_rank_score 的平均
+capability_score(m, c) = sum(question_credit[m, q] for q in Q[c]) / |Q[c]|
+overall_qa(m)           = sum(question_credit[m, q] for q in Q)    / |Q|
 ```
 
-能力族先在每个 benchmark 内对原生 task 做宏平均，再在该 benchmark 内对十家 method 排名，
-最后对 contributing benchmarks 等权平均。一个 benchmark 对一个能力族最多一票。只有一家
-benchmark 的能力只作 diagnostic，不产生 cross-benchmark capability score。
+一题一票，不做 benchmark 等权、average-rank 归一化或 native-task macro。machine report 同时
+写入 `credit_sum`、`question_count`、均值、benchmark contribution 与基于 pooled score 的并列
+平均名次；排名不反向参与分数。
 
-禁止把五家逐题分数直接混池。完整题池会让 MemBench 与 HaluMem 因发布题量合计获得 73.78%
-权重，同时把 LoCoMo F1、BEAM 0/0.5/1 rubric/tau 与三种 accuracy 当成同一尺度。题级 pooled
-micro 只可作为明确标注的 “released-item population” sensitivity，不能替代五 benchmark 等权主榜。
+缺格、失败、run scope 错误、dataset/question/answer/evaluator identity 不一致均输出
+`incomplete`，不得缩小分母。LongMemEval S/M 与 HaluMem Medium/Long 的同一 question identity
+在一个正式 cohort 中只能选择一个 variant。
 
-## 5. QA primary score
+## 5. 当前发布门
 
-- LoCoMo：F1；LongMemEval：官方 judge accuracy；MemBench：choice accuracy；HaluMem：QA Correct。
-- BEAM 普通 ability 用 float rubric score；event_ordering 用官方报告实际消费的 `tau_norm`。
-- 五个 raw score 只在各自 benchmark 内比较，不直接相加。
-
-## 6. 发布门
-
-- 主排名只接受 `formal` 完整 10×5 cohort；pilot/smoke 只验管线。
-- 同一 benchmark 的 variant、data/question cohort、answer model/prompt/transport、judge
-  model/prompt/transport 必须相同。
-- 缺格为 incomplete：不补零、不缩分母、不借旧 artifact 拼榜。
-- raw score、rank、rank-score、question/native-task 数、coverage 与 contract version 必须同时落盘。
-- 95% CI 采用 isolation-level paired cluster bootstrap；API 随机性不在该区间内，需另做 repeat。
+- M0-R2 已完成 deterministic kernel、BEAM evaluator receipt、artifact loader 与 pooled report。
+- 旧 `qa-task-aggregation-v2-draft` 只读，不与 v3 混合。
+- M1 仍须生成正式 cohort receipt，锁 variant、完整 question IDs、十家 run IDs 与 answer/judge
+  identity；在该门完成前不得发布正式排名。
+- M2 才加入 isolation-level paired cluster bootstrap 与最终人类可读报告。

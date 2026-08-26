@@ -20,7 +20,8 @@ benchmark 原生有哪些题、每类题到底在测什么、真实例子是什�
 
 - 五份单家文档中的 source identity、原生类型、计数、例子和 scorer 是已复核的调查事实。
 - 横向能力、abstention M0 边界、BEAM 三档题分与 pooled-micro 权重已在
-  [聚合合同](aggregation.md) 中确认；可执行代码尚未从 `v2-draft` 升级前仍不得 formal 排名。
+  [聚合合同](aggregation.md) 中确认；可执行内核现为 `qa-task-aggregation-v3`，但正式 cohort
+  receipt 尚未锁定，因此仍不得发布 formal 排名。
 - 检索级 Recall/NDCG、HaluMem extraction/update/memory-type 仍与 QA/readout 分开。
 - 可答性边界 M0 只按固定 answer LLM 的最终输出评分；retrieval zero-hit/sufficiency 延后，不阻塞
   QA 聚合，也不由旧 artifact 空 list 反推。

@@ -22,7 +22,14 @@ from memory_benchmark.evaluators.beam_rubric_judge import (
     _index_by_question_id,
     _parse_judge_json,
 )
-from memory_benchmark.core.exceptions import JudgeOutputError
+from memory_benchmark.core.exceptions import ConfigurationError, JudgeOutputError
+from memory_benchmark.metrics import (
+    BEAM_ORDINARY_QUESTION_CREDIT_PROFILE,
+    BEAM_QUESTION_CREDIT_CONTRACT_VERSION,
+)
+from memory_benchmark.prompts.benchmarks.beam import (
+    BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE,
+)
 from memory_benchmark.runners.evaluation import run_artifact_evaluation
 from memory_benchmark.storage import ExperimentPaths, read_jsonl
 
@@ -79,6 +86,27 @@ class _MixedFakeClient:
         score = scores[self.call_count % 3]
         self.call_count += 1
         return {"score": score, "reason": "mixed"}
+
+
+class _EventOrderingFakeClient(_FakeBeamJudgeClient):
+    """逐 item 固定满分，但整题 ordered prompt 返回独立三档分。"""
+
+    def __init__(self, ordered_score: float) -> None:
+        """保存整题顺序分。"""
+
+        super().__init__(score=1.0)
+        self.ordered_score = ordered_score
+
+    def judge_json(self, prompt: str) -> dict[str, Any]:
+        """区分官方逐 item prompt 与 framework 整题顺序 prompt。"""
+
+        self.calls.append(prompt)
+        score = (
+            self.ordered_score
+            if "ORDERED REFERENCE EVENTS" in prompt
+            else self.score
+        )
+        return {"score": score, "reason": "ordered fixture"}
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +216,7 @@ def test_rubric_aggregation_aligns_with_official_formula() -> None:
     assert len(record["item_scores"]) == 3
     for item_score in record["item_scores"]:
         assert item_score["score"] == 0.5
+    assert record["aggregation_question_credit"] == 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +247,7 @@ def test_score_0_5_is_preserved_not_truncated_to_0() -> None:
     )
     assert record["score"] != 0.0, "0.5 must NOT be truncated to 0 (official int() bug)"
     assert record["llm_judge_score_official_int"] == 0.0
+    assert record["aggregation_question_credit"] == 0.5
 
 
 def test_score_mixture_preserves_float_precision() -> None:
@@ -235,6 +265,33 @@ def test_score_mixture_preserves_float_precision() -> None:
     expected = (1.0 + 0.5 + 0.0) / 3
     assert record["score"] == pytest.approx(expected)
     assert record["score"] == pytest.approx(0.5)
+    assert record["aggregation_question_credit"] == 0.5
+
+
+@pytest.mark.parametrize(
+    ("item_score", "expected_credit"),
+    [(1.0, 1.0), (0.0, 0.0)],
+)
+def test_ordinary_question_credit_requires_all_or_none(
+    item_score: float,
+    expected_credit: float,
+) -> None:
+    """普通题全满足才得 1、全不满足才得 0。"""
+
+    evaluator = BeamRubricJudgeEvaluator(
+        mode="compact",
+        client=_FakeBeamJudgeClient(score=item_score),
+    )
+    record = _run_mini_evaluation(
+        evaluator,
+        rubric=["item a", "item b"],
+        ability="information_extraction",
+    )[0]
+
+    assert record["aggregation_question_credit"] == expected_credit
+    assert record["aggregation_question_credit_profile"] == (
+        BEAM_ORDINARY_QUESTION_CREDIT_PROFILE
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +315,7 @@ def test_ability_breakdown_covers_all_10_abilities() -> None:
                     "item_scores": [],
                     "metric_name": "beam_rubric_judge",
                     "record_kind": "beam_rubric_judge",
+                    **_question_credit_fields(ability, 0.5),
                 }
             )
 
@@ -277,6 +335,14 @@ def test_ability_breakdown_covers_all_10_abilities() -> None:
 
     overall = payload["summary"]["overall_score"]
     assert overall["beam_rubric_judge_mean"] == pytest.approx(0.75)
+    assert overall["aggregation_question_credit_mean"] == pytest.approx(0.5)
+    assert payload["summary"][
+        "aggregation_question_credit_contract_version"
+    ] == BEAM_QUESTION_CREDIT_CONTRACT_VERSION
+    assert set(payload["summary"]["aggregation_question_credit_profiles"]) == {
+        BEAM_ORDINARY_QUESTION_CREDIT_PROFILE,
+        BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE,
+    }
 
 
 def test_ability_breakdown_handles_missing_abilities() -> None:
@@ -292,6 +358,7 @@ def test_ability_breakdown_handles_missing_abilities() -> None:
             "item_scores": [],
             "metric_name": "beam_rubric_judge",
             "record_kind": "beam_rubric_judge",
+            **_question_credit_fields("abstention", 0.5),
         }
     ]
 
@@ -346,6 +413,69 @@ def test_event_ordering_uses_newline_split_llm_alignment_and_composite() -> None
     assert record["details"]["event_ordering_composite_score"] == 1.0
     assert record["details"]["prediction_split"] == "llm_response.split('\\n')"
     assert len(evaluator.client.equivalence_calls) == 2
+    assert record["aggregation_question_credit"] == 1.0
+    assert record["aggregation_question_credit_source"] == (
+        "ordered_compound_rubric_llm"
+    )
+    assert record["aggregation_question_credit_profile"] == (
+        BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE
+    )
+
+
+def test_event_ordering_reversed_complete_answer_cannot_inherit_item_full_score() -> None:
+    """事件全出现但完全倒序时，整题 credit 不得沿用逐 item 的 1 分。"""
+
+    evaluator = BeamRubricJudgeEvaluator(
+        mode="compact",
+        client=_EventOrderingFakeClient(ordered_score=0.0),
+    )
+    record = _run_mini_evaluation(
+        evaluator,
+        rubric=["event A", "event B", "event C"],
+        answer="event C\nevent B\nevent A",
+        ability="event_ordering",
+    )[0]
+
+    assert record["score"] == 1.0
+    assert [item["score"] for item in record["item_scores"]] == [1.0, 1.0, 1.0]
+    assert record["details"]["event_ordering_tau_norm"] == pytest.approx(0.0)
+    assert record["aggregation_question_credit"] == 0.0
+
+
+def test_event_ordering_local_inversion_preserves_partial_credit() -> None:
+    """内容齐全但局部错序可由整题 judge 给 0.5。"""
+
+    evaluator = BeamRubricJudgeEvaluator(
+        mode="compact",
+        client=_EventOrderingFakeClient(ordered_score=0.5),
+    )
+    record = _run_mini_evaluation(
+        evaluator,
+        rubric=["event A", "event B", "event C"],
+        answer="event A\nevent C\nevent B",
+        ability="event_ordering",
+    )[0]
+
+    assert record["score"] == 1.0
+    assert 0.0 < record["details"]["event_ordering_tau_norm"] < 1.0
+    assert record["aggregation_question_credit"] == 0.5
+
+
+def test_event_ordering_credit_rejects_non_tristate_judge_output() -> None:
+    """整题 judge 返回 0.75 等未定义值必须 fail-loud。"""
+
+    evaluator = BeamRubricJudgeEvaluator(
+        mode="compact",
+        client=_EventOrderingFakeClient(ordered_score=0.75),
+    )
+
+    with pytest.raises(ConfigurationError, match="exactly 0, 0.5, or 1"):
+        _run_mini_evaluation(
+            evaluator,
+            rubric=["event A", "event B"],
+            answer="event B\nevent A",
+            ability="event_ordering",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -676,10 +806,11 @@ def test_beam_event_ordering_equivalence_records_usage_without_double_count(
     )
     scores = read_jsonl(Path(summary.score_path))
 
-    # 2 条 rubric + 2 次判等 = 4 次真实调用；observation 数恰好等于调用数（不双计）。
-    assert len(client.calls) == 4
-    assert len(observations) == 4
-    assert len({observation["observation_id"] for observation in observations}) == 4
+    # 2 条 rubric + 2 次官方判等 + 1 次 v3 整题顺序 judge = 5 次真实调用；
+    # observation 数恰好等于调用数（不双计）。
+    assert len(client.calls) == 5
+    assert len(observations) == 5
+    assert len({observation["observation_id"] for observation in observations}) == 5
     for observation in observations:
         assert observation["stage"] == "judge"
         assert observation["model_id"] == "judge-llm"
@@ -697,6 +828,39 @@ def test_beam_event_ordering_equivalence_records_usage_without_double_count(
     ]
     assert equivalence_inputs[0][0] == dict(BEAM_EQUIVALENCE_MESSAGES[0])
 
+    ordered_inputs = [
+        call["input"]
+        for call in client.calls
+        if isinstance(call["input"], str)
+        and "ORDERED REFERENCE EVENTS" in call["input"]
+    ]
+    assert len(ordered_inputs) == 1
+    assert "1. event A\n2. event B" in ordered_inputs[0]
+    assert "QUESTION:\norder?" in ordered_inputs[0]
+
     # 完美对齐时分数与 composite 保持不变。
     assert scores[0]["score"] == pytest.approx(1.0)
     assert scores[0]["details"]["event_ordering_composite_score"] == 1.0
+    assert scores[0]["aggregation_question_credit"] == 1.0
+
+
+def _question_credit_fields(ability: str, credit: float) -> dict[str, object]:
+    """构造 payload 单测所需的 v3 BEAM question-credit 收据。"""
+
+    return {
+        "aggregation_question_credit": credit,
+        "aggregation_question_credit_contract_version": (
+            BEAM_QUESTION_CREDIT_CONTRACT_VERSION
+        ),
+        "aggregation_question_credit_source": (
+            "ordered_compound_rubric_llm"
+            if ability == "event_ordering"
+            else "rubric_item_tristate"
+        ),
+        "aggregation_question_credit_profile": (
+            BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE
+            if ability == "event_ordering"
+            else BEAM_ORDINARY_QUESTION_CREDIT_PROFILE
+        ),
+        "aggregation_question_credit_reason": "fixture",
+    }

@@ -21,13 +21,14 @@ Recall@K、Precision@K、HaluMem Extraction、HaluMem Updating 或 memory-type�
 - Recall/Precision/NDCG 与 HaluMem operation 指标不混进 QA raw score。
 - 五家原生 task、横向 taxonomy、abstention M0 与题目级 pooled 权重均已确认。
 - Abstention M0 只按固定 answer LLM 输出判分；retrieval boundary 是后续增强，本合同不宣称已测。
-- 当前可执行映射版本是 `qa-task-aggregation-v2-draft`，只供强反例和讨论，不得用于 formal 排名。
+- 当前可执行版本是 `qa-task-aggregation-v3`；旧 `v2-draft` 只读。M1 cohort receipt 完成前仍
+  不得发布 formal 排名。
 
 ## 当前断点
 
-M0-R1 讨论已闭合，正式人类可读合同与 spec v3 已落盘；现有 Python 仍是
-`qa-task-aggregation-v2-draft`，不得 formal 排名。下一批 M0-R2 实现 BEAM 整题顺序 judge、三档
-selector、最终 taxonomy 与 pooled-micro artifact；真实 API 与 pilot 继续暂停。
+M0-R2 已闭合：BEAM 整题顺序 judge、普通题三档 selector、最终 taxonomy、answer-only
+abstention 与逐题 pooled-micro artifact 均已实现并通过零 API 门。下一批 M1 只组装正式 cohort
+receipt 与 machine-readable report 写出面；真实 API 与 pilot 继续暂停。
 
 ## 文档索引
 
@@ -40,6 +41,8 @@ selector、最终 taxonomy 与 pooled-micro artifact；真实 API 与 pilot 继�
 - [正式聚合合同](../../../../survey/qa-task-types/aggregation.md)：最终 taxonomy、题分、边界与权重。
 - [已归档讨论稿](../../../../survey/qa-task-types/aggregation-draft.md)：三种旧候选与裁决过程。
 - [v3 最终裁决](notes/2026-08-26-qa-task-aggregation-v3-ruling.md)：用户确认与一手证据摘要。
+- [M0-R2 实现记录](notes/2026-08-26-qa-task-aggregation-m0-r2-implementation.md)：可执行 v3、
+  BEAM receipt、强反例与兼容边界。
 - [M0-R1 v2 候选记录](notes/2026-08-26-qa-task-taxonomy-v2-ruling.md)：一手复核与被用户重开的旧候选。
 - [Boundary/文档拆分重开](notes/2026-08-26-boundary-and-document-split-reopen.md)：本轮用户纠正、
   typed zero-hit 缺口与新交付结构。

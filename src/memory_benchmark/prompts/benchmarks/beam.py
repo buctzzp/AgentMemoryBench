@@ -158,10 +158,42 @@ BEAM_JUDGE_OFFICIAL_SOURCE = (
 BEAM_JUDGE_PROFILE_NOTE = (
     "The official prompt explicitly permits 1.0, 0.5 or 0.0 at prompts.py:11579-11613, "
     "while compute_metrics.py truncates 0.5 via int() at lines 357,385,454,483,512,541,"
-    "570,599,628. The primary score follows the prompt's float intent and details retain "
-    "the official-int comparison. Official judge model was gpt-4.1-mini; "
+    "570,599,628. The native rubric score follows the prompt's float intent and details "
+    "retain the official-int comparison. QA aggregation reads a separate versioned "
+    "question-credit field and does not overwrite native rubric/F1/tau. "
+    "Official judge model was gpt-4.1-mini; "
     "this project uses gpt-4o-mini by policy."
 )
+
+# BEAM 官方 event-ordering 另报 F1/Kendall tau，但共享逐 item judge 不能独自判断
+# 整体相对顺序。下述 profile 是项目 v3 聚合专用的整题三档 judge，不冒充官方指标。
+BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE = (
+    "framework_ordered_compound_rubric_v1"
+)
+BEAM_EVENT_ORDERING_CREDIT_PROMPT = """You are evaluating one event-ordering answer.
+
+QUESTION:
+<question>
+
+ORDERED REFERENCE EVENTS (the listed order is authoritative):
+<ordered_reference>
+
+RESPONSE TO EVALUATE:
+<llm_response>
+
+Judge BOTH semantic event coverage and relative ordering. Paraphrases are allowed.
+
+SCORING:
+- 1.0: all required events are present and their relative order is fully correct.
+- 0.5: the response shows meaningful partial correctness, but omits an event, includes a
+  minor inaccurate event, or contains one or more local ordering errors.
+- 0.0: the response is non-responsive, fundamentally incorrect, or provides no meaningful
+  ordered reconstruction.
+
+Return only a JSON object:
+{"score": 1.0, "reason": "short justification"}
+The score must be exactly 1.0, 0.5, or 0.0.
+"""
 
 
 __all__ = [
@@ -169,6 +201,8 @@ __all__ = [
     "BEAM_ANSWER_PROMPT_PROFILE",
     "BEAM_ANSWER_PROMPT_TEMPLATE",
     "BEAM_EQUIVALENCE_MESSAGES",
+    "BEAM_EVENT_ORDERING_CREDIT_PROMPT",
+    "BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE",
     "BEAM_JUDGE_OFFICIAL_SOURCE",
     "BEAM_JUDGE_PROFILE_NOTE",
     "BEAM_JUDGE_PROMPT",

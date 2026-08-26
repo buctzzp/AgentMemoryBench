@@ -1,6 +1,7 @@
 # QA Task Aggregation v3 Spec
 
-状态：**taxonomy/score/weight 已于 2026-08-26 获用户确认；实现与正式 cohort 尚未验收。**
+状态：**taxonomy/score/weight 已于 2026-08-26 获用户确认；M0-R2 实现已验收，正式 cohort
+receipt 尚待 M1。**
 稳定的人类可读合同见 `docs/survey/qa-task-types/aggregation.md`。
 
 ## 1. Estimand

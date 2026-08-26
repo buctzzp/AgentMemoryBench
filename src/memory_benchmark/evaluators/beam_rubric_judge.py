@@ -1,8 +1,9 @@
 """BEAM rubric judge 与 event-ordering 官方有效评测面。
 
-九类逐条 rubric 打分；event_ordering 另按官方实际调用路径计算
-LLM 语义判等后的 Kendall tau-b x F1 复合分。主分保留 prompt 明确允许的
-0.5，同时记录官方 ``int()`` 截断对照分。
+十类均保留官方逐条 rubric 面；event_ordering 另按官方实际调用路径计算
+LLM 语义判等后的 Kendall tau-b x F1 复合分。v3 横向聚合再写独立三档
+question credit：普通题确定性规约 item 分，event_ordering 用有序整题 judge。
+原生 float、官方 ``int()`` 截断对照与 F1/tau 均不被覆盖。
 """
 
 from __future__ import annotations
@@ -14,8 +15,16 @@ from scipy.stats import kendalltau
 
 from memory_benchmark.core.exceptions import ConfigurationError, JudgeOutputError
 from memory_benchmark.evaluators.llm_judge import LLMJudgeEvaluator
+from memory_benchmark.metrics import (
+    BEAM_ORDINARY_QUESTION_CREDIT_PROFILE,
+    BEAM_QUESTION_CREDIT_CONTRACT_VERSION,
+    ordinary_beam_question_credit,
+    require_beam_question_credit,
+)
 from memory_benchmark.prompts.benchmarks.beam import (
     BEAM_EQUIVALENCE_MESSAGES,
+    BEAM_EVENT_ORDERING_CREDIT_PROMPT,
+    BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE,
     BEAM_JUDGE_OFFICIAL_SOURCE,
     BEAM_JUDGE_PROFILE_NOTE,
     BEAM_JUDGE_PROMPT,
@@ -125,6 +134,10 @@ class BeamRubricJudgeEvaluator(LLMJudgeEvaluator):
 
             if not rubric:
                 continue
+            if ability not in BEAM_ABILITY_KEYS:
+                raise ConfigurationError(
+                    f"unknown BEAM ability in private label: {ability!r}"
+                )
 
             conversation_id = public_record.get("conversation_id")
             # 同一真实公开问题的全部 rubric-item judge 与 event-ordering 判等调用共用一个
@@ -143,7 +156,10 @@ class BeamRubricJudgeEvaluator(LLMJudgeEvaluator):
                         "<llm_response>", prediction_text
                     )
                     result = self._judge_json(prompt)
-                    item_score = float(result["score"])
+                    item_score = require_beam_question_credit(
+                        result.get("score"),
+                        label="BEAM rubric item judge score",
+                    )
                     item_scores.append(
                         {
                             "rubric_item": rubric_item,
@@ -156,6 +172,12 @@ class BeamRubricJudgeEvaluator(LLMJudgeEvaluator):
 
                 llm_judge_score = total_score / len(rubric) if rubric else 0.0
                 official_int_score = official_int_total / len(rubric) if rubric else 0.0
+                question_credit = ordinary_beam_question_credit(
+                    item["score"] for item in item_scores
+                )
+                question_credit_source = "rubric_item_tristate"
+                question_credit_profile = BEAM_ORDINARY_QUESTION_CREDIT_PROFILE
+                question_credit_reason = ""
 
                 event_details: dict[str, Any] = {}
                 if ability == "event_ordering":
@@ -164,6 +186,23 @@ class BeamRubricJudgeEvaluator(LLMJudgeEvaluator):
                         system=prediction_text.split("\n"),
                         equivalent=self._judge_equivalence,
                     )
+                    ordered_result = self._judge_json(
+                        _event_ordering_credit_prompt(
+                            question_text=str(question_text),
+                            reference=list(map(str, rubric)),
+                            prediction_text=str(prediction_text),
+                        )
+                    )
+                    question_credit = require_beam_question_credit(
+                        ordered_result.get("score"),
+                        label="BEAM event-ordering question credit",
+                    )
+                    question_credit_source = "ordered_compound_rubric_llm"
+                    question_credit_profile = (
+                        BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE
+                    )
+                    reason = ordered_result.get("reason", "")
+                    question_credit_reason = reason if isinstance(reason, str) else ""
 
             score_records.append(
                 {
@@ -182,6 +221,13 @@ class BeamRubricJudgeEvaluator(LLMJudgeEvaluator):
                     "event_ordering_composite_score": event_details.get(
                         "event_ordering_composite_score"
                     ),
+                    "aggregation_question_credit": question_credit,
+                    "aggregation_question_credit_contract_version": (
+                        BEAM_QUESTION_CREDIT_CONTRACT_VERSION
+                    ),
+                    "aggregation_question_credit_source": question_credit_source,
+                    "aggregation_question_credit_profile": question_credit_profile,
+                    "aggregation_question_credit_reason": question_credit_reason,
                 }
             )
 
@@ -236,6 +282,28 @@ def _equivalence_messages_text(messages: list[dict[str, str]]) -> str:
 
     return "\n".join(
         f"{message['role']}: {message['content']}" for message in messages
+    )
+
+
+def _event_ordering_credit_prompt(
+    *,
+    question_text: str,
+    reference: list[str],
+    prediction_text: str,
+) -> str:
+    """构造 framework-standardized event-ordering 整题三档 judge prompt。"""
+
+    if not reference:
+        raise ConfigurationError(
+            "BEAM event-ordering question credit requires non-empty reference"
+        )
+    ordered_reference = "\n".join(
+        f"{index}. {item}" for index, item in enumerate(reference, start=1)
+    )
+    return (
+        BEAM_EVENT_ORDERING_CREDIT_PROMPT.replace("<question>", question_text)
+        .replace("<ordered_reference>", ordered_reference)
+        .replace("<llm_response>", prediction_text)
     )
 
 
@@ -364,27 +432,63 @@ def _build_evaluation_payload(
                 "category_breakdown": [],
                 "official_source": BEAM_JUDGE_OFFICIAL_SOURCE,
                 "profile_note": BEAM_JUDGE_PROFILE_NOTE,
+                "aggregation_question_credit_contract_version": (
+                    BEAM_QUESTION_CREDIT_CONTRACT_VERSION
+                ),
+                "aggregation_question_credit_profiles": [],
             },
         }
 
     # per-ability 聚合（每能力取均）
     ability_scores: dict[str, list[float]] = defaultdict(list)
+    ability_question_credits: dict[str, list[float]] = defaultdict(list)
     official_int_scores: dict[str, list[float]] = defaultdict(list)
     for record in score_records:
         ability = record.get("ability")
-        if ability:
-            ability_scores[ability].append(record["score"])
-            official_int_scores[ability].append(
-                record.get("llm_judge_score_official_int", int(record["score"]))
+        if ability not in BEAM_ABILITY_KEYS:
+            raise ConfigurationError(f"unknown BEAM score-record ability: {ability!r}")
+        ability_scores[ability].append(record["score"])
+        contract_version = record.get(
+            "aggregation_question_credit_contract_version"
+        )
+        if contract_version != BEAM_QUESTION_CREDIT_CONTRACT_VERSION:
+            raise ConfigurationError(
+                "BEAM score record is missing the current question-credit contract"
             )
+        ability_question_credits[ability].append(
+            require_beam_question_credit(
+                record.get("aggregation_question_credit"),
+                label="BEAM aggregation question credit",
+            )
+        )
+        official_int_scores[ability].append(
+            record.get("llm_judge_score_official_int", int(record["score"]))
+        )
 
     ability_means: dict[str, float] = {}
+    ability_question_credit_means: dict[str, float] = {}
     for ability in BEAM_ABILITY_KEYS:
         scores = ability_scores.get(ability, [])
         ability_means[ability] = sum(scores) / len(scores) if scores else 0.0
+        credits = ability_question_credits.get(ability, [])
+        ability_question_credit_means[ability] = (
+            sum(credits) / len(credits) if credits else 0.0
+        )
 
     # overall = 10 能力均值
     overall = sum(ability_means.values()) / len(BEAM_ABILITY_KEYS)
+    question_credit_overall = sum(
+        credit
+        for credits in ability_question_credits.values()
+        for credit in credits
+    ) / sum(len(credits) for credits in ability_question_credits.values())
+    question_credit_profiles = sorted(
+        {
+            str(record["aggregation_question_credit_profile"])
+            for record in score_records
+            if isinstance(record.get("aggregation_question_credit_profile"), str)
+        }
+    )
     official_int_means = {
         ability: (
             sum(official_int_scores.get(ability, []))
@@ -405,6 +509,9 @@ def _build_evaluation_payload(
         {
             "category": ability,
             "rubric_judge_mean_score": ability_means[ability],
+            "aggregation_question_credit_mean": ability_question_credit_means[
+                ability
+            ],
             "question_count": len(ability_scores.get(ability, [])),
         }
         for ability in BEAM_ABILITY_KEYS
@@ -420,6 +527,13 @@ def _build_evaluation_payload(
             "status": "ok",
             "overall_score": {
                 "beam_rubric_judge_mean": overall,
+                "aggregation_question_credit_mean": question_credit_overall,
+                "aggregation_question_credit_contract_version": (
+                    BEAM_QUESTION_CREDIT_CONTRACT_VERSION
+                ),
+                "aggregation_question_credit_ability_breakdown": (
+                    ability_question_credit_means
+                ),
                 "llm_judge_score_official_int": official_int_overall,
                 "ability_breakdown": ability_means,
                 "official_int_ability_breakdown": official_int_means,
@@ -432,5 +546,9 @@ def _build_evaluation_payload(
             "category_breakdown": category_breakdown,
             "official_source": BEAM_JUDGE_OFFICIAL_SOURCE,
             "profile_note": BEAM_JUDGE_PROFILE_NOTE,
+            "aggregation_question_credit_contract_version": (
+                BEAM_QUESTION_CREDIT_CONTRACT_VERSION
+            ),
+            "aggregation_question_credit_profiles": question_credit_profiles,
         },
     }

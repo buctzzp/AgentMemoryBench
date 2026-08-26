@@ -11,12 +11,18 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from memory_benchmark.core import ConfigurationError
+from memory_benchmark.metrics import (
+    BEAM_ORDINARY_QUESTION_CREDIT_PROFILE,
+    BEAM_QUESTION_CREDIT_CONTRACT_VERSION,
+    require_beam_question_credit,
+)
+from memory_benchmark.prompts.benchmarks.beam import (
+    BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE,
+)
 from memory_benchmark.storage import ExperimentPaths, read_jsonl
 
 
-# 用户尚未确认跨 benchmark taxonomy 与权重；保留可执行草案便于强反例，
-# 但版本名必须阻止它被误当成 formal 发布合同。
-QA_TASK_AGGREGATION_CONTRACT_VERSION = "qa-task-aggregation-v2-draft"
+QA_TASK_AGGREGATION_CONTRACT_VERSION = "qa-task-aggregation-v3"
 
 PHASE1_QA_BENCHMARKS: tuple[str, ...] = (
     "locomo",
@@ -40,7 +46,7 @@ PHASE1_QA_METHODS: tuple[str, ...] = (
 )
 
 PRIMARY_QA_METRIC_BY_BENCHMARK: Mapping[str, str] = {
-    "locomo": "locomo_f1",
+    "locomo": "locomo_judge_accuracy",
     "longmemeval": "longmemeval_judge_accuracy",
     "beam": "beam_rubric_judge",
     "membench": "membench_choice_accuracy",
@@ -59,17 +65,17 @@ _TASK_TO_CAPABILITY: Mapping[str, Mapping[str, str]] = {
         "single-session-assistant": "factual_recall_extraction",
         "single-session-preference": "personalization",
         "multi-session": "multi_evidence_recall_reasoning",
-        "knowledge-update": "memory_revision",
+        "knowledge-update": "memory_update",
         "temporal-reasoning": "temporal_event_reasoning",
         "abstention": "answerability_boundary",
     },
     "beam": {
         "abstention": "answerability_boundary",
-        "contradiction_resolution": "memory_revision",
+        "contradiction_resolution": "history_contradiction_resolution",
         "event_ordering": "temporal_event_reasoning",
         "information_extraction": "factual_recall_extraction",
         "instruction_following": "instruction_following",
-        "knowledge_update": "memory_revision",
+        "knowledge_update": "memory_update",
         "multi_session_reasoning": "multi_evidence_recall_reasoning",
         "preference_following": "personalization",
         "summarization": "long_horizon_summarization",
@@ -83,19 +89,23 @@ _TASK_TO_CAPABILITY: Mapping[str, Mapping[str, str]] = {
         "post_processing": "multi_evidence_recall_reasoning",
         "lowlevel_rec": "factual_recall_extraction",
         "RecMultiSession": "multi_evidence_recall_reasoning",
-        "knowledge_update": "memory_revision",
+        "knowledge_update": "memory_update",
         "highlevel": "personalization",
         "highlevel_rec": "personalization",
-        "noisy": "noise_robustness",
     },
     "halumem": {
         "Basic Fact Recall": "factual_recall_extraction",
         "Multi-hop Inference": "multi_evidence_recall_reasoning",
-        "Dynamic Update": "memory_revision",
+        "Dynamic Update": "memory_update",
         "Memory Boundary": "answerability_boundary",
-        "Memory Conflict": "memory_revision",
+        "Memory Conflict": "false_premise_correction",
         "Generalization & Application": "generalization_application",
     },
+}
+
+_EXCLUDED_NATIVE_TASKS: Mapping[str, frozenset[str]] = {
+    "locomo": frozenset({"5"}),
+    "membench": frozenset({"noisy"}),
 }
 
 _METHOD_ALIASES: Mapping[str, str] = {
@@ -117,6 +127,7 @@ _METHOD_ALIASES: Mapping[str, str] = {
 _LLM_JUDGED_PRIMARY_METRICS = frozenset(
     {
         "longmemeval_judge_accuracy",
+        "locomo_judge_accuracy",
         "beam_rubric_judge",
         "halumem_qa",
     }
@@ -139,7 +150,7 @@ class QAQuestionScore:
 
 @dataclass(frozen=True)
 class QANativeTaskScore:
-    """一个 method×benchmark 内的原生 task 宏平均输入。"""
+    """一个 method×benchmark 内的原生 task 逐题均值诊断。"""
 
     native_task: str
     score: float
@@ -149,7 +160,7 @@ class QANativeTaskScore:
 
 @dataclass(frozen=True)
 class QACapabilitySlice:
-    """一个 method×benchmark×capability 的原生 task 宏平均。"""
+    """一个 method×benchmark×capability 的逐题 pooled-micro 切片。"""
 
     capability: str
     score: float
@@ -181,6 +192,7 @@ class QARunScore:
     missing_native_tasks: tuple[str, ...]
     missing_question_ids: tuple[str, ...]
     extra_score_question_ids: tuple[str, ...]
+    excluded_question_ids: tuple[str, ...]
 
     @property
     def question_coverage_complete(self) -> bool:
@@ -226,6 +238,12 @@ def classify_qa_task(
         if benchmark == "longmemeval" and qid.endswith("_abs")
         else source_task
     )
+    if effective_task in _EXCLUDED_NATIVE_TASKS.get(benchmark, frozenset()):
+        raise ConfigurationError(
+            "QA native task is explicitly excluded from aggregation contract "
+            f"{QA_TASK_AGGREGATION_CONTRACT_VERSION}: "
+            f"benchmark={benchmark!r}, task={effective_task!r}"
+        )
     mapping = _TASK_TO_CAPABILITY[benchmark]
     if effective_task not in mapping:
         raise ConfigurationError(
@@ -265,11 +283,19 @@ def load_qa_run_score(run_dir: str | Path) -> QARunScore:
     )
     score_by_id = _index_unique_rows(score_rows, f"answer_scores.{metric_name}")
 
-    missing_question_ids = tuple(sorted(set(public_by_id) - set(score_by_id)))
+    excluded_question_ids = tuple(
+        sorted(
+            question_id
+            for question_id, public_row in public_by_id.items()
+            if _is_excluded_public_question(benchmark, public_row)
+        )
+    )
+    eligible_public_ids = set(public_by_id) - set(excluded_question_ids)
+    missing_question_ids = tuple(sorted(eligible_public_ids - set(score_by_id)))
     extra_score_question_ids = tuple(sorted(set(score_by_id) - set(public_by_id)))
 
     question_scores: list[QAQuestionScore] = []
-    for question_id in sorted(set(public_by_id) & set(score_by_id)):
+    for question_id in sorted(eligible_public_ids & set(score_by_id)):
         public_row = public_by_id[question_id]
         score_row = score_by_id[question_id]
         source_native_task = _native_task_for_row(
@@ -341,6 +367,7 @@ def load_qa_run_score(run_dir: str | Path) -> QARunScore:
         missing_native_tasks=missing_native_tasks,
         missing_question_ids=missing_question_ids,
         extra_score_question_ids=extra_score_question_ids,
+        excluded_question_ids=excluded_question_ids,
     )
 
 
@@ -409,7 +436,7 @@ def build_qa_aggregate_report(
         missing_cells or invalid_cells or benchmark_identity_errors
     )
     overall = (
-        _build_overall_table(benchmark_tables, roster) if cohort_complete else []
+        _build_overall_table(indexed, roster) if cohort_complete else []
     )
     capabilities = _build_capability_tables(
         indexed,
@@ -423,6 +450,11 @@ def build_qa_aggregate_report(
         "status": "ok" if cohort_complete else "incomplete",
         "roster": list(roster),
         "benchmarks": list(PHASE1_QA_BENCHMARKS),
+        "aggregation": {
+            "weighting": "question_pooled_micro",
+            "score_scale": [0.0, 1.0],
+            "abstention_scope": "fixed_framework_answer_reader_only",
+        },
         "coverage": {
             "expected_cell_count": len(roster) * len(PHASE1_QA_BENCHMARKS),
             "observed_cell_count": len(indexed),
@@ -445,7 +477,7 @@ def build_qa_aggregate_report(
 def _build_capability_slices(
     questions: Sequence[QAQuestionScore],
 ) -> tuple[QACapabilitySlice, ...]:
-    """先按原生 task 取均，再按 capability 对原生 task 宏平均。"""
+    """按 capability 逐题 pooled micro，并保留原生 task 诊断。"""
 
     by_capability_task: dict[str, dict[str, list[QAQuestionScore]]] = defaultdict(
         lambda: defaultdict(list)
@@ -472,7 +504,11 @@ def _build_capability_slices(
         slices.append(
             QACapabilitySlice(
                 capability=capability,
-                score=_mean(item.score for item in native_scores),
+                score=_mean(
+                    item.score
+                    for task_rows in by_capability_task[capability].values()
+                    for item in task_rows
+                ),
                 question_count=sum(item.question_count for item in native_scores),
                 native_tasks=tuple(native_scores),
                 question_ids=tuple(sorted(all_question_ids)),
@@ -485,19 +521,13 @@ def _benchmark_primary_score(
     benchmark: str,
     questions: Sequence[QAQuestionScore],
 ) -> float:
-    """按 benchmark primary aggregation 计算 raw score。"""
+    """按 benchmark 内全部纳入题目逐题 pooled micro。"""
 
     if not questions:
         raise ConfigurationError("QA score rows must not be empty")
-    if benchmark != "beam":
-        return _mean(item.score for item in questions)
-    by_ability: dict[str, list[float]] = defaultdict(list)
-    for item in questions:
-        by_ability[item.native_task].append(item.score)
-    expected = set(_TASK_TO_CAPABILITY["beam"])
-    if set(by_ability) != expected:
-        raise ConfigurationError("BEAM primary score requires all ten abilities")
-    return _mean(_mean(by_ability[ability]) for ability in sorted(expected))
+    if benchmark not in PHASE1_QA_BENCHMARKS:
+        raise ConfigurationError(f"unknown QA benchmark: {benchmark}")
+    return _mean(item.score for item in questions)
 
 
 def _build_benchmark_tables(
@@ -528,10 +558,14 @@ def _build_benchmark_tables(
                 {"benchmark": benchmark, "status": "incomplete", "rows": []}
             )
             continue
-        scores = {
-            method: float(cell.benchmark_score)
+        complete_cells = {
+            method: cell
             for method, cell in zip(roster, cells, strict=True)
             if cell is not None and cell.benchmark_score is not None
+        }
+        scores = {
+            method: float(cell.benchmark_score)
+            for method, cell in complete_cells.items()
         }
         ranks = _average_ranks(scores)
         tables.append(
@@ -539,45 +573,59 @@ def _build_benchmark_tables(
                 "benchmark": benchmark,
                 "status": "ok",
                 "metric_name": PRIMARY_QA_METRIC_BY_BENCHMARK[benchmark],
-                "rows": _ranked_rows(scores, ranks),
+                "excluded_question_count": len(
+                    next(iter(complete_cells.values())).excluded_question_ids
+                ),
+                "rows": _question_credit_rows(
+                    scores=scores,
+                    ranks=ranks,
+                    questions_by_method={
+                        method: cell.question_scores
+                        for method, cell in complete_cells.items()
+                    },
+                    score_field="benchmark_question_credit",
+                ),
             }
         )
     return tables
 
 
 def _build_overall_table(
-    benchmark_tables: Sequence[dict[str, Any]],
+    indexed: Mapping[tuple[str, str], QARunScore],
     roster: Sequence[str],
 ) -> list[dict[str, Any]]:
-    """把五个 benchmark 的 rank-score 等权平均成 overall。"""
+    """把五家固定 cohort 的全部题目逐题 pooled micro。"""
 
-    contributions: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for table in benchmark_tables:
-        if table["status"] != "ok":
-            raise ConfigurationError("overall requires five complete benchmark tables")
-        for row in table["rows"]:
-            contributions[row["method"]].append(
-                {
-                    "benchmark": table["benchmark"],
-                    "raw_score": row["raw_score"],
-                    "rank": row["rank"],
-                    "rank_score": row["rank_score"],
-                }
-            )
-    rows = []
+    questions_by_method: dict[str, tuple[QAQuestionScore, ...]] = {}
+    contributions_by_method: dict[str, list[dict[str, Any]]] = {}
     for method in roster:
-        items = contributions[method]
-        if len(items) != len(PHASE1_QA_BENCHMARKS):
-            raise ConfigurationError("overall contribution count mismatch")
-        rows.append(
-            {
-                "method": method,
-                "overall_qa_score": 100 * _mean(x["rank_score"] for x in items),
-                "mean_rank": _mean(x["rank"] for x in items),
-                "benchmark_contributions": items,
-            }
-        )
-    return sorted(rows, key=lambda item: (-item["overall_qa_score"], item["method"]))
+        all_questions: list[QAQuestionScore] = []
+        contributions: list[dict[str, Any]] = []
+        for benchmark in PHASE1_QA_BENCHMARKS:
+            run = indexed[(method, benchmark)]
+            questions = run.question_scores
+            all_questions.extend(questions)
+            contributions.append(
+                _question_credit_contribution(benchmark, questions)
+            )
+        questions_by_method[method] = tuple(all_questions)
+        contributions_by_method[method] = contributions
+
+    _require_same_question_cohort(questions_by_method, label="overall")
+    scores = {
+        method: _mean(item.score for item in questions)
+        for method, questions in questions_by_method.items()
+    }
+    ranks = _average_ranks(scores)
+    rows = _question_credit_rows(
+        scores=scores,
+        ranks=ranks,
+        questions_by_method=questions_by_method,
+        score_field="overall_qa_score",
+    )
+    for row in rows:
+        row["benchmark_contributions"] = contributions_by_method[row["method"]]
+    return rows
 
 
 def _build_capability_tables(
@@ -587,7 +635,7 @@ def _build_capability_tables(
     require_run_scope: str,
     blocked_benchmarks: set[str],
 ) -> list[dict[str, Any]]:
-    """构造跨 benchmark capability 榜与单 benchmark diagnostic。"""
+    """按 capability 跨 benchmark 合并逐题 credit。"""
 
     capability_benchmarks: dict[str, list[str]] = defaultdict(list)
     for benchmark, mapping in _TASK_TO_CAPABILITY.items():
@@ -601,13 +649,17 @@ def _build_capability_tables(
             for benchmark in PHASE1_QA_BENCHMARKS
             if benchmark in capability_benchmarks[capability]
         )
-        benchmark_contributions: list[dict[str, Any]] = []
         complete = True
+        questions_by_method: dict[str, list[QAQuestionScore]] = {
+            method: [] for method in roster
+        }
+        contributions_by_method: dict[str, list[dict[str, Any]]] = {
+            method: [] for method in roster
+        }
         for benchmark in benchmarks:
             if benchmark in blocked_benchmarks:
                 complete = False
                 continue
-            slices: dict[str, QACapabilitySlice] = {}
             for method in roster:
                 run = indexed.get((method, benchmark))
                 if (
@@ -617,72 +669,49 @@ def _build_capability_tables(
                 ):
                     complete = False
                     break
-                match = next(
-                    (
-                        item
-                        for item in run.capability_slices
-                        if item.capability == capability
-                    ),
-                    None,
+                selected = tuple(
+                    item
+                    for item in run.question_scores
+                    if item.capability == capability
                 )
-                if match is None:
+                if not selected:
                     complete = False
                     break
-                slices[method] = match
-            if len(slices) != len(roster):
-                continue
-            question_sets = {item.question_ids for item in slices.values()}
-            if len(question_sets) != 1:
-                complete = False
-                continue
-            scores = {method: item.score for method, item in slices.items()}
-            ranks = _average_ranks(scores)
-            benchmark_contributions.append(
-                {
-                    "benchmark": benchmark,
-                    "rows": _ranked_rows(scores, ranks),
-                }
-            )
+                questions_by_method[method].extend(selected)
+                contributions_by_method[method].append(
+                    _question_credit_contribution(benchmark, selected)
+                )
 
         cross_benchmark = len(benchmarks) >= 2
         result_rows: list[dict[str, Any]] = []
-        if (
-            complete
-            and cross_benchmark
-            and len(benchmark_contributions) == len(benchmarks)
-        ):
-            by_method: dict[str, list[dict[str, Any]]] = defaultdict(list)
-            for contribution in benchmark_contributions:
-                for row in contribution["rows"]:
-                    by_method[row["method"]].append(
-                        {
-                            "benchmark": contribution["benchmark"],
-                            "raw_score": row["raw_score"],
-                            "rank": row["rank"],
-                            "rank_score": row["rank_score"],
-                        }
-                    )
-            for method in roster:
-                items = by_method[method]
-                result_rows.append(
-                    {
-                        "method": method,
-                        "capability_score": 100
-                        * _mean(item["rank_score"] for item in items),
-                        "mean_rank": _mean(item["rank"] for item in items),
-                        "benchmark_contributions": items,
-                    }
-                )
-            result_rows.sort(
-                key=lambda item: (-item["capability_score"], item["method"])
+        if complete:
+            frozen_questions = {
+                method: tuple(items) for method, items in questions_by_method.items()
+            }
+            _require_same_question_cohort(
+                frozen_questions,
+                label=f"capability {capability}",
             )
+            scores = {
+                method: _mean(item.score for item in items)
+                for method, items in frozen_questions.items()
+            }
+            result_rows = _question_credit_rows(
+                scores=scores,
+                ranks=_average_ranks(scores),
+                questions_by_method=frozen_questions,
+                score_field="capability_score",
+            )
+            for row in result_rows:
+                row["benchmark_contributions"] = contributions_by_method[
+                    row["method"]
+                ]
         tables.append(
             {
                 "capability": capability,
-                "kind": "cross_benchmark" if cross_benchmark else "diagnostic",
+                "kind": "cross_benchmark" if cross_benchmark else "single_benchmark",
                 "status": "ok" if complete else "incomplete",
                 "benchmarks": list(benchmarks),
-                "benchmark_tables": benchmark_contributions,
                 "rows": result_rows,
             }
         )
@@ -719,6 +748,9 @@ def _benchmark_identity_errors(
         }
         if len(question_sets) != 1:
             reasons.append("question_cohort_mismatch")
+        excluded_question_sets = {run.excluded_question_ids for run in runs}
+        if len(excluded_question_sets) != 1:
+            reasons.append("excluded_question_cohort_mismatch")
         if reasons:
             errors[benchmark] = reasons
     return errors
@@ -741,25 +773,67 @@ def _average_ranks(scores: Mapping[str, float]) -> dict[str, float]:
     return ranks
 
 
-def _ranked_rows(
+def _question_credit_rows(
+    *,
     scores: Mapping[str, float],
     ranks: Mapping[str, float],
+    questions_by_method: Mapping[str, Sequence[QAQuestionScore]],
+    score_field: str,
 ) -> list[dict[str, Any]]:
-    """返回同时含 raw、rank 和归一 rank-score 的有序行。"""
+    """构造逐题 credit 均值、分子、分母与排名行。"""
 
-    method_count = len(scores)
-    if method_count < 2:
-        raise ConfigurationError("rank aggregation requires at least two methods")
-    rows = [
-        {
-            "method": method,
-            "raw_score": score,
-            "rank": ranks[method],
-            "rank_score": (method_count - ranks[method]) / (method_count - 1),
-        }
-        for method, score in scores.items()
-    ]
+    if len(scores) < 2:
+        raise ConfigurationError("QA aggregation requires at least two methods")
+    rows: list[dict[str, Any]] = []
+    for method, score in scores.items():
+        questions = tuple(questions_by_method[method])
+        if not questions:
+            raise ConfigurationError("QA aggregation requires non-empty questions")
+        rows.append(
+            {
+                "method": method,
+                score_field: score,
+                "credit_sum": sum(item.score for item in questions),
+                "question_count": len(questions),
+                "rank": ranks[method],
+            }
+        )
     return sorted(rows, key=lambda item: (item["rank"], item["method"]))
+
+
+def _question_credit_contribution(
+    benchmark: str,
+    questions: Sequence[QAQuestionScore],
+) -> dict[str, Any]:
+    """构造一个 benchmark 对 pooled score 的显式分子/分母收据。"""
+
+    if not questions:
+        raise ConfigurationError("benchmark contribution requires questions")
+    return {
+        "benchmark": benchmark,
+        "question_credit_score": _mean(item.score for item in questions),
+        "credit_sum": sum(item.score for item in questions),
+        "question_count": len(questions),
+    }
+
+
+def _require_same_question_cohort(
+    questions_by_method: Mapping[str, Sequence[QAQuestionScore]],
+    *,
+    label: str,
+) -> None:
+    """要求所有 method 使用完全相同且无重复的 benchmark×question cohort。"""
+
+    cohorts: set[tuple[tuple[str, str], ...]] = set()
+    for method, questions in questions_by_method.items():
+        keys = tuple(
+            sorted((item.benchmark_name, item.question_id) for item in questions)
+        )
+        if len(keys) != len(set(keys)):
+            raise ConfigurationError(f"duplicate question in {label}: method={method}")
+        cohorts.add(keys)
+    if len(cohorts) != 1:
+        raise ConfigurationError(f"question cohort mismatch in {label}")
 
 
 def _native_task_for_row(
@@ -783,21 +857,61 @@ def _primary_score_for_row(
     benchmark: str,
     score_row: Mapping[str, Any],
 ) -> float:
-    """读取 benchmark task-aware QA primary score。"""
+    """读取 v3 逐题 answer-correctness credit。"""
 
-    if benchmark == "beam" and score_row.get("ability") == "event_ordering":
-        details = score_row.get("details")
-        if not isinstance(details, Mapping):
-            raise ConfigurationError("BEAM event_ordering details are required")
-        value = details.get("event_ordering_tau_norm")
-    else:
-        value = score_row.get("score")
+    if benchmark == "beam":
+        if (
+            score_row.get("aggregation_question_credit_contract_version")
+            != BEAM_QUESTION_CREDIT_CONTRACT_VERSION
+        ):
+            raise ConfigurationError(
+                "BEAM score row does not satisfy the v3 question-credit contract"
+            )
+        ability = score_row.get("ability")
+        expected_profile = (
+            BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE
+            if ability == "event_ordering"
+            else BEAM_ORDINARY_QUESTION_CREDIT_PROFILE
+        )
+        expected_source = (
+            "ordered_compound_rubric_llm"
+            if ability == "event_ordering"
+            else "rubric_item_tristate"
+        )
+        if score_row.get("aggregation_question_credit_profile") != expected_profile:
+            raise ConfigurationError(
+                "BEAM question-credit profile does not match the ability"
+            )
+        if score_row.get("aggregation_question_credit_source") != expected_source:
+            raise ConfigurationError(
+                "BEAM question-credit source does not match the ability"
+            )
+        return require_beam_question_credit(
+            score_row.get("aggregation_question_credit"),
+            label="BEAM aggregation question credit",
+        )
+
+    value = score_row.get("score")
     if type(value) not in (int, float):
         raise ConfigurationError("QA primary score must be numeric")
     score = float(value)
     if not math.isfinite(score) or not 0.0 <= score <= 1.0:
         raise ConfigurationError("QA primary score must be finite and within [0, 1]")
     return score
+
+
+def _is_excluded_public_question(
+    benchmark: str,
+    public_row: Mapping[str, Any],
+) -> bool:
+    """判断公开问题是否被 v3 固定题池显式排除。"""
+
+    excluded = _EXCLUDED_NATIVE_TASKS.get(benchmark, frozenset())
+    if not excluded:
+        return False
+    value = public_row.get("category")
+    normalized = str(value).strip() if value is not None else ""
+    return normalized in excluded
 
 
 def _isolation_id(
@@ -862,13 +976,68 @@ def _evaluator_identity(
             and isinstance((profile := row["details"].get("prompt_profile")), str)
         }
     )
+    beam_credit_contracts = sorted(
+        {
+            value
+            for row in score_rows
+            if isinstance(
+                (
+                    value := row.get(
+                        "aggregation_question_credit_contract_version"
+                    )
+                ),
+                str,
+            )
+        }
+    )
+    beam_credit_profiles = sorted(
+        {
+            value
+            for row in score_rows
+            if isinstance(
+                (value := row.get("aggregation_question_credit_profile")),
+                str,
+            )
+        }
+    )
+    beam_credit_sources = sorted(
+        {
+            value
+            for row in score_rows
+            if isinstance(
+                (value := row.get("aggregation_question_credit_source")),
+                str,
+            )
+        }
+    )
     complete = metric_name not in _LLM_JUDGED_PRIMARY_METRICS or inventory is not None
+    if metric_name == "beam_rubric_judge":
+        complete = complete and (
+            beam_credit_contracts == [BEAM_QUESTION_CREDIT_CONTRACT_VERSION]
+            and beam_credit_profiles
+            == sorted(
+                {
+                    BEAM_ORDINARY_QUESTION_CREDIT_PROFILE,
+                    BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE,
+                }
+            )
+            and beam_credit_sources
+            == ["ordered_compound_rubric_llm", "rubric_item_tristate"]
+            and summary.get("aggregation_question_credit_contract_version")
+            == BEAM_QUESTION_CREDIT_CONTRACT_VERSION
+        )
     payload = {
         "metric_name": metric_name,
         "model_inventory": inventory,
         "official_source": summary.get("official_source"),
         "profile_note": summary.get("profile_note"),
         "prompt_profiles": prompt_profiles,
+        "beam_question_credit_contracts": beam_credit_contracts,
+        "beam_question_credit_profiles": beam_credit_profiles,
+        "beam_question_credit_sources": beam_credit_sources,
+        "beam_question_credit_summary_contract": summary.get(
+            "aggregation_question_credit_contract_version"
+        ),
     }
     return _stable_sha256(payload), complete
 

@@ -1,7 +1,8 @@
 # Phase 1 QA 任务类型与聚合合同
 
-状态：**用户与架构师已于 2026-08-26 对齐；实现尚待升级，formal 排名前不得读取旧
-`qa-task-aggregation-v2-draft` 冒充本合同。**
+状态：**用户与架构师已于 2026-08-26 对齐；M0-R2 可执行内核已升级为
+`qa-task-aggregation-v3`。M1 正式 cohort receipt 完成前仍不得发布 formal 排名；旧
+`qa-task-aggregation-v2-draft` 不得混入。**
 
 本文只聚合五个 benchmark 的 QA/readout。Recall@K、Precision@K、NDCG、HaluMem
 extraction/update/memory-type 与成本效率均单独报告，不混入 QA 总分。

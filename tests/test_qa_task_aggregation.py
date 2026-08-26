@@ -20,6 +20,13 @@ from memory_benchmark.analysis.qa_task_aggregation import (
     load_qa_run_score,
 )
 from memory_benchmark.core import ConfigurationError
+from memory_benchmark.metrics import (
+    BEAM_ORDINARY_QUESTION_CREDIT_PROFILE,
+    BEAM_QUESTION_CREDIT_CONTRACT_VERSION,
+)
+from memory_benchmark.prompts.benchmarks.beam import (
+    BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE,
+)
 from memory_benchmark.storage import (
     ExperimentPaths,
     atomic_write_json,
@@ -70,6 +77,16 @@ def test_taxonomy_keeps_personalization_and_instruction_following_separate() -> 
     assert preference != instruction
 
 
+def test_v3_primary_metric_uses_locomo_semantic_judge() -> None:
+    """LoCoMo 横向题分必须读冻结 semantic judge，F1 只保留 native 旁表。"""
+
+    from memory_benchmark.analysis.qa_task_aggregation import (
+        PRIMARY_QA_METRIC_BY_BENCHMARK,
+    )
+
+    assert PRIMARY_QA_METRIC_BY_BENCHMARK["locomo"] == "locomo_judge_accuracy"
+
+
 def test_longmemeval_abstention_suffix_overrides_native_question_type_once() -> None:
     """_abs 题只进入 answerability boundary，原 question_type 不重复计权。"""
 
@@ -83,8 +100,8 @@ def test_longmemeval_abstention_suffix_overrides_native_question_type_once() -> 
     assert capability == "answerability_boundary"
 
 
-def test_conflict_and_update_share_memory_revision_parent() -> None:
-    """Conflict 保留 native task，但不另造第二个跨 benchmark 父能力。"""
+def test_update_false_premise_and_history_conflict_are_separate() -> None:
+    """三种失败语义不得重新压进一个 memory-revision 父类。"""
 
     _, beam_conflict = classify_qa_task(
         "beam", "contradiction_resolution", question_id="q-conflict"
@@ -96,7 +113,10 @@ def test_conflict_and_update_share_memory_revision_parent() -> None:
         "halumem", "Memory Conflict", question_id="q-memory-conflict"
     )
 
-    assert beam_conflict == beam_update == halumem_conflict == "memory_revision"
+    assert beam_update == "memory_update"
+    assert beam_conflict == "history_contradiction_resolution"
+    assert halumem_conflict == "false_premise_correction"
+    assert len({beam_update, beam_conflict, halumem_conflict}) == 3
 
 
 def test_generalization_is_not_collapsed_into_personalization() -> None:
@@ -139,8 +159,24 @@ def test_unknown_native_task_fails_loud() -> None:
         classify_qa_task("locomo", "99", question_id="q-unknown")
 
 
-def test_beam_loader_uses_tau_norm_for_event_ordering(tmp_path: Path) -> None:
-    """event_ordering 必须按官方 report consumer 读 tau_norm，而非 rubric score。"""
+@pytest.mark.parametrize(
+    ("benchmark", "task"),
+    [("locomo", "5"), ("membench", "noisy")],
+)
+def test_explicitly_excluded_native_tasks_do_not_receive_a_capability(
+    benchmark: str,
+    task: str,
+) -> None:
+    """排除项只能由 artifact loader 记账并跳过，不能伪装成 primary 能力。"""
+
+    with pytest.raises(ConfigurationError, match="explicitly excluded"):
+        classify_qa_task(benchmark, task, question_id="q-excluded")
+
+
+def test_beam_loader_uses_v3_question_credit_not_tau_or_rubric_mean(
+    tmp_path: Path,
+) -> None:
+    """event ordering 聚合读整题三档 credit；native tau/rubric 只作旁报。"""
 
     public_rows = []
     score_rows = []
@@ -159,12 +195,28 @@ def test_beam_loader_uses_tau_norm_for_event_ordering(tmp_path: Path) -> None:
                 "question_id": question_id,
                 "conversation_id": "conv-1",
                 "metric_name": "beam_rubric_judge",
-                "score": 0.0,
+                "score": 1.0,
                 "ability": ability,
                 "details": (
                     {"event_ordering_tau_norm": 1.0}
                     if ability == "event_ordering"
                     else {}
+                ),
+                "aggregation_question_credit": (
+                    0.5 if ability == "event_ordering" else 0.0
+                ),
+                "aggregation_question_credit_contract_version": (
+                    BEAM_QUESTION_CREDIT_CONTRACT_VERSION
+                ),
+                "aggregation_question_credit_source": (
+                    "ordered_compound_rubric_llm"
+                    if ability == "event_ordering"
+                    else "rubric_item_tristate"
+                ),
+                "aggregation_question_credit_profile": (
+                    BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE
+                    if ability == "event_ordering"
+                    else BEAM_ORDINARY_QUESTION_CREDIT_PROFILE
                 ),
             }
         )
@@ -186,15 +238,49 @@ def test_beam_loader_uses_tau_norm_for_event_ordering(tmp_path: Path) -> None:
         for item in result.capability_slices
         if item.capability == "temporal_event_reasoning"
     )
-    assert event.score == 1.0
-    assert result.benchmark_score == pytest.approx(0.1)
-    assert temporal_slice.score == pytest.approx(0.5)
+    assert event.score == 0.5
+    assert result.benchmark_score == pytest.approx(0.05)
+    assert temporal_slice.score == pytest.approx(0.25)
+    assert result.evaluator_identity_complete is True
 
 
-def test_capability_slice_macro_averages_native_tasks_not_question_counts(
+def test_beam_loader_rejects_old_artifact_without_v3_question_credit(
     tmp_path: Path,
 ) -> None:
-    """一个原生 subtype 题多时不得在 capability 内获得额外权重。"""
+    """旧 BEAM artifact 不得静默回落 rubric mean 或 tau。"""
+
+    run_dir = _write_run(
+        tmp_path / "beam-old",
+        benchmark="beam",
+        method_display_name="A-Mem",
+        public_rows=[
+            {
+                "question_id": "conv-1:event_ordering:q1",
+                "conversation_id": "conv-1",
+                "question_text": "order",
+                "category": "event_ordering",
+            }
+        ],
+        score_rows=[
+            {
+                "question_id": "conv-1:event_ordering:q1",
+                "conversation_id": "conv-1",
+                "metric_name": "beam_rubric_judge",
+                "score": 1.0,
+                "ability": "event_ordering",
+                "details": {"event_ordering_tau_norm": 1.0},
+            }
+        ],
+    )
+
+    with pytest.raises(ConfigurationError, match="v3 question-credit contract"):
+        load_qa_run_score(run_dir)
+
+
+def test_capability_slice_pools_questions_and_excludes_membench_noisy(
+    tmp_path: Path,
+) -> None:
+    """能力分一题一票；noisy 保留原生评测但不进入 v3 分母。"""
 
     public_rows = []
     score_rows = []
@@ -233,24 +319,66 @@ def test_capability_slice_macro_averages_native_tasks_not_question_counts(
         if item.capability == "multi_evidence_recall_reasoning"
     )
 
-    # 五个 native tasks 等权：conditional=1，其余四类=0，所以是 1/5；
-    # lowlevel_rec 已按显式回顾归入 factual，不再混进推理分母。若错误按题
-    # micro-average，这里会得到 10/14。
-    assert reasoning.score == pytest.approx(1 / 5)
+    assert reasoning.score == pytest.approx(10 / 14)
     assert reasoning.question_count == 14
+    assert result.excluded_question_ids == ("noisy:q0",)
+    assert all(item.native_task != "noisy" for item in result.question_scores)
 
 
-def test_overall_gives_each_benchmark_one_vote_not_each_question() -> None:
-    """五格等权；三格胜两格的 method 获得更高 overall。"""
+def test_longmemeval_abstention_loader_needs_only_answer_judge_artifacts(
+    tmp_path: Path,
+) -> None:
+    """M0 boundary 不读取 retrieval artifact，固定 reader 的 answer judge 即为题分。"""
+
+    run_dir = _write_run(
+        tmp_path / "lme-abs",
+        benchmark="longmemeval",
+        method_display_name="A-Mem",
+        public_rows=[
+            {
+                "question_id": "0862e8bf_abs",
+                "conversation_id": "0862e8bf",
+                "question_text": "What was the hamster called?",
+                "category": "single-session-user",
+            }
+        ],
+        score_rows=[
+            {
+                "question_id": "0862e8bf_abs",
+                "conversation_id": "0862e8bf",
+                "metric_name": "longmemeval_judge_accuracy",
+                "score": 1.0,
+                "details": {
+                    "prompt_profile": "longmemeval_official_evaluate_qa_v1"
+                },
+            }
+        ],
+    )
+
+    result = load_qa_run_score(run_dir)
+
+    assert len(result.question_scores) == 1
+    assert result.question_scores[0].native_task == "abstention"
+    assert result.question_scores[0].capability == "answerability_boundary"
+    assert result.question_scores[0].score == 1.0
+
+
+def test_overall_pools_questions_instead_of_giving_each_benchmark_one_vote() -> None:
+    """高题量 benchmark 的逐题分母可推翻 benchmark 等权多数。"""
 
     runs: list[QARunScore] = []
-    for index, benchmark in enumerate(PHASE1_QA_BENCHMARKS):
-        a_score = 1.0 if index < 3 else 0.0
+    for benchmark in PHASE1_QA_BENCHMARKS:
+        question_count = 10 if benchmark == "locomo" else 1
+        a_score = 0.0 if benchmark == "locomo" else 1.0
         b_score = 1.0 - a_score
         runs.extend(
             [
-                _synthetic_run("amem", benchmark, a_score),
-                _synthetic_run("mem0", benchmark, b_score),
+                _synthetic_run(
+                    "amem", benchmark, a_score, question_count=question_count
+                ),
+                _synthetic_run(
+                    "mem0", benchmark, b_score, question_count=question_count
+                ),
             ]
         )
 
@@ -261,14 +389,16 @@ def test_overall_gives_each_benchmark_one_vote_not_each_question() -> None:
 
     assert report["status"] == "ok"
     assert report["contract_version"] == QA_TASK_AGGREGATION_CONTRACT_VERSION
-    assert report["contract_version"] == "qa-task-aggregation-v2-draft"
-    assert report["overall"][0]["method"] == "amem"
-    assert report["overall"][0]["overall_qa_score"] == pytest.approx(60.0)
-    assert report["overall"][1]["overall_qa_score"] == pytest.approx(40.0)
+    assert report["contract_version"] == "qa-task-aggregation-v3"
+    assert report["aggregation"]["weighting"] == "question_pooled_micro"
+    assert report["overall"][0]["method"] == "mem0"
+    assert report["overall"][0]["overall_qa_score"] == pytest.approx(10 / 14)
+    assert report["overall"][1]["overall_qa_score"] == pytest.approx(4 / 14)
+    assert {row["question_count"] for row in report["overall"]} == {14}
 
 
 def test_equal_scores_receive_average_rank() -> None:
-    """完全同分时两家均为 1.5 名和 50 分，不靠名字破 tie。"""
+    """完全同分时两家均为 1.5 名和 0.5 分，不靠名字破 tie。"""
 
     runs = [
         _synthetic_run(method, benchmark, 0.5)
@@ -281,8 +411,8 @@ def test_equal_scores_receive_average_rank() -> None:
         expected_methods=("amem", "mem0"),
     )
 
-    assert [row["mean_rank"] for row in report["overall"]] == [1.5, 1.5]
-    assert [row["overall_qa_score"] for row in report["overall"]] == [50.0, 50.0]
+    assert [row["rank"] for row in report["overall"]] == [1.5, 1.5]
+    assert [row["overall_qa_score"] for row in report["overall"]] == [0.5, 0.5]
 
 
 def test_missing_cell_is_incomplete_without_zero_fill_or_smaller_denominator() -> None:
@@ -408,6 +538,9 @@ def _write_run(
     paths = ExperimentPaths.create(run_dir)
     metric = {
         "beam": "beam_rubric_judge",
+        "halumem": "halumem_qa",
+        "locomo": "locomo_judge_accuracy",
+        "longmemeval": "longmemeval_judge_accuracy",
         "membench": "membench_choice_accuracy",
     }[benchmark]
     atomic_write_json(
@@ -441,9 +574,23 @@ def _write_run(
             "metric_name": metric,
             "official_source": "fixture",
             "profile_note": "fixture",
+            **(
+                {
+                    "aggregation_question_credit_contract_version": (
+                        BEAM_QUESTION_CREDIT_CONTRACT_VERSION
+                    )
+                }
+                if metric == "beam_rubric_judge"
+                else {}
+            ),
         },
     )
-    if metric == "beam_rubric_judge":
+    if metric in {
+        "beam_rubric_judge",
+        "halumem_qa",
+        "locomo_judge_accuracy",
+        "longmemeval_judge_accuracy",
+    }:
         atomic_write_json(
             paths.evaluator_model_inventory_path(metric),
             {
@@ -467,31 +614,35 @@ def _synthetic_run(
     score: float,
     *,
     run_scope: str = "formal",
+    question_count: int = 1,
 ) -> QARunScore:
     """构造总榜算法测试用的完整 run，不测试 artifact loader。"""
 
-    question = QAQuestionScore(
-        method_name=method,
-        benchmark_name=benchmark,
-        question_id=f"{benchmark}:q1",
-        isolation_id=f"{benchmark}:isolation-1",
-        source_native_task="fixture",
-        native_task="fixture",
-        capability="fixture_capability",
-        score=score,
+    questions = tuple(
+        QAQuestionScore(
+            method_name=method,
+            benchmark_name=benchmark,
+            question_id=f"{benchmark}:q{index}",
+            isolation_id=f"{benchmark}:isolation-{index}",
+            source_native_task="fixture",
+            native_task="fixture",
+            capability="fixture_capability",
+            score=score,
+        )
+        for index in range(question_count)
     )
     native = QANativeTaskScore(
         native_task="fixture",
         score=score,
-        question_count=1,
-        question_ids=(question.question_id,),
+        question_count=question_count,
+        question_ids=tuple(item.question_id for item in questions),
     )
     capability = QACapabilitySlice(
         capability="fixture_capability",
         score=score,
-        question_count=1,
+        question_count=question_count,
         native_tasks=(native,),
-        question_ids=(question.question_id,),
+        question_ids=tuple(item.question_id for item in questions),
     )
     return QARunScore(
         run_dir=Path(f"/{method}/{benchmark}"),
@@ -506,11 +657,12 @@ def _synthetic_run(
         evaluator_identity_complete=True,
         metric_name=f"metric-{benchmark}",
         benchmark_score=score,
-        question_scores=(question,),
+        question_scores=questions,
         capability_slices=(capability,),
         expected_native_tasks=("fixture",),
         observed_native_tasks=("fixture",),
         missing_native_tasks=(),
         missing_question_ids=(),
         extra_score_question_ids=(),
+        excluded_question_ids=(),
     )
