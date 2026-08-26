@@ -27,7 +27,7 @@ created: 2026-07-05
   `2297 passed, 3 deselected, 25 warnings, 29 subtests passed`。M0-R2 承重集为
   `125 passed`；M1 同批已机械同步五份 ledger 的两条模板 requirement，定向 ledger+QA 门为
   `31 passed`，最终文档门为 `38 passed`；artifact 瘦身/分批 evaluator 合同后的 current 全量为
-  `2356 passed, 3 deselected, 25 warnings, 29 subtests passed`；该 current 数包含 formal 精确
+  `2357 passed, 3 deselected, 25 warnings, 29 subtests passed`；该 current 数包含 formal 精确
   isolation 选择与 Mimo calibration profile 的 CLI/config/十家 registry/full-scope 强反例。扩大真实
   实验尚未恢复。
 - **并行断点**：[开跑前 isolation 并行门](notes/2026-08-25-pre-experiment-parallelism-gate.md)

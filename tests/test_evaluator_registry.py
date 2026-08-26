@@ -104,6 +104,20 @@ def test_metric_dependency_order_rejects_duplicate_paid_metric() -> None:
         order_metrics_for_evaluation(["halumem-update", "halumem-update"])
 
 
+def test_membench_source_accuracy_runs_after_choice_accuracy() -> None:
+    """source 四格必须在同批 choice score 落盘后再聚合。"""
+
+    registration = get_evaluator_registration("membench-source-accuracy")
+    assert registration.artifact_prerequisites == ("membench-choice-accuracy",)
+    assert order_metrics_for_evaluation(
+        ["membench-source-accuracy", "membench-recall", "membench-choice-accuracy"]
+    ) == (
+        "membench-choice-accuracy",
+        "membench-source-accuracy",
+        "membench-recall",
+    )
+
+
 def test_locomo_f1_registration_is_offline_and_locomo_only() -> None:
     """LoCoMo F1 应标记为离线指标，且不能用于其他 benchmark。"""
 

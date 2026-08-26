@@ -14,6 +14,8 @@
 - formal `conversation_budget` 首批只产生已完成问题的 answer artifact，而 public/private
   标签覆盖完整选中 cohort。retrieval evaluator 应验证完整标签彼此一致，再投影到已完成
   answer 子集；不能要求三份集合在首批就完全相等。
+- MemBench `source-accuracy` 读取 `choice-accuracy` score artifact；registry 现显式声明该
+  prerequisite，用户即使以反序传入两个 metric，planner 也会先落 choice score。
 
 ## 2. 实现边界
 
@@ -79,7 +81,7 @@ OFFLINE_RETRIEVAL_PREFLIGHT_PASS
 最终 current 全量零 API 门：
 
 ```text
-2356 passed, 3 deselected, 25 warnings, 29 subtests passed in 182.80s (0:03:02)
+2357 passed, 3 deselected, 25 warnings, 29 subtests passed in 195.23s (0:03:15)
 ```
 
-文档/registry/新合同定向门：`31 passed in 3.06s`；`git diff --check` 干净。
+最终 registry/artifact/文档定向门：`68 passed in 4.75s`；`git diff --check` 干净。

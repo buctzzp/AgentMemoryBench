@@ -39,7 +39,7 @@ HaluMem 同时写出 70 条 session memory report、171 条 update probe 与 4,8
 prediction efficiency observation。五个 manifest 均已初验为 `calibration`、
 `opencodego/mimo-v2.5`、thinking disabled、workers 10；完整字段合理性验收已通过，
 artifact 瘦身/分批 evaluator 合同后的 current 全量零 API 门为
-`2356 passed, 3 deselected, 25 warnings, 29 subtests passed`。
+`2357 passed, 3 deselected, 25 warnings, 29 subtests passed`。
 
 ### 当前施工
 

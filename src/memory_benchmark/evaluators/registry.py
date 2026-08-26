@@ -438,6 +438,7 @@ _REGISTRATIONS = {
         profile_relative_path=None,
         config_type=None,
         factory=_build_membench_source_accuracy,
+        artifact_prerequisites=("membench-choice-accuracy",),
     ),
     "locomo-recall": EvaluatorRegistration(
         cli_name="locomo-recall",
