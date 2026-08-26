@@ -371,8 +371,10 @@ def test_public_conversation_excludes_rubric_and_private_fields(
         assert private_key not in public_questions_text
 
 
-def test_gold_answers_keep_only_scorer_required_private_fields(tmp_path: Path) -> None:
-    """GoldAnswerInfo 不应按题重复 source-locked row 的大块生成上下文。"""
+def test_gold_answers_preserve_source_facts_but_artifact_projection_is_compact(
+    tmp_path: Path,
+) -> None:
+    """Canonical gold 保留一手事实，evaluator artifact 只落 scorer 必需字段。"""
 
     _make_beam_arrow(
         tmp_path / "data" / "BEAM" / "beam_dataset" / "100K",
@@ -387,16 +389,23 @@ def test_gold_answers_keep_only_scorer_required_private_fields(tmp_path: Path) -
 
     assert gold.metadata["rubric"] is not None
     assert "difficulty" in gold.metadata
-    assert set(gold.metadata) == {
+    assert "ideal_response" in gold.metadata
+    assert "conversation_seed" in gold.metadata
+    assert "user_profile" in gold.metadata
+
+    from memory_benchmark.storage import evaluator_private_label_record
+
+    record = evaluator_private_label_record(gold, first_q.category)
+    assert set(record["metadata"]) == {
         "ability",
         "rubric",
         "difficulty",
         "ambiguous_gold_id_count",
         "unmatched_gold_id_count",
     }
-    assert "ideal_response" not in gold.metadata
-    assert "conversation_seed" not in gold.metadata
-    assert "user_profile" not in gold.metadata
+    assert "ideal_response" not in record["metadata"]
+    assert "conversation_seed" not in record["metadata"]
+    assert "user_profile" not in record["metadata"]
 
 
 def test_gold_evidence_maps_raw_ids_to_all_public_turn_ids(tmp_path: Path) -> None:

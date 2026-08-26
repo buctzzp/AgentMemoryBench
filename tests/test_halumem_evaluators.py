@@ -990,6 +990,53 @@ def test_halumem_update_records_observation_with_scope_identity(tmp_path: Path) 
     )
 
 
+def test_halumem_update_reuses_paid_point_scores(tmp_path: Path) -> None:
+    """新增 update probe 后只 judge 新 point，既有 tuple identity 的 score/token 保持。"""
+
+    run_dir = _build_halumem_run_dir(tmp_path)
+    first_client = _FakeHalumemResponsesClient(input_tokens=8, output_tokens=1)
+    run_artifact_evaluation(
+        run_dir=run_dir,
+        evaluator=HalumemUpdateEvaluator(model="gpt-4o-mini", client=first_client),
+        expected_benchmark="halumem",
+    )
+
+    probe_path = run_dir / "artifacts" / "update_probe_results.jsonl"
+    probes = read_jsonl(probe_path)
+    probes.append(
+        {
+            "session_ref": {
+                "isolation_key": "run_user-1",
+                "session_id": "s1",
+            },
+            "gold_memory_index": 1,
+            "query_text": "keeps a cyan notebook",
+            "memories_from_system": ["retrieved cyan notebook memory"],
+            "formatted_memory": "retrieved cyan notebook memory",
+        }
+    )
+    _write_jsonl(probe_path, probes)
+    second_client = _FakeHalumemResponsesClient(input_tokens=10, output_tokens=2)
+    summary = run_artifact_evaluation(
+        run_dir=run_dir,
+        evaluator=HalumemUpdateEvaluator(model="gpt-4o-mini", client=second_client),
+        expected_benchmark="halumem",
+        max_workers=2,
+    )
+
+    paths = ExperimentPaths(run_dir=run_dir)
+    scores = read_jsonl(Path(summary.score_path))
+    observations = read_jsonl(
+        paths.evaluator_efficiency_observations_path("halumem_update")
+    )
+    assert len(first_client.calls) == 1
+    assert len(second_client.calls) == 1
+    assert [record["gold_memory_index"] for record in scores] == [2, 1]
+    assert len(observations) == 2
+    assert sum(record["input_tokens"] for record in observations) == 18
+    assert sum(record["output_tokens"] for record in observations) == 3
+
+
 def test_halumem_update_empty_retrieval_creates_no_observation(tmp_path: Path) -> None:
     """空检索的 update point 被官方路由跳过，不建立 scope、不产生 observation。"""
 

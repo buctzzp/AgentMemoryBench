@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from memory_benchmark.core import GOLD_EVIDENCE_CONTRACT_V1, GoldAnswerInfo, Question
+from memory_benchmark.core.exceptions import ConfigurationError
 from memory_benchmark.core.validators import validate_no_private_keys
 
 
@@ -55,12 +56,20 @@ def evaluator_private_label_record(
         `evidence_group_sets`；旧无版本 gold 保持旧 shape，不凭空加字段。
     """
 
+    metadata_projector = getattr(gold, "evaluator_artifact_metadata", None)
+    artifact_metadata = (
+        metadata_projector() if callable(metadata_projector) else gold.metadata
+    )
+    if not isinstance(artifact_metadata, dict):
+        raise ConfigurationError(
+            "evaluator artifact metadata projector must return a dict"
+        )
     record = {
         "question_id": gold.question_id,
         "gold_answer": gold.answer,
         "category": category,
         "evidence": gold.evidence,
-        "metadata": gold.metadata,
+        "metadata": artifact_metadata,
     }
     if gold.gold_evidence_contract_version == GOLD_EVIDENCE_CONTRACT_V1:
         record["gold_evidence_contract_version"] = GOLD_EVIDENCE_CONTRACT_V1

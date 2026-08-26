@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Hashable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -187,6 +187,7 @@ class LLMJudgeEvaluator:
     metric_name = "llm_judge_accuracy"
     benchmark_name = "generic"
     supports_efficiency_observability = True
+    supports_incremental_artifact_scores = False
 
     def __init__(
         self,
@@ -222,6 +223,7 @@ class LLMJudgeEvaluator:
         self._settings = None
         self._openai_settings = openai_settings
         self.efficiency_collector = efficiency_collector
+        self._existing_artifact_score_records: tuple[dict[str, Any], ...] = ()
 
     def build_prompt(
         self,
@@ -302,6 +304,8 @@ class LLMJudgeEvaluator:
             _ArtifactResult,
         ],
         max_workers: int,
+        unit_identity: Callable[[_ArtifactUnit], Hashable] | None = None,
+        score_identity: Callable[[dict[str, Any]], Hashable] | None = None,
     ) -> tuple[list[_ArtifactResult], EvaluatorEfficiencyObservationSink]:
         """有界并行评测 artifact 单元，并按输入顺序归并结果与 token 观测。
 
@@ -313,12 +317,47 @@ class LLMJudgeEvaluator:
 
         if isinstance(max_workers, bool) or max_workers < 1:
             raise ConfigurationError("artifact judge max_workers must be positive")
+        if (unit_identity is None) != (score_identity is None):
+            raise ConfigurationError(
+                "artifact judge cache requires both unit_identity and score_identity"
+            )
         aggregate_sink = self._new_efficiency_observation_sink()
         indexed_units = list(enumerate(units))
+        cached_by_identity: dict[Hashable, dict[str, Any]] = {}
+        if self._existing_artifact_score_records:
+            if unit_identity is None or score_identity is None:
+                raise ConfigurationError(
+                    f"{self.metric_name} does not support incremental score reuse"
+                )
+            for record in self._existing_artifact_score_records:
+                identity = score_identity(record)
+                if identity in cached_by_identity:
+                    raise ConfigurationError(
+                        "artifact judge cache has duplicate score identity"
+                    )
+                cached_by_identity[identity] = record
+
+            unit_identities = [unit_identity(unit) for _, unit in indexed_units]
+            if len(set(unit_identities)) != len(unit_identities):
+                raise ConfigurationError(
+                    "artifact judge units have duplicate score identity"
+                )
+            extra_cached = set(cached_by_identity) - set(unit_identities)
+            if extra_cached:
+                raise ConfigurationError(
+                    "artifact judge cache contains scores outside current inputs"
+                )
+            indexed_units_to_run = [
+                item
+                for item in indexed_units
+                if unit_identity(item[1]) not in cached_by_identity
+            ]
+        else:
+            indexed_units_to_run = indexed_units
         if not indexed_units:
             return [], aggregate_sink
 
-        worker_count = min(max_workers, len(indexed_units))
+        worker_count = min(max_workers, len(indexed_units_to_run))
         def execute(
             indexed_unit: tuple[int, _ArtifactUnit],
         ) -> tuple[int, _ArtifactResult, list[EfficiencyObservation]]:
@@ -332,27 +371,68 @@ class LLMJudgeEvaluator:
         completed: list[
             tuple[int, _ArtifactResult, list[EfficiencyObservation]]
         ] = []
-        with _artifact_judge_progress(self.metric_name, len(indexed_units)) as advance:
+        with _artifact_judge_progress(
+            self.metric_name,
+            len(indexed_units_to_run),
+        ) as advance:
             if worker_count == 1:
-                for indexed_unit in indexed_units:
+                for indexed_unit in indexed_units_to_run:
                     completed.append(execute(indexed_unit))
                     advance()
-            else:
+            elif worker_count > 1:
                 with ThreadPoolExecutor(max_workers=worker_count) as executor:
                     futures = [
                         executor.submit(execute, indexed_unit)
-                        for indexed_unit in indexed_units
+                        for indexed_unit in indexed_units_to_run
                     ]
                     for future in as_completed(futures):
                         completed.append(future.result())
                         advance()
 
         completed.sort(key=lambda item: item[0])
-        results: list[_ArtifactResult] = []
-        for _, result, observations in completed:
-            results.append(result)
+        new_by_index: dict[int, _ArtifactResult] = {}
+        for index, result, observations in completed:
+            new_by_index[index] = result
             aggregate_sink.extend_observations(observations)
+        results: list[_ArtifactResult] = []
+        for index, unit in indexed_units:
+            if unit_identity is not None:
+                cached = cached_by_identity.get(unit_identity(unit))
+                if cached is not None:
+                    results.append(cached)  # type: ignore[arg-type]
+                    continue
+            results.append(new_by_index[index])
         return results, aggregate_sink
+
+    def bind_existing_artifact_score_records(
+        self,
+        records: Sequence[dict[str, Any]],
+    ) -> None:
+        """在任何 API 调用前绑定同 metric 的既有 score，供增量 evaluator 复用。"""
+
+        if self._existing_artifact_score_records:
+            raise ConfigurationError("artifact judge score cache was already bound")
+        normalized: list[dict[str, Any]] = []
+        for record in records:
+            if not isinstance(record, dict):
+                raise ConfigurationError("artifact judge score cache rows must be objects")
+            if record.get("metric_name") != self.metric_name:
+                raise ConfigurationError(
+                    "artifact judge score cache metric_name does not match evaluator"
+                )
+            normalized.append(dict(record))
+        self._existing_artifact_score_records = tuple(normalized)
+
+    @staticmethod
+    def _question_score_identity(record: dict[str, Any]) -> str:
+        """从 question-level score row 读取稳定非空 question id。"""
+
+        question_id = record.get("question_id")
+        if not isinstance(question_id, str) or not question_id.strip():
+            raise ConfigurationError(
+                "incremental question-level judge score requires question_id"
+            )
+        return question_id
 
     def efficiency_model_inventory(self) -> tuple[ModelDescriptor, ...]:
         """返回 judge evaluator 会写入 observation 的模型身份。"""

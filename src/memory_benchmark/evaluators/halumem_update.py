@@ -29,6 +29,7 @@ class HalumemUpdateEvaluator(HalumemJudgeEvaluatorBase):
     metric_name = "halumem_update"
     official_source = "eval_tools.py:329-349; evaluation.py:154-174,294-330"
     profile_note = HALUMEM_JUDGE_PROFILE_NOTE
+    supports_incremental_artifact_scores = True
 
     def evaluate_run_artifacts(
         self,
@@ -124,6 +125,8 @@ class HalumemUpdateEvaluator(HalumemJudgeEvaluatorBase):
             units=units,
             evaluate_unit=evaluate_unit,
             max_workers=max_workers,
+            unit_identity=_update_unit_identity,
+            score_identity=_update_score_identity,
         )
 
         overall = {
@@ -189,6 +192,29 @@ def _update_scope_unit_id(
     """
 
     return f"{metric_name}:{session_id}:{gold_memory_index}"
+
+
+def _update_unit_identity(
+    unit: tuple[str, str, Any, dict[str, Any], list[str]],
+) -> tuple[str, str, Any]:
+    """返回 update 评测单元的稳定 cache identity。"""
+
+    return unit[0], unit[1], unit[2]
+
+
+def _update_score_identity(record: dict[str, Any]) -> tuple[str, str, Any]:
+    """从既有 update score row 重建稳定 cache identity。"""
+
+    conversation_id = record.get("conversation_id")
+    session_id = record.get("session_id")
+    gold_memory_index = record.get("gold_memory_index")
+    if not isinstance(conversation_id, str) or not conversation_id.strip():
+        raise ConfigurationError("cached HaluMem update score requires conversation_id")
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise ConfigurationError("cached HaluMem update score requires session_id")
+    if gold_memory_index is None:
+        raise ConfigurationError("cached HaluMem update score requires gold_memory_index")
+    return conversation_id, session_id, gold_memory_index
 
 
 def _string_list(value: Any) -> list[str]:

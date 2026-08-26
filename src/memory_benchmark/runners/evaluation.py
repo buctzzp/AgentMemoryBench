@@ -146,6 +146,7 @@ def run_artifact_evaluation(
     model_inventory: tuple[ModelDescriptor, ...] = ()
     efficiency_store: EfficiencyArtifactStore | None = None
     declared_metric_name: str | None = None
+    existing_score_records: list[dict[str, Any]] = []
     if efficiency_collector is not None and efficiency_collector.enabled:
         if efficiency_collector.run_id != run_id:
             raise ConfigurationError(
@@ -157,6 +158,14 @@ def run_artifact_evaluation(
             paths,
             declared_metric_name,
         )
+        existing_score_records = _read_optional_score_records(
+            paths.metric_scores_path(declared_metric_name)
+        )
+        _preflight_incremental_judge_artifacts(
+            efficiency_store=efficiency_store,
+            model_inventory=model_inventory,
+            existing_score_records=existing_score_records,
+        )
         efficiency_collector.bind_failed_attempt_sink(
             efficiency_store.append_failed_attempt
         )
@@ -164,16 +173,33 @@ def run_artifact_evaluation(
     ordered_question_ids = [
         qid for qid in ordered_question_ids if qid in prediction_by_id
     ]
+    should_skip_category = getattr(evaluator, "should_skip_category", None)
+    eligible_question_ids = [
+        qid
+        for qid in ordered_question_ids
+        if not callable(should_skip_category)
+        or not should_skip_category(public_by_id[qid].get("category"))
+    ]
+    existing_score_by_id = _index_existing_question_scores(
+        existing_score_records,
+        expected_metric_name=declared_metric_name,
+        public_by_id=public_by_id,
+        eligible_question_ids=eligible_question_ids,
+    )
+    pending_question_ids = [
+        qid for qid in eligible_question_ids if qid not in existing_score_by_id
+    ]
     eval_results = _evaluate_questions(
         evaluator=evaluator,
         public_by_id=public_by_id,
         prediction_by_id=prediction_by_id,
         private_by_id=private_by_id,
-        ordered_question_ids=ordered_question_ids,
+        ordered_question_ids=pending_question_ids,
         efficiency_collector=efficiency_collector,
         max_workers=max_workers,
     )
 
+    new_score_by_id: dict[str, dict[str, Any]] = {}
     for result_item in eval_results:
         question_id = result_item["question_id"]
         result_metric_name = result_item["metric_name"]
@@ -183,22 +209,44 @@ def run_artifact_evaluation(
             raise ConfigurationError(
                 "evaluator returned inconsistent metric_name across questions"
             )
-        if result_item.get("category") is not None:
-            categories[question_id] = result_item["category"]
-        score_sum += result_item["score"]
-        if result_item["is_correct"] is not None:
-            correct_values.append(result_item["is_correct"])
-        score_records.append(
-            {
-                "question_id": question_id,
-                "conversation_id": result_item["conversation_id"],
-                "metric_name": result_metric_name,
-                "score": result_item["score"],
-                "is_correct": result_item["is_correct"],
-                "details": result_item["details"],
-            }
-        )
+        new_score_by_id[question_id] = {
+            "question_id": question_id,
+            "conversation_id": result_item["conversation_id"],
+            "metric_name": result_metric_name,
+            "score": result_item["score"],
+            "is_correct": result_item["is_correct"],
+            "details": result_item["details"],
+        }
         efficiency_observations.extend(result_item["efficiency_observations"])
+
+    score_by_id = {**existing_score_by_id, **new_score_by_id}
+    score_records = [score_by_id[qid] for qid in eligible_question_ids]
+    for record in score_records:
+        question_id = record["question_id"]
+        category = public_by_id[question_id].get("category")
+        if category is not None:
+            categories[question_id] = str(category)
+        score = record.get("score")
+        if not isinstance(score, int | float) or isinstance(score, bool):
+            raise ConfigurationError("judge score cache contains a non-numeric score")
+        score_sum += float(score)
+        is_correct = record.get("is_correct")
+        if is_correct is not None:
+            if not isinstance(is_correct, bool):
+                raise ConfigurationError(
+                    "judge score cache contains a non-boolean is_correct"
+                )
+            correct_values.append(is_correct)
+        record_metric_name = _require_non_empty_string(
+            record.get("metric_name"),
+            "judge score metric_name",
+        )
+        if metric_name is None:
+            metric_name = record_metric_name
+        elif record_metric_name != metric_name:
+            raise ConfigurationError(
+                "judge score cache contains inconsistent metric_name values"
+            )
 
     resolved_metric_name = metric_name or getattr(evaluator, "metric_name", None)
     if not resolved_metric_name:
@@ -231,7 +279,6 @@ def run_artifact_evaluation(
         summary_path=str(summary_path.resolve()),
     )
     if efficiency_store is not None:
-        efficiency_store.write_model_inventory(model_inventory)
         efficiency_store.merge_observations(efficiency_observations)
     summary_dict = summary.to_dict()
     if categories:
@@ -279,9 +326,37 @@ def _run_artifact_level_evaluation(
             paths,
             declared_metric_name,
         )
+        existing_score_records = _read_optional_score_records(
+            paths.metric_scores_path(declared_metric_name)
+        )
+        _preflight_incremental_judge_artifacts(
+            efficiency_store=efficiency_store,
+            model_inventory=model_inventory,
+            existing_score_records=existing_score_records,
+        )
         efficiency_collector.bind_failed_attempt_sink(
             efficiency_store.append_failed_attempt
         )
+        if existing_score_records:
+            if not getattr(
+                evaluator,
+                "supports_incremental_artifact_scores",
+                False,
+            ):
+                raise ConfigurationError(
+                    f"{declared_metric_name} has existing paid scores but does not "
+                    "support incremental artifact evaluation"
+                )
+            binder = getattr(
+                evaluator,
+                "bind_existing_artifact_score_records",
+                None,
+            )
+            if not callable(binder):
+                raise ConfigurationError(
+                    "incremental artifact evaluator must expose a score-cache binder"
+                )
+            binder(existing_score_records)
 
     payload = evaluator.evaluate_run_artifacts(
         paths=paths,
@@ -557,6 +632,91 @@ def _read_required_jsonl(
     if not records:
         raise ConfigurationError(f"{artifact_name} is empty: {path}")
     return records
+
+
+def _read_optional_score_records(path: Path) -> list[dict[str, Any]]:
+    """读取可缺席的既有 score JSONL；一旦存在就严格校验对象行。"""
+
+    if not path.is_file():
+        return []
+    try:
+        records = read_jsonl(path)
+    except (json.JSONDecodeError, ValueError, UnicodeDecodeError) as exc:
+        raise ConfigurationError(
+            f"existing evaluator score JSONL is invalid: {path}"
+        ) from exc
+    if any(not isinstance(record, dict) for record in records):
+        raise ConfigurationError("existing evaluator score rows must be JSON objects")
+    return records
+
+
+def _preflight_incremental_judge_artifacts(
+    *,
+    efficiency_store: EfficiencyArtifactStore,
+    model_inventory: tuple[ModelDescriptor, ...],
+    existing_score_records: list[dict[str, Any]],
+) -> None:
+    """在付费调用前锁模型身份，并拒绝缺 token 账的既有 paid score。"""
+
+    if existing_score_records:
+        if not efficiency_store.model_inventory_path.is_file():
+            raise ConfigurationError(
+                "existing judge scores require an existing model inventory"
+            )
+        if not efficiency_store.observations_path.is_file():
+            raise ConfigurationError(
+                "existing judge scores require existing efficiency observations"
+            )
+        if not efficiency_store.read_observations():
+            raise ConfigurationError(
+                "existing judge scores require non-empty token observations"
+            )
+    # 文件已存在时该方法逐字段比较并 fail-fast；新 metric 则在首个 API 调用前落身份。
+    efficiency_store.write_model_inventory(model_inventory)
+
+
+def _index_existing_question_scores(
+    records: list[dict[str, Any]],
+    *,
+    expected_metric_name: str | None,
+    public_by_id: dict[str, dict[str, Any]],
+    eligible_question_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    """校验 answer-level paid score cache，并按 question id 建立复用索引。"""
+
+    if not records:
+        return {}
+    if expected_metric_name is None:
+        raise ConfigurationError(
+            "existing paid judge scores require a declared metric identity"
+        )
+    eligible = set(eligible_question_ids)
+    indexed: dict[str, dict[str, Any]] = {}
+    for record in records:
+        question_id = _require_non_empty_string(
+            record.get("question_id"),
+            "existing judge score question_id",
+        )
+        if question_id in indexed:
+            raise ConfigurationError(
+                f"existing judge scores contain duplicate question_id: {question_id}"
+            )
+        if question_id not in eligible:
+            raise ConfigurationError(
+                "existing judge scores contain a question outside current inputs: "
+                f"{question_id}"
+            )
+        if record.get("metric_name") != expected_metric_name:
+            raise ConfigurationError(
+                "existing judge score metric_name does not match evaluator"
+            )
+        expected_conversation_id = public_by_id[question_id].get("conversation_id")
+        if record.get("conversation_id") != expected_conversation_id:
+            raise ConfigurationError(
+                f"existing judge score conversation_id mismatch for {question_id}"
+            )
+        indexed[question_id] = dict(record)
+    return indexed
 
 
 def _index_records(

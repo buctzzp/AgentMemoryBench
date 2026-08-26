@@ -26,6 +26,7 @@ class HalumemQAEvaluator(HalumemJudgeEvaluatorBase):
     metric_name = "halumem_qa"
     official_source = "eval_tools.py:352-365; evaluation.py:176-197,332-362"
     profile_note = HALUMEM_JUDGE_PROFILE_NOTE
+    supports_incremental_artifact_scores = True
 
     def evaluate_run_artifacts(
         self,
@@ -98,6 +99,8 @@ class HalumemQAEvaluator(HalumemJudgeEvaluatorBase):
             units=units,
             evaluate_unit=evaluate_unit,
             max_workers=max_workers,
+            unit_identity=lambda unit: unit[0],
+            score_identity=self._question_score_identity,
         )
 
         overall = {

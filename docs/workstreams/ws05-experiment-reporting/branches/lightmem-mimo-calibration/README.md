@@ -60,6 +60,13 @@ artifact 瘦身/分批 evaluator 合同后的 current 全量零 API 门为
   [首批 evaluate 收据](notes/first-batch-evaluation-receipt.md)。
 - [x] 闭合 BEAM/HaluMem artifact judge 的内部有界并行、逐单元进度与 token 守恒，见
   [M1 实现收据](notes/artifact-judge-parallelism-m1.md)。
+- [x] 闭合分批 resume 的 paid judge 增量复用与 token ledger 前置门，见
+  [M2 实现收据](notes/incremental-paid-judge-resume-m2.md)。
+- [x] 修正 BEAM artifact slimming 误改 canonical dataset identity 的层次错误，完整 gold 与紧凑
+  label 同时守恒，见 [R1 收据](notes/beam-resume-artifact-projection-r1.md)。
+- [x] 合并后的 current 全量零 API 门：
+  `2364 passed, 3 deselected, 25 warnings, 29 subtests passed`；LongMemEval 真实 1→3 题增量
+  judge 与零新增幂等复跑均通过。
 - [ ] 按既有 identity 推进第二批 prediction resume，并形成增量成本/波动收据。
 
 ## 已知边界

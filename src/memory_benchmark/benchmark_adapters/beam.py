@@ -59,6 +59,25 @@ BEAM_OFFICIAL_10M_DATASET_URL = "https://huggingface.co/datasets/Mohammadta/BEAM
 BEAM_LICENSE = "CC-BY-SA-4.0"
 _SOURCE_HASH_CHUNK_SIZE = 1024 * 1024
 
+
+class BeamGoldAnswerInfo(GoldAnswerInfo):
+    """保留 source-locked 完整私有事实，但为落盘提供紧凑 evaluator 投影。"""
+
+    def evaluator_artifact_metadata(self) -> dict[str, Any]:
+        """只返回 scorer/evidence 映射实际消费的私有 metadata。"""
+
+        return {
+            "ability": self.metadata.get("ability"),
+            "rubric": self.metadata.get("rubric"),
+            "difficulty": self.metadata.get("difficulty"),
+            "ambiguous_gold_id_count": self.metadata.get(
+                "ambiguous_gold_id_count"
+            ),
+            "unmatched_gold_id_count": self.metadata.get(
+                "unmatched_gold_id_count"
+            ),
+        }
+
 # Arrow 目录名保留 HF 原始大写 split 名；10M 使用独立数据集目录。
 _VARIANT_PATH_MAP: dict[str, Path] = {
     "100k": _BEAM_DATASET_DIR / "100K",
@@ -344,20 +363,25 @@ def _conversation_from_row(
             # instruction_following/preference_following → expected_compliance;
             # summarization → ideal_summary
             gold_answer_text = _resolve_answer_field(q_obj, question_id)
-            _, ambiguous_count, unmatched_count = _map_evidence_turn_ids(
+            evidence_turn_ids, ambiguous_count, unmatched_count = _map_evidence_turn_ids(
                 q_obj.get("source_chat_ids"),
                 raw_id_to_public_turn_ids,
             )
 
-            # evaluator-private label 只保存 scorer 与 evidence 映射实际消费的字段。
-            # 原始 row/question_obj 由 source-locked dataset 保留，不能在每道题重复
-            # 复制整段 conversation plan、user questions 与 narratives。
+            # Canonical Dataset 保留 source-locked 私有事实，确保 adapter 语义与历史
+            # dataset identity 可审计；落盘时由 BeamGoldAnswerInfo 的 evaluator 投影
+            # 去掉 scorer 不消费的大块重复上下文。
             gold_metadata: dict[str, Any] = {
                 "ability": ability,
-                "rubric": q_obj.get("rubric"),
-                "difficulty": q_obj.get("difficulty"),
+                **{k: copy.deepcopy(v) for k, v in q_obj.items() if k != "question"},
+                "evidence_turn_ids": evidence_turn_ids,
                 "ambiguous_gold_id_count": ambiguous_count,
                 "unmatched_gold_id_count": unmatched_count,
+                "conversation_seed": row.get("conversation_seed"),
+                "user_profile": row.get("user_profile"),
+                "conversation_plan": row.get("conversation_plan"),
+                "user_questions": row.get("user_questions"),
+                "narratives": row.get("narratives"),
             }
 
             questions.append(
@@ -369,7 +393,7 @@ def _conversation_from_row(
                     metadata={},
                 )
             )
-            gold_answers[question_id] = GoldAnswerInfo(
+            gold_answers[question_id] = BeamGoldAnswerInfo(
                 question_id=question_id,
                 answer=gold_answer_text,
                 evidence=[],

@@ -195,6 +195,18 @@
     假设，不能把低价模型的分数、速度、token 数或价格写成 GPT-4o-mini 实测。优先把有限正式
     经费用于效率高、能形成完整对照的方法；A-Mem 等高调用方法可只给低价 token 成本外推，但
     必须诚实标注未做目标模型 full。
+40. **分批 prediction resume 不得让 judge 从头付费**：扩大同一 run 后，离线公式可全量重算，
+    API judge 必须先锁同 metric/model/prompt 身份，再复用既有 score 与 token ledger，只把新增
+    稳定评测单元送进模型。score 存在而 model inventory 或 efficiency observation 缺失时在 API
+    前拒绝；缓存 key 必须对齐真实 question 或复合 operation identity，不能用行号。尚未实现
+    增量合同的 artifact evaluator 宁可明确停工，也不能静默重打旧题或让幂等 merge 掩盖真实
+    重复费用。
+41. **artifact 瘦身只能发生在 serializer 投影层，不能删 canonical Dataset 事实**：私有字段不达
+    method，不代表它不属于 dataset/evaluator identity。直接从 adapter 的 `GoldAnswerInfo` 删除
+    source-locked metadata 会改变 `dataset_sha256` 并正确阻断 resume。应保留 canonical fact，
+    由显式、强类型的 evaluator artifact projector 只落 scorer 实际消费字段；随后同时证明完整
+    dataset hash、method-visible records 与紧凑 private records 守恒。禁止为赶进度放宽 SHA 比较
+    或硬编码迁移白名单。
 
 完整历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

@@ -842,6 +842,79 @@ def test_beam_artifact_judge_honors_workers_and_keeps_score_order(
     assert sum(item["output_tokens"] for item in observations) == 4
 
 
+def test_beam_artifact_judge_reuses_paid_question_scores(tmp_path: Path) -> None:
+    """扩大 prediction 后应只 judge 新 question，并保留首批 score 与 token observation。"""
+
+    first_id = "1:abstention:q1"
+    second_id = "2:abstention:q1"
+    run_dir = _write_beam_run_dir(
+        tmp_path,
+        questions=[_make_question_record(first_id, "q1?", category="abstention")],
+        predictions=[_make_prediction_record(first_id, "answer 1")],
+        private_labels=[
+            _make_private_label(first_id, rubric=["item 1"], ability="abstention")
+        ],
+    )
+    first_client = _FakeBeamResponsesClient(
+        score=1.0,
+        input_tokens=7,
+        output_tokens=1,
+    )
+    run_artifact_evaluation(
+        run_dir=run_dir,
+        evaluator=BeamRubricJudgeEvaluator(
+            mode="compact",
+            model="gpt-4o-mini",
+            client=first_client,
+        ),
+        expected_benchmark="BEAM",
+    )
+
+    _write_artifacts(
+        run_dir / "artifacts",
+        questions=[
+            _make_question_record(first_id, "q1?", category="abstention"),
+            _make_question_record(second_id, "q2?", category="abstention"),
+        ],
+        predictions=[
+            _make_prediction_record(first_id, "answer 1"),
+            _make_prediction_record(second_id, "answer 2"),
+        ],
+        private_labels=[
+            _make_private_label(first_id, rubric=["item 1"], ability="abstention"),
+            _make_private_label(second_id, rubric=["item 2"], ability="abstention"),
+        ],
+    )
+    second_client = _FakeBeamResponsesClient(
+        score=0.5,
+        input_tokens=9,
+        output_tokens=2,
+    )
+    summary = run_artifact_evaluation(
+        run_dir=run_dir,
+        evaluator=BeamRubricJudgeEvaluator(
+            mode="compact",
+            model="gpt-4o-mini",
+            client=second_client,
+        ),
+        expected_benchmark="BEAM",
+        max_workers=2,
+    )
+
+    paths = ExperimentPaths(run_dir=run_dir)
+    scores = read_jsonl(Path(summary.score_path))
+    observations = read_jsonl(
+        paths.evaluator_efficiency_observations_path("beam_rubric_judge")
+    )
+    assert len(first_client.calls) == 1
+    assert len(second_client.calls) == 1
+    assert [record["question_id"] for record in scores] == [first_id, second_id]
+    assert [record["score"] for record in scores] == [1.0, 0.5]
+    assert len(observations) == 2
+    assert sum(record["input_tokens"] for record in observations) == 16
+    assert sum(record["output_tokens"] for record in observations) == 3
+
+
 def test_beam_event_ordering_equivalence_records_usage_without_double_count(
     tmp_path: Path,
 ) -> None:

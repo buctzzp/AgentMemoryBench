@@ -53,6 +53,7 @@ class BeamRubricJudgeEvaluator(LLMJudgeEvaluator):
     benchmark_name = "BEAM"
     official_source = BEAM_JUDGE_OFFICIAL_SOURCE
     profile_note = BEAM_JUDGE_PROFILE_NOTE
+    supports_incremental_artifact_scores = True
 
     @property
     def client(self) -> Any | None:
@@ -147,6 +148,8 @@ class BeamRubricJudgeEvaluator(LLMJudgeEvaluator):
             units=units,
             evaluate_unit=self._evaluate_artifact_question,
             max_workers=max_workers,
+            unit_identity=lambda unit: unit[0],
+            score_identity=self._question_score_identity,
         )
 
         return self._finalize_artifact_payload(

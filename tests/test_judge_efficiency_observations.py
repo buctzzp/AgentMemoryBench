@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from memory_benchmark.core import ConfigurationError
 from memory_benchmark.evaluators import LoCoMoF1Evaluator, LoCoMoJudgeEvaluator
 from memory_benchmark.evaluators.llm_judge import LLMJudgeEvaluator
 from memory_benchmark.observability.efficiency import EfficiencyCollector
@@ -99,6 +100,139 @@ def test_actual_llm_judge_records_model_inventory_and_token_usage(
     assert observations[0]["token_measurement_source"] == "api_usage"
     assert observations[0]["conversation_id"] == "conv-1"
     assert observations[0]["question_id"] == "conv-1:q1"
+
+
+def test_answer_level_judge_reuses_paid_scores_and_calls_only_new_question(
+    tmp_path: Path,
+) -> None:
+    """同 run 新增问题后，既有 score/token 应复用，只为新问题再调用一次 judge。"""
+
+    run_dir = _build_minimal_run_dir(tmp_path)
+    first_client = _FakeResponsesClient(
+        text='{"label": "CORRECT"}',
+        input_tokens=17,
+        output_tokens=1,
+    )
+    run_artifact_evaluation(
+        run_dir=run_dir,
+        evaluator=LoCoMoJudgeEvaluator(
+            mode="compact",
+            model="gpt-4o-mini",
+            client=first_client,
+        ),
+        expected_benchmark="locomo",
+    )
+
+    paths = ExperimentPaths(run_dir=run_dir)
+    public = read_jsonl(paths.public_questions_path)
+    predictions = read_jsonl(paths.method_predictions_path)
+    private = read_jsonl(paths.evaluator_private_labels_path)
+    public.append(
+        {
+            "question_id": "conv-2:q1",
+            "conversation_id": "conv-2",
+            "question_text": "Where did Bob move?",
+            "category": "2",
+            "metadata": {},
+        }
+    )
+    predictions.append(
+        {
+            "question_id": "conv-2:q1",
+            "conversation_id": "conv-2",
+            "answer": "Boston",
+            "metadata": {},
+        }
+    )
+    private.append(
+        {
+            "question_id": "conv-2:q1",
+            "gold_answer": "Boston",
+            "category": "2",
+            "evidence": [],
+            "metadata": {},
+        }
+    )
+    _write_jsonl(paths.public_questions_path, public)
+    _write_jsonl(paths.method_predictions_path, predictions)
+    _write_jsonl(paths.evaluator_private_labels_path, private)
+    second_client = _FakeResponsesClient(
+        text='{"label": "CORRECT"}',
+        input_tokens=19,
+        output_tokens=2,
+    )
+
+    summary = run_artifact_evaluation(
+        run_dir=run_dir,
+        evaluator=LoCoMoJudgeEvaluator(
+            mode="compact",
+            model="gpt-4o-mini",
+            client=second_client,
+        ),
+        expected_benchmark="locomo",
+        max_workers=2,
+    )
+
+    scores = read_jsonl(Path(summary.score_path))
+    observations = read_jsonl(
+        paths.evaluator_efficiency_observations_path("locomo_judge_accuracy")
+    )
+    assert len(first_client.calls) == 1
+    assert len(second_client.calls) == 1
+    assert [record["question_id"] for record in scores] == [
+        "conv-1:q1",
+        "conv-2:q1",
+    ]
+    assert len(observations) == 2
+    assert sum(record["input_tokens"] for record in observations) == 36
+    assert sum(record["output_tokens"] for record in observations) == 3
+
+
+def test_paid_score_without_token_ledger_fails_before_new_api_call(
+    tmp_path: Path,
+) -> None:
+    """既有 paid score 若丢失 token observation，不得静默复用或重新付费。"""
+
+    run_dir = _build_minimal_run_dir(tmp_path)
+    first_client = _FakeResponsesClient(
+        text='{"label": "CORRECT"}',
+        input_tokens=17,
+        output_tokens=1,
+    )
+    run_artifact_evaluation(
+        run_dir=run_dir,
+        evaluator=LoCoMoJudgeEvaluator(
+            mode="compact",
+            model="gpt-4o-mini",
+            client=first_client,
+        ),
+        expected_benchmark="locomo",
+    )
+    paths = ExperimentPaths(run_dir=run_dir)
+    paths.evaluator_efficiency_observations_path(
+        "locomo_judge_accuracy"
+    ).unlink()
+    second_client = _FakeResponsesClient(
+        text='{"label": "CORRECT"}',
+        input_tokens=19,
+        output_tokens=2,
+    )
+
+    with pytest.raises(
+        ConfigurationError,
+        match="require existing efficiency observations",
+    ):
+        run_artifact_evaluation(
+            run_dir=run_dir,
+            evaluator=LoCoMoJudgeEvaluator(
+                mode="compact",
+                model="gpt-4o-mini",
+                client=second_client,
+            ),
+            expected_benchmark="locomo",
+        )
+
+    assert second_client.calls == []
 
 
 class _MinimalArtifactJudgeEvaluator(LLMJudgeEvaluator):
