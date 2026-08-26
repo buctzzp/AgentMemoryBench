@@ -261,7 +261,7 @@ def test_overall_gives_each_benchmark_one_vote_not_each_question() -> None:
 
     assert report["status"] == "ok"
     assert report["contract_version"] == QA_TASK_AGGREGATION_CONTRACT_VERSION
-    assert report["contract_version"] == "qa-task-aggregation-v2"
+    assert report["contract_version"] == "qa-task-aggregation-v2-draft"
     assert report["overall"][0]["method"] == "amem"
     assert report["overall"][0]["overall_qa_score"] == pytest.approx(60.0)
     assert report["overall"][1]["overall_qa_score"] == pytest.approx(40.0)

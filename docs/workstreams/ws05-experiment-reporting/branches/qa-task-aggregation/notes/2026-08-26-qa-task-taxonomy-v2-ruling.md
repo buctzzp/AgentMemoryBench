@@ -1,4 +1,10 @@
-# 2026-08-26 QA task taxonomy v2 裁决
+# 2026-08-26 QA task taxonomy v2 候选裁决记录
+
+> **2026-08-26 用户纠正后重开。**五家 task census 与官方 scorer 证据仍有效；横向映射、权重和
+> 原 §3.4“boundary 不要求空检索”均未获用户确认。现行讨论入口改为
+> [五家独立调查](../../../../../survey/qa-task-types/README.md) 与
+> [聚合讨论稿](../../../../../survey/qa-task-types/aggregation-draft.md)。本 note 是候选方案的历史
+> 收据，不是正式合同。
 
 ## 1. 目标与证据边界
 
@@ -22,10 +28,9 @@ BEAM+MemBench、HaluMem+权重。架构师复核了 current adapter 的公开 ca
 | HaluMem | 3,467 | Boundary=828、Fact=746、Conflict=769、Generalization=746、Multi-hop=198、Dynamic=180 |
 
 稳定定义与真实题目不在本 note 重复倾倒，统一见
-[`docs/survey/qa-task-taxonomy-and-aggregation.md`](../../../../../survey/qa-task-taxonomy-and-aggregation.md)
-及其链接的五张 benchmark 卡。
+[五家独立任务类型调查](../../../../../survey/qa-task-types/README.md)。
 
-## 3. v2 裁决
+## 3. v2 候选方案（等待讨论）
 
 ### 3.1 七个跨 benchmark 能力
 
@@ -54,11 +59,16 @@ Personalization 从偏好、习惯或用户状态推断“什么回答更适合�
 preference prompt 也明确排除 instruction。MemBench `highlevel/emotion` 可作为 personalization
 中的 affective-state secondary subtype，但不会被冒充为 instruction。
 
-### 3.4 Boundary 不等于空检索
+### 3.4 Boundary 必须区分 retrieval 与 answer
 
-LongMemEval `_abs`、BEAM abstention、HaluMem Memory Boundary 都在测最终 readout 是否承认
-证据不足。方法可能检索到无关或互相矛盾的 memory；`retrieved_items=[]` 既非必要条件，也非
-充分条件。QA 聚合只消费官方 answer judge，检索数量另作诊断，不建立隐式捷径。
+原判词“只要最终拒答，检索到无关记忆也算正确”被用户纠正：那只能说明官方
+`answer_abstention` 正确，不能说明记忆模块的 `retrieval_boundary` 正确。若目标是评测 memory
+module，返回无关 memory 应判 retrieval boundary 失败；成功应是 typed true-zero-hit 或
+`no_relevant_memory`。
+
+current artifact 又把 `RetrievalResult.items=None` 与 `items=()` 都序列化成 `[]`，尚不能可靠
+区分“不提供结构化 items”和“真实 0-hit”。因此最终 boundary 公式暂停，先修可观测性，再与用户
+讨论 retrieval、answer 两层和 strict conjunction 如何报告。
 
 ### 3.5 Generalization 与长期总结
 
@@ -98,8 +108,7 @@ judge、choice accuracy、BEAM 0/0.5/1 rubric 与 ordering tau。它只能解释
 
 ## 5. v1 → v2 变更
 
-- capability contract version 从 `qa-task-aggregation-v1` 升为 v2；旧 report artifact 仍按自身
-  version 回读，不得与 v2 cohort 混合。
+- capability contract 暂记 `qa-task-aggregation-v2-draft`；用户确认前不得生成 formal 排名。
 - `dynamic_update` + `conflict_resolution` → `memory_revision`。
 - `memory_grounded_inference_application` 拆成 `personalization` 与
   `generalization_application`。

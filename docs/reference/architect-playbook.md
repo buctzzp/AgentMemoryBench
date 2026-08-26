@@ -138,6 +138,13 @@
     author-reported effective config、current product default 与 framework main identity 四栏取证。
     论文主流程/消融中的组件若在代码里被做成开关，不能仅因通用默认关闭就删掉；反过来也不能
     看到 bool 就全部开启。沿到最终调用分支，并对关键开关或高影响数值做零 API mutation。
+32. **先锁被测组件，再解释官方 metric**：end-to-end QA 正确不能自动证明 memory retrieval 正确。
+    例如 boundary 题里 reader 最终拒答，只能证明 answer abstention；若 provider 返回无关记忆，
+    retrieval boundary 仍失败。组件级指标必须有 typed runtime outcome，并区分 N/A、未观测与真实
+    zero-hit，禁止让下游 LLM 的补救掩盖上游模块缺陷。
+33. **用户要先审阅调查稿时，不得越级冻结合同**：按用户指定的信息架构交付（如五份单家事实页
+    + 一份横向讨论稿），明确“已核事实 / 候选映射 / 未决问题”。在用户逐项确认前，代码版本和
+    workstream 必须标 draft/in-progress；不能因为架构师已有推荐方案就抢先写成稳定合同。
     官方 benchmark 的专调值只进入显式 `author_<benchmark>`；主配置保持跨 benchmark 固定。
     配置字段名、README 描述和 harness 传值也不证明字段有效：若产品没有消费者，应裁
     `DEAD_CONFIG`，不能继续把它写进 active identity。一个 benchmark 报告多组 backbone/参数/

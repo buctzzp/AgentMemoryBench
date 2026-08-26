@@ -38,9 +38,9 @@
   `reference/method-toml-and-answer-builder-policy.md`；十家逐项参数/prompt 取证的当前进度看
   `workstreams/ws05.1-method-profile-provenance/README.md`。
 - 想知道五个 benchmark 的 QA task 如何对齐、总榜/能力榜如何计算、为什么 retrieval 与
-  HaluMem operation 指标不进主总分：先看带真实例子的
-  `survey/qa-task-taxonomy-and-aggregation.md`，计算合同看 `reference/qa-task-aggregation.md`；
-  当前实现与研究证据看 `workstreams/ws05-experiment-reporting/branches/qa-task-aggregation/README.md`。
+  HaluMem operation 指标不进主总分：先逐家看 `survey/qa-task-types/`，再看其中的
+  `aggregation-draft.md`；当前候选计算合同在 `reference/qa-task-aggregation.md`，实现与讨论断点看
+  `workstreams/ws05-experiment-reporting/branches/qa-task-aggregation/README.md`。
 - 想知道 smoke/official 使用哪个 API provider、model、transport，以及如何进入
   manifest/resume：`reference/api-runtime-profiles.md`。
 - 想生成不会误带 HaluMem 裁剪轴、错误 worker 或 variant run-id 的 smoke 命令：

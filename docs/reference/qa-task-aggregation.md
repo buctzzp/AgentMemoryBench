@@ -1,8 +1,8 @@
 # Phase 1 QA 任务类型与聚合契约
 
-> 当前版本：`qa-task-aggregation-v2`（2026-08-26）。这是主实验报告的稳定计算入口；五家
-> task 的定义、真实例子与权重解释见
-> [survey 横向入口](../survey/qa-task-taxonomy-and-aggregation.md)，研究证据与旧 v1 见 ws05 支线。
+> 当前版本：`qa-task-aggregation-v2-draft`（2026-08-26）。**用户尚未确认，禁止用于 formal
+> 排名。**先逐一阅读 [五家独立任务类型调查](../survey/qa-task-types/README.md)，再看
+> [聚合讨论稿](../survey/qa-task-types/aggregation-draft.md)。本页只是当前可执行候选合同。
 
 ## 1. 主榜边界
 
@@ -33,9 +33,10 @@ N/A 不扣 QA 分，也不得为填榜伪造能力。
 | long-horizon summarization | — | — | summarization | — | — |
 | noise robustness | — | — | — | noisy | — |
 
-每题恰好一个 primary capability。Conflict 保留 native 名但并入 memory revision；instruction
-following 不与 personalization 合并；`highlevel/emotion` 等 scenario 只作 secondary diagnostic。
-边界题的正确性不要求 method 检索为空，只要求最终回答在证据不足时不编造。
+每题恰好一个 primary capability 的规则、Conflict/update 和 personalization/instruction 映射仍待
+用户确认。边界题必须拆开报告：官方 QA judge 只能证明 final answer abstention；若要声称 memory
+module boundary 正确，还须证明 typed zero-hit/`no_relevant_memory`，返回无关记忆应判 retrieval
+boundary 失败。
 
 ## 4. 公式
 

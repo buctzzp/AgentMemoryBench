@@ -35,9 +35,10 @@
 
 ## 2. Phase 1 五 benchmark 四联入口
 
-五家 QA 原生任务如何归并、为什么不能直接按题数混池、总榜与能力榜如何计算，统一看
-[QA 任务类型与跨 benchmark 聚合](qa-task-taxonomy-and-aggregation.md)。单家任务定义与真实例子
-仍落在下表对应 benchmark 卡，避免总表复制所有样例。
+五家 QA 原生任务已按用户要求拆成
+[五份独立调查文档](qa-task-types/README.md)；每份写清 task、真实例子和官方 scorer。读完后再看
+[跨 benchmark 聚合讨论稿](qa-task-types/aggregation-draft.md)。横向 taxonomy 与权重尚待用户和
+架构师确认，当前不得冒充 formal 合同。
 
 | Benchmark | 总览 | Dataset schema | 异常详账 | 官方/框架 workflow | 当前 gold evidence unit 摘要 |
 |---|---|---|---|---|---|

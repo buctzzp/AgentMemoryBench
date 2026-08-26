@@ -145,31 +145,9 @@ event_id = f"{tid}:{step_id}"
 
 ### 2.7 QA 任务类型与真实例子（2026-08-26）
 
-以下 locator 均指 `data/membench/Membenchdata/data2test/0-10k/`。`First...` 是
-Participation 的 user/assistant pair-step，`Third...` 是 Observation 的单消息 step；同一个原始
-`tid` 会在不同 source 重复，因此框架使用
-`{first|third}-{high|low}-{question_type}-{scenario}-{tid}:q<qid>` 作为公开 id。
-
-| 原生 task | 真实例子 | QA 能力归属 |
-| --- | --- | --- |
-| `simple` | `FirstAgentDataLowLevel_multiple_0.json / roles / tid=0`：问 niece 的公司名，答案 `TechInnovate Systems LLC` | 事实回顾与信息抽取 |
-| `lowlevel_rec` | 同文件 `movie / tid=0`：回忆助手以前明确推荐过的电影，如 *Return of the Jedi* 与 *Jurassic Park* | 事实回顾；答案是显式推荐项，不是偏好推断 |
-| `conditional` | 同文件 `roles / tid=0`：先找 Associate Degree 的人，再回答其年龄 | 跨会话与组合回忆/推理（筛选） |
-| `comparative` | 同文件 `roles / tid=0`：比较 Nolan Hayes 与 Sophie Turner 谁更年长 | 跨会话与组合回忆/推理（比较） |
-| `aggregative` | 同文件 `roles / tid=0`：统计住在 Philadelphia 的人数 | 跨会话与组合回忆/推理（计数） |
-| `post_processing` | `ThirdAgentDataLowLevel_multiple_0.json / roles / tid=0`：筛选 Boston 工作者后抽取 email suffix | 跨会话与组合回忆/推理（派生变换） |
-| `RecMultiSession` | `FirstAgentDataLowLevel_multiple_0.json / multi_agent / tid=0`：汇总跨 movie/book/dish 会话里助手给过的所有推荐 | 跨会话与组合回忆/推理 |
-| `knowledge_update` | `FirstAgentDataLowLevel_multiple_0.json / roles / tid=0`：旧 hobby 后来更新为 `Camping`，问题问当前 hobby | 记忆修订 |
-| `highlevel` | `FirstAgentDataHighLevel_multiple_0.json / movie / tid=0`：从提到的电影推断偏好 `Drama`；`emotion / tid=0` 则推断给定时刻附近的情绪 | 个性化；偏好与情绪状态保留 secondary subtype |
-| `highlevel_rec` | 同文件 `movie / tid=0`：在包含推荐、拒绝和喜欢/不喜欢反馈的历史中推断抽象电影偏好 | 个性化；不能与具体推荐回顾 `lowlevel_rec` 合并 |
-| `noisy` | `FirstAgentDataLowLevel_multiple_0.json / roles / tid=0`：hiking/weather/restaurant 等噪声后再问真实职位 | 噪声鲁棒性（单 benchmark diagnostic） |
-
-0-10k 主数据共 3,400 道 choice QA：`simple=350`、`conditional=350`、
-`comparative=250`、`aggregative=250`、`post_processing=350`、`knowledge_update=200`、
-`lowlevel_rec=150`、`RecMultiSession=50`、`highlevel=800`、`highlevel_rec=300`、
-`noisy=350`。每题的 QA 主分仍只是 A/B/C/D exact choice accuracy；上述分类不改变官方 scorer。
-`scenario`（roles/events/items/places/hybrid/movie/food/book/emotion）保留为 secondary 诊断轴，
-不会因为一个 source 划得更细就获得更多跨 benchmark 权重。
+独立、可讨论的任务类型清单（11 类计数、真实题目、推荐回顾边界、choice scorer 与 `noisy`
+实际上是 query 前缀碎碎念而非“空检索”）见
+[MemBench QA 任务类型](../qa-task-types/membench.md)。跨 benchmark 映射不在本总览卡提前定稿。
 
 ## 3. Evaluation 流程
 

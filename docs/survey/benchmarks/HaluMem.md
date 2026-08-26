@@ -165,21 +165,9 @@ Question 示例：
 
 ### 2.7 QA 任务类型与真实例子（2026-08-26）
 
-下表来自冻结 Medium 数据；Long 使用相同 QA identity/六类计数，只改变 context variant，不能把
-Medium 与 Long 当成两批独立题目重复计权。
-
-| question_type | 定义 | current 数据例子 | QA 聚合能力 |
-| --- | --- | --- | --- |
-| `Basic Fact Recall` | 回忆对话中明确出现的单个事实或偏好 | UUID `2f1f…294f`, `s1:q2`：“Martin Mark 的出生日期？”→`1996-08-02` | `factual_recall_extraction` |
-| `Multi-hop Inference` | 综合 2–3 个 memory point 作逻辑、关系、因果或时间推理 | 同 UUID `s8:q5`：哪次角色转变改善了心理健康？→提供更健康工作生活平衡的角色 | `multi_evidence_recall_reasoning` |
-| `Dynamic Update` | 跟踪同一信息随时间变化并询问 current/latest 状态 | 同 UUID `s30:q7`：截至 2029-03-10 当前心理状态？→`Abnormal` | `memory_revision` |
-| `Memory Conflict` | 问题含有与记忆冲突的错误前提，答案应纠正前提 | 同 UUID `s1:q3`：是否与 partner 建立全球健康项目？→没有 partner，只是计划建立项目 | `memory_revision`；不另设 conflict 聚合分 |
-| `Memory Boundary` | 所问具体信息从未提供，正确答案是 unknown | 同 UUID `s1:q1`：“Martin Mark 的 middle name？”→`Unknown; not provided`，`evidence=[]` | `answerability_boundary` |
-| `Generalization & Application` | 把已知偏好/特征应用到未逐字出现的新情境 | 同 UUID `s5:q3`：Golden Retriever 偏好如何影响压力期选宠？→可提供放松与情绪支持 | `generalization_application` |
-
-六类计数为 Boundary 828、Fact 746、Conflict 769、Generalization 746、Multi-hop 198、Dynamic
-180。题量明显不均，因此能力聚合先算 official type mean，再在同一父能力内宏平均；不能让 769 个
-Conflict 自动把 180 个 Dynamic Update 淹没。
+独立、可讨论的六类 QA 清单（计数、真实题目、C/H/O scorer、QA Boundary 与 FMR 区别，以及
+retrieval/answer boundary 分层）见 [HaluMem QA 任务类型](../qa-task-types/halumem.md)。跨
+benchmark 映射不在本总览卡提前定稿。
 
 ## 3. Evaluation 流程
 

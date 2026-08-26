@@ -1,7 +1,7 @@
 # 2026-08-26 QA task aggregation M0 实现验收
 
-> 历史 v1 实现收据：artifact/identity/rank 机制仍有效；taxonomy 与 contract version 已由
-> [M0-R1 v2](2026-08-26-qa-task-taxonomy-v2-ruling.md) 取代。
+> 历史 v1 实现收据：artifact/identity/rank 机制仍有效；taxonomy 已进入
+> [M0-R1 v2 draft](2026-08-26-qa-task-taxonomy-v2-ruling.md)，但用户尚未确认，当前不作 formal 合同。
 
 ## 1. 交付
 

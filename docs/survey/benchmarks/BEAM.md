@@ -227,29 +227,9 @@ method。
 
 ### 2.5 QA ability 的真实例子与聚合归属（2026-08-26）
 
-下表前九例均来自 `data/BEAM/beam_dataset/100K/data-00000-of-00001.arrow` 的 row 0、
-`conversation_id=1`；时间题改用无 answer/rubric 冲突的 10M row 0。locator 中 `q0` 是该
-ability 的第一题；框架公开 id 为 `1:<ability>:q1`。rubric、answer 与 source ids 仍只给
-evaluator，不会送入 method。
-
-| ability | 问题与正确行为（节选） | QA 能力归属 |
-| --- | --- | --- |
-| `information_extraction/q0` | “When does my first sprint end?”；应答 `March 29` | 事实回顾与信息抽取 |
-| `multi_session_reasoning/q0` | 跨三段历史统计 transactions table 新增了几列；应答 `category` 与 `notes` 共两列 | 跨会话与组合回忆/推理 |
-| `temporal_reasoning/q0`（10M） | 计算 `2025-02-15` 到 `2025-03-01` 的间隔；应答 `14 days` | 时间与事件顺序 |
-| `event_ordering/q0` | 按对话中首次提及的顺序列出 budget tracker 的三项开发活动 | 时间与事件顺序；保留独立 `tau_norm` scorer |
-| `knowledge_update/q0` | dashboard API response time 后来更新为 `250ms`，问题问当前值 | 记忆修订 |
-| `contradiction_resolution/q0` | 历史同时出现“从未写 Flask route”和“实现过 homepage route”；应指出矛盾并要求澄清 | 记忆修订；native conflict 明细不删除 |
-| `preference_following/q0` | 用户偏好 lightweight、minimal dependencies，后续工具建议应据此个性化 | 个性化 |
-| `instruction_following/q0` | 很早以前要求实现细节中的代码必须带 syntax highlighting，后续仍须遵守 | 长期指令遵循（单 benchmark diagnostic） |
-| `abstention/q0` | 历史没有说明 user feedback 如何影响 UI/UX；应明确“无相关信息” | 可答性与记忆边界 |
-| `summarization/q0` | 概括 budget tracker 从核心功能、错误处理到安全与部署的长期演变 | 概括与长期总结（单 benchmark diagnostic） |
-
-`preference_following` 与 `instruction_following` 不合并。前者描述用户希望什么，后者规定系统
-必须怎样行动；官方 preference prompt 也明确要求只考虑 preference、不把 instruction 当偏好。
-`knowledge_update` 与 `contradiction_resolution` 则共享“维护当前可信记忆”的父能力，但在 native
-task 明细中继续分开。100K row 0 的 temporal `answer` 与 rubric 存在 4/8 weeks 冲突，因此不拿
-它做教学例子；正式 scorer 仍以 rubric 的锁定身份为准。
+独立、可讨论的十 ability 清单（真实题目、rubric、event-ordering `tau_norm`、0.5 截断历史与
+boundary 分层）见 [BEAM QA 任务类型](../qa-task-types/beam.md)。跨 benchmark 映射不在本总览卡
+提前定稿。
 
 ## 3. Evaluation 流程
 

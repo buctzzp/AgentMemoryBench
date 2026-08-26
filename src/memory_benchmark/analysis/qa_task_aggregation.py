@@ -14,7 +14,9 @@ from memory_benchmark.core import ConfigurationError
 from memory_benchmark.storage import ExperimentPaths, read_jsonl
 
 
-QA_TASK_AGGREGATION_CONTRACT_VERSION = "qa-task-aggregation-v2"
+# 用户尚未确认跨 benchmark taxonomy 与权重；保留可执行草案便于强反例，
+# 但版本名必须阻止它被误当成 formal 发布合同。
+QA_TASK_AGGREGATION_CONTRACT_VERSION = "qa-task-aggregation-v2-draft"
 
 PHASE1_QA_BENCHMARKS: tuple[str, ...] = (
     "locomo",

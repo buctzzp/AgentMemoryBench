@@ -26,22 +26,9 @@ S/M variant 的成本差异主要来自 history 长度：官方称 S 约 115k to
 
 ### 2.1 QA 任务类型与真实例子（2026-08-26）
 
-S/M 两个 cleaned variant 的 500 个 question identity 与题型计数一致。`_abs` 是覆盖普通
-`question_type` 的有效 abstention 身份：同一道题只进入边界能力一次，原类型仅保留为诊断轴。
-
-| effective task | 定义 | current S 数据例子 | QA 聚合能力 |
-| --- | --- | --- | --- |
-| `single-session-user` | 从一个 session 的 user 发言直接回忆事实 | item 0 / `e47becba`：“我取得什么学位？”→ `Business Administration` | `factual_recall_extraction` |
-| `single-session-assistant` | 从一个 session 的 assistant 回复回忆建议/安排 | item 444 / `7161e7e2`：回忆 Admon 周日轮班→`8 am - 4 pm` | `factual_recall_extraction`；`source_role=assistant` 另作诊断 |
-| `multi-session` | 综合多个 session 的事实 | item 70 / `0a995998`：“需要取回或退回几件衣服？”→`3`，答案跨三个 session | `multi_evidence_recall_reasoning` |
-| `temporal-reasoning` | 根据多次事件日期计算间隔或先后 | item 233 / `gpt4_59149c77`：MoMA 与 Metropolitan Museum 参观间隔→`7 days` | `temporal_event_reasoning` |
-| `knowledge-update` | 旧信息后来被更新，问题要求当前/最终值 | item 366 / `6a1eabeb`：5K 最佳成绩由 `27:12` 更新为 `25:50` | `memory_revision` |
-| `single-session-preference` | 根据用户偏好生成合适的建议，不是短事实复述 | item 132 / `8a2466db`：推荐 video-editing 资源；gold rubric 偏向 Adobe Premiere Pro 高级设置 | `personalization` |
-| `abstention` (`*_abs`) | 历史没有所问信息，应说明未提及 | item 64 / `0862e8bf_abs`：“我的仓鼠叫什么？”；历史只提到猫 Luna | `answerability_boundary` |
-
-官方 judge 对 temporal、update、preference、abstention 使用不同判定模板：temporal 允许特定
-off-by-one，update 必须包含更新后的答案，preference 以偏好 rubric 判定，abstention 判断是否正确
-识别不可回答。因此这些题即使最终都落成 `0/1`，也不等于共享同一题级测量语义。
+独立、可讨论的任务类型清单（六类原生 task、`_abs` 覆盖语义、真实题目、judge 与 retrieval/
+answer boundary 分层）见 [LongMemEval QA 任务类型](../qa-task-types/longmemeval.md)。跨 benchmark
+映射不在本总览卡提前定稿。
 
 ## 3. 官方评测流程
 

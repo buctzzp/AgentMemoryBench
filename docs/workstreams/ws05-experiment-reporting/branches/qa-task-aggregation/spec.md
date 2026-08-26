@@ -1,4 +1,7 @@
-# QA Task Aggregation v2 Spec
+# QA Task Aggregation v2 Draft Spec
+
+> 用户尚未确认 taxonomy、boundary 与权重；本 spec 只描述当前候选算法，不是 formal 发布合同。
+> 讨论入口见 `docs/survey/qa-task-types/aggregation-draft.md`。
 
 ## 1. 研究问题
 
@@ -83,4 +86,5 @@ task 进入 memory revision；preference/personalization 与显式 instruction �
 6. 缺格后缩小分母、补 0 或用 table min/max normalization；
 7. pilot/smoke 与 formal，或不同 model/prompt/judge identity 混成一个 cohort；
 8. 把单 benchmark diagnostic 宣称成跨 benchmark 能力分。
-9. 把“检索结果非空”直接判成 boundary 失败，或把题级 pooled micro 冒充五 benchmark 等权主榜。
+9. 用 final answer 拒答替代 memory retrieval boundary，或在未区分 `items=None`/真实 0-hit 时计分。
+10. 把题级 pooled micro 冒充五 benchmark 等权主榜。

@@ -1,4 +1,4 @@
-# QA Task Aggregation v2 Plan
+# QA Task Aggregation v2 Draft Plan
 
 ## M0 — 开跑前合同
 
@@ -9,15 +9,18 @@
 - [x] 增加强反例：重复计权、缺 roster、BEAM event-ordering、tie、宏/微平均、未知类型。
 - [x] 更新 ws05/roadmap/稳定索引并通过定向测试、文档门与 `git diff --check`。
 
-## M0-R1 — 任务语义复核与 v2（当前）
+## M0-R1 — 五家任务调查与用户裁决（当前）
 
 - [x] 五家全量/官方 task taxonomy 复核并给每类补真实 locator 与通俗定义。
-- [x] 裁定 Conflict 并入 memory revision，personalization 与 instruction following 分离。
-- [x] 把 LoCoMo commonsense/HaluMem generalization 从 personalization 中拆出。
-- [x] 裁定 MemBench `lowlevel_rec` 为显式推荐回顾、`RecMultiSession` 为多证据回顾。
-- [x] 锁定题量 pooled-micro 只能作 supplementary，主榜保持 benchmark-equal average-rank。
-- [x] 同步五张 benchmark 卡、survey 横向入口、稳定契约、代码与强反例。
-- [x] 更新父状态/恢复胶囊并通过零 API 定向门。
+- [x] 建立五份独立 benchmark task 文档与一份 aggregation discussion draft。
+- [x] 修正 MemBench noisy：原生 task 是 query 前缀碎碎念；100K 历史 NoiseData 是另一条轴。
+- [x] 修正 boundary：retrieval boundary 与 answer abstention 分层；记录 `None`/空 tuple 可观测缺口。
+- [ ] 用户确认 Conflict/update 的父能力关系。
+- [ ] 用户确认 personalization/instruction 是否分离。
+- [ ] 用户确认 MemBench recommendation 与 noisy 的归类。
+- [ ] 用户确认 boundary headline 与 retrieval outcome 协议修复范围。
+- [ ] 用户确认主权重方案及 raw/pooled sensitivity。
+- [ ] 根据最终裁决升级正式 contract version、强反例与稳定文档。
 
 ## M1 — 正式 cohort 组装（首批 formal 前）
 
