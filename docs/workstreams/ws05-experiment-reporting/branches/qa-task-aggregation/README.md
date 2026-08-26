@@ -27,8 +27,10 @@ Recall@K、Precision@K、HaluMem Extraction、HaluMem Updating 或 memory-type�
 ## 当前断点
 
 M0-R2 已闭合：BEAM 整题顺序 judge、普通题三档 selector、最终 taxonomy、answer-only
-abstention 与逐题 pooled-micro artifact 均已实现并通过零 API 门。下一批 M1 只组装正式 cohort
-receipt 与 machine-readable report 写出面；真实 API 与 pilot 继续暂停。
+abstention 与逐题 pooled-micro artifact 均已实现。M1 的显式 run 选择、deterministic receipt、
+JSON report 与 Markdown 写出面也已零 API 实现；它不扫描 `outputs/`，身份不一致或缺格时扣住
+排名。真正的 10×5 `status=ok` 收据必须等首批 formal artifact 存在后生成，当前不伪造空收据；
+真实 API 与 pilot 继续暂停。
 
 ## 文档索引
 
@@ -43,6 +45,8 @@ receipt 与 machine-readable report 写出面；真实 API 与 pilot 继续暂�
 - [v3 最终裁决](notes/2026-08-26-qa-task-aggregation-v3-ruling.md)：用户确认与一手证据摘要。
 - [M0-R2 实现记录](notes/2026-08-26-qa-task-aggregation-m0-r2-implementation.md)：可执行 v3、
   BEAM receipt、强反例与兼容边界。
+- [M1 receipt 实现记录](notes/2026-08-26-qa-cohort-receipt-m1-implementation.md)：显式 cohort
+  选择、写出面、ledger 基线修复与停手线。
 - [M0-R1 v2 候选记录](notes/2026-08-26-qa-task-taxonomy-v2-ruling.md)：一手复核与被用户重开的旧候选。
 - [Boundary/文档拆分重开](notes/2026-08-26-boundary-and-document-split-reopen.md)：本轮用户纠正、
   typed zero-hit 缺口与新交付结构。

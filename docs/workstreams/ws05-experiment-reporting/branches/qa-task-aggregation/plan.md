@@ -34,11 +34,14 @@
 - [x] 定向测试、文档门与架构验收通过；全量仅保留基线已复现的两个 ws02.7 ledger 失败，
   M0-R2 相对基线零回归。下一步可进入 M1。
 
-## M1 — 正式 cohort 组装（首批 formal 前）
+## M1 — 正式 cohort 组装
 
-- [ ] 从 run manifests 生成 cohort receipt，验证 data/question/answer/judge identity。
-- [ ] 锁十家×五家 run-id 清单；pilot 只验证管线，不发布方法排名。
-- [ ] 输出 machine-readable QA report artifact 与人类可读表格。
+- [x] 实现从**显式选择**的 run manifests 生成 deterministic cohort receipt，验证
+  data/question/isolation/task/answer/judge identity；不扫描 `outputs/` 猜 run。
+- [x] 实现 machine-readable receipt、QA report 与紧凑 Markdown 表格写出面；incomplete
+  cohort 只写诊断，不写部分排名。
+- [ ] 首批 formal artifact 完成后锁十家×五家 run-id 清单并生成 `status=ok` 的实物收据；pilot
+  只验证管线，不发布方法排名。
 
 ## M2 — 不确定性与报告（完整 cohort 后）
 

@@ -10,14 +10,18 @@ import pytest
 
 from memory_benchmark.analysis.qa_task_aggregation import (
     PHASE1_QA_BENCHMARKS,
+    QA_COHORT_RECEIPT_CONTRACT_VERSION,
     QA_TASK_AGGREGATION_CONTRACT_VERSION,
     QACapabilitySlice,
     QANativeTaskScore,
     QAQuestionScore,
     QARunScore,
     build_qa_aggregate_report,
+    build_qa_cohort_receipt,
     classify_qa_task,
     load_qa_run_score,
+    render_qa_aggregate_report_markdown,
+    write_qa_cohort_artifacts,
 )
 from memory_benchmark.core import ConfigurationError
 from memory_benchmark.metrics import (
@@ -523,6 +527,158 @@ def test_report_explicitly_excludes_retrieval_and_halumem_operation_metrics() ->
         "halumem_update",
         "halumem_memory_type",
     ]
+
+
+def test_cohort_receipt_is_deterministic_and_contains_no_absolute_run_paths() -> None:
+    """显式 run 选择顺序不影响收据，且收据不泄露机器绝对路径。"""
+
+    runs = [
+        _synthetic_run(method, benchmark, 0.5)
+        for benchmark in PHASE1_QA_BENCHMARKS
+        for method in ("amem", "mem0")
+    ]
+
+    receipt = build_qa_cohort_receipt(
+        runs,
+        expected_methods=("amem", "mem0"),
+    )
+    reversed_receipt = build_qa_cohort_receipt(
+        reversed(runs),
+        expected_methods=("amem", "mem0"),
+    )
+
+    assert receipt == reversed_receipt
+    assert receipt["contract_version"] == QA_COHORT_RECEIPT_CONTRACT_VERSION
+    assert receipt["status"] == "ok"
+    assert len(receipt["cells"]) == 10
+    assert len(receipt["receipt_sha256"]) == 64
+    assert all("run_dir" not in cell for cell in receipt["cells"])
+    assert all(len(cell["cell_identity_sha256"]) == 64 for cell in receipt["cells"])
+
+
+def test_cohort_receipt_carries_identity_mismatch_without_publishing_rank() -> None:
+    """身份漂移必须进入收据诊断，不能因已经能算均值就发布。"""
+
+    runs = [
+        _synthetic_run(method, benchmark, 0.5)
+        for benchmark in PHASE1_QA_BENCHMARKS
+        for method in ("amem", "mem0")
+    ]
+    target = next(
+        index
+        for index, run in enumerate(runs)
+        if run.method_name == "mem0" and run.benchmark_name == "locomo"
+    )
+    runs[target] = replace(runs[target], answer_identity_sha256="drifted")
+
+    receipt = build_qa_cohort_receipt(
+        runs,
+        expected_methods=("amem", "mem0"),
+    )
+
+    assert receipt["status"] == "incomplete"
+    assert receipt["coverage"]["benchmark_identity_errors"] == {
+        "locomo": ["answer_identity_sha256_mismatch"]
+    }
+
+
+def test_same_question_id_with_different_isolation_is_not_the_same_cohort() -> None:
+    """question_id 相同也不能掩盖 isolation/task identity 漂移。"""
+
+    runs = [
+        _synthetic_run(method, benchmark, 0.5)
+        for benchmark in PHASE1_QA_BENCHMARKS
+        for method in ("amem", "mem0")
+    ]
+    target = next(
+        index
+        for index, run in enumerate(runs)
+        if run.method_name == "mem0" and run.benchmark_name == "locomo"
+    )
+    run = runs[target]
+    runs[target] = replace(
+        run,
+        question_scores=(
+            replace(run.question_scores[0], isolation_id="different-isolation"),
+        ),
+    )
+
+    report = build_qa_aggregate_report(
+        runs,
+        expected_methods=("amem", "mem0"),
+    )
+
+    assert report["status"] == "incomplete"
+    assert report["coverage"]["benchmark_identity_errors"] == {
+        "locomo": ["question_cohort_mismatch"]
+    }
+
+
+def test_writer_reads_only_explicit_runs_and_withholds_incomplete_ranking(
+    tmp_path: Path,
+) -> None:
+    """writer 不扫描其它 outputs；缺 49 格时仍写诊断但不写部分排名。"""
+
+    run_dir = _write_run(
+        tmp_path / "one-explicit-run",
+        benchmark="longmemeval",
+        method_display_name="A-Mem",
+        public_rows=[
+            {
+                "question_id": "q1",
+                "conversation_id": "c1",
+                "question_text": "question",
+                "category": "single-session-user",
+            }
+        ],
+        score_rows=[
+            {
+                "question_id": "q1",
+                "conversation_id": "c1",
+                "metric_name": "longmemeval_judge_accuracy",
+                "score": 1.0,
+            }
+        ],
+    )
+    manifest_before = (run_dir / "manifest.json").read_bytes()
+
+    receipt_path, report_path, markdown_path = write_qa_cohort_artifacts(
+        [run_dir],
+        tmp_path / "report",
+    )
+
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert receipt["status"] == report["status"] == "incomplete"
+    assert receipt["coverage"]["observed_cell_count"] == 1
+    assert report["overall"] == []
+    assert "Ranking withheld: cohort is incomplete." in markdown
+    assert (run_dir / "manifest.json").read_bytes() == manifest_before
+
+
+def test_complete_markdown_renders_question_pooled_overall() -> None:
+    """完整 cohort 的人类表只呈现现有 pooled-micro 结果，不另造排名公式。"""
+
+    runs = [
+        _synthetic_run(method, benchmark, 0.5)
+        for benchmark in PHASE1_QA_BENCHMARKS
+        for method in ("amem", "mem0")
+    ]
+    report = build_qa_aggregate_report(
+        runs,
+        expected_methods=("amem", "mem0"),
+    )
+    receipt = build_qa_cohort_receipt(
+        runs,
+        expected_methods=("amem", "mem0"),
+    )
+
+    markdown = render_qa_aggregate_report_markdown(receipt, report)
+
+    assert "| rank | method | QA score | credit sum | questions |" in markdown
+    assert "| 1.5 | amem | 0.500000 | 2.500 | 5 |" in markdown
+    assert "Ranking withheld" not in markdown
 
 
 def _write_run(

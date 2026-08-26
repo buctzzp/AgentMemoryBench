@@ -10,22 +10,24 @@ created: 2026-07-05
 
 - **当前目标**：runtime/观测、十家参数/source/embedding provenance 与 isolation 并行门已关闭；
   真实 API 仍暂停。[QA task aggregation v3](branches/qa-task-aggregation/README.md) 的 taxonomy、
-  answer-only abstention M0、BEAM 三档题分与题目级 pooled micro 已实现；下一步是零 API 的 M1
-  正式 cohort receipt，不恢复实验。
+  answer-only abstention M0、BEAM 三档题分、题目级 pooled micro 与 M1 receipt/write surface 已
+  实现。用户已说明还会给出一项开跑前任务；收到前不自行进入 M2 或恢复实验。
 - **当前批次**：
   [runtime 配置与观测 M0-M5](branches/runtime-config-and-observability/plan.md) 已完成无 API验收；
   [ws05.1 method profile provenance](../ws05.1-method-profile-provenance/README.md) 的 M0/M0.5、
   M1 LightMem、M2 A-Mem、M3 Mem0、M4 MemoryOS、M5 MemOS、M6 SimpleMem、M7 Letta、M8
   LangMem、M9 EverOS、M10 Graphiti OSS 与 M11 横向实现均已闭合；ws05.1 状态为 done。
 - **当前判据**：[正式聚合合同](../../survey/qa-task-types/aggregation.md) 与可执行
-  `qa-task-aggregation-v3` 已一致；旧 `v2-draft` 只读。M1 cohort receipt 完成前不得 formal
-  排名。Abstention v3 有意只测 fixed-reader answer，不宣称 retrieval boundary。
+  `qa-task-aggregation-v3`、`qa-cohort-receipt-v1` 已一致；旧 `v2-draft` 只读。真正 10×5
+  `status=ok` receipt 完成前不得 formal 排名。Abstention v3 有意只测 fixed-reader answer，
+  不宣称 retrieval boundary。
 - **现场证据**：十家 method 主 TOML 已单源化，runtime/execution composition 进入严格 resume
   identity v2；九家 controlled MiniLM 锁同一组本地 bytes/tokenizer/runtime，Letta embedding=N/A；
   十家 source closure v2 与 EverOS effective strategy 均已闭合。M11 最终零 API 全量门为
   `2297 passed, 3 deselected, 25 warnings, 29 subtests passed`。M0-R2 承重集为
-  `125 passed`；current 全量为 `2326 passed, 2 failed`，两个失败已在基线 `3e801fc` 复现为
-  ws02.7 ledger/template 预存漂移，与本批零 diff。扩大 pilot 尚未恢复。
+  `125 passed`；M1 同批已机械同步五份 ledger 的两条模板 requirement，定向 ledger+QA 门为
+  `31 passed`，最终文档门为 `38 passed`，current 全量为
+  `2333 passed, 3 deselected, 25 warnings, 29 subtests passed`。扩大 pilot 尚未恢复。
 - **并行断点**：[开跑前 isolation 并行门](notes/2026-08-25-pre-experiment-parallelism-gate.md)
   已实现 HaluMem UUID 级稳定 worker lane、Letta 独立 product runtime、MemOS v6 独立
   runtime/embedder；W2 是最小竞态哨兵，不是能力天花板，显式 worker 接受任意正整数，实际
@@ -34,8 +36,9 @@ created: 2026-07-05
   授权/执行。
 - **禁止事项**：用户重新批准规模/run_id 前，不恢复真实 pilot；不得改写旧
   artifact、把旧 embedding build 重标为新 controlled identity，或用 lineage 伪造 metric 资格。
-- **当前动作**：M0-R2 已关闭；下一批 M1 生成 cohort identity receipt 与 machine-readable report
-  写出面，之后 M2 才做 paired cluster bootstrap。现有 `predict pilot` 只含固定首 isolation，
+- **当前动作**：M1 机制已关闭；等待用户宣布的另一项开跑前任务。真正收据必须显式输入首批
+  formal 的 50 个 run 目录，当前不能用 smoke/pilot 伪造。M2 paired cluster bootstrap 尚未开工。
+  现有 `predict pilot` 只含固定首 isolation，
   `predict formal --conversation-budget` 虽可续跑却绑定正式 runtime；两者均不能直接冒充用户提出的
   “代表 isolation 先跑 1 个、随后同 cheap-runtime run 继续”的身份。模型、规模、run-id 与新命令面
   未经用户裁定前不创建 run。M11 前的 method state 不 resume；作者校准与主 controlled run 分开。
@@ -130,8 +133,9 @@ created: 2026-07-05
 ### 开跑前 QA 聚合合同
 
 - [x] QA task taxonomy/score/weight v3 已获用户确认并落稳定合同。
-- [ ] M0-R2 把旧 benchmark-equal `v2-draft` 内核升级为题目级 pooled-micro 可执行合同。
-- [ ] 正式 cohort identity receipt、isolation-level paired bootstrap 与报告表面。
+- [x] M0-R2 把旧 benchmark-equal `v2-draft` 内核升级为题目级 pooled-micro 可执行合同。
+- [x] M1 实现显式 cohort identity receipt 与 JSON/Markdown report 写出面。
+- [ ] 首批 formal 后生成真正 10×5 receipt；再做 isolation-level paired bootstrap 与完整报告面。
 
 ### 申请材料（依赖 ws02）
 

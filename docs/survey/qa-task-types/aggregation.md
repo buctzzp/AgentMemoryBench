@@ -1,7 +1,8 @@
 # Phase 1 QA 任务类型与聚合合同
 
-状态：**用户与架构师已于 2026-08-26 对齐；M0-R2 可执行内核已升级为
-`qa-task-aggregation-v3`。M1 正式 cohort receipt 完成前仍不得发布 formal 排名；旧
+状态：**用户与架构师已于 2026-08-26 对齐；M0-R2 可执行内核为
+`qa-task-aggregation-v3`，M1 receipt/write surface 为 `qa-cohort-receipt-v1`。首批 formal
+artifact 尚未产生，真正 `status=ok` 的 10×5 receipt 完成前仍不得发布排名；旧
 `qa-task-aggregation-v2-draft` 不得混入。**
 
 本文只聚合五个 benchmark 的 QA/readout。Recall@K、Precision@K、NDCG、HaluMem
@@ -86,3 +87,13 @@ overall_qa(m)           = sum(question_credit[m, q] for q in Q)    / |Q|
 4. answer abstention、HaluMem H/O 等 guardrail；
 5. isolation-level paired uncertainty；
 6. 成本、延迟、失败与覆盖率旁表。
+
+M1 只消费调用方**显式列出的**标准 run 目录，不扫描 `outputs/` 自动猜测“最新结果”。它固定写出：
+
+- `qa-cohort-receipt.json`：run-id、variant、题池/isolation/task、data、answer、judge 与 score-input
+  哈希；
+- `qa-aggregate-report.json`：机器可读 pooled-micro、能力、coverage 与阻断原因；
+- `qa-aggregate-report.md`：紧凑人工审阅表。
+
+缺格、非 formal scope 或任何身份漂移时三份文件仍可写出诊断，但 status 为 `incomplete`，overall
+排名必须留空。生成阶段不调用 method、embedding、answer LLM 或 judge LLM。

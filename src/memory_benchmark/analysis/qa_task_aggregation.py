@@ -19,10 +19,11 @@ from memory_benchmark.metrics import (
 from memory_benchmark.prompts.benchmarks.beam import (
     BEAM_EVENT_ORDERING_CREDIT_PROMPT_PROFILE,
 )
-from memory_benchmark.storage import ExperimentPaths, read_jsonl
+from memory_benchmark.storage import ExperimentPaths, atomic_write_json, read_jsonl
 
 
 QA_TASK_AGGREGATION_CONTRACT_VERSION = "qa-task-aggregation-v3"
+QA_COHORT_RECEIPT_CONTRACT_VERSION = "qa-cohort-receipt-v1"
 
 PHASE1_QA_BENCHMARKS: tuple[str, ...] = (
     "locomo",
@@ -474,6 +475,222 @@ def build_qa_aggregate_report(
     }
 
 
+def build_qa_cohort_receipt(
+    runs: Iterable[QARunScore],
+    *,
+    expected_methods: Sequence[str] = PHASE1_QA_METHODS,
+    require_run_scope: str = "formal",
+) -> dict[str, Any]:
+    """为一组显式选择的 QA run 生成确定性 cohort 收据。
+
+    收据只锁定聚合实际消费的 run、题池和 identity；它不扫描 ``outputs``、不调用
+    模型，也不把不完整 cohort 伪装成可发布排名。
+    """
+
+    frozen_runs = tuple(runs)
+    report = build_qa_aggregate_report(
+        frozen_runs,
+        expected_methods=expected_methods,
+        require_run_scope=require_run_scope,
+    )
+    return _build_qa_cohort_receipt(
+        frozen_runs,
+        report=report,
+        require_run_scope=require_run_scope,
+    )
+
+
+def write_qa_cohort_artifacts(
+    run_dirs: Iterable[str | Path],
+    output_dir: str | Path,
+    *,
+    expected_methods: Sequence[str] = PHASE1_QA_METHODS,
+    require_run_scope: str = "formal",
+) -> tuple[Path, Path, Path]:
+    """读取显式 run 目录并写出 receipt、JSON report 与 Markdown 表格。"""
+
+    runs = tuple(load_qa_run_score(run_dir) for run_dir in run_dirs)
+    report = build_qa_aggregate_report(
+        runs,
+        expected_methods=expected_methods,
+        require_run_scope=require_run_scope,
+    )
+    receipt = _build_qa_cohort_receipt(
+        runs,
+        report=report,
+        require_run_scope=require_run_scope,
+    )
+    target = Path(output_dir).resolve()
+    target.mkdir(parents=True, exist_ok=True)
+    receipt_path = target / "qa-cohort-receipt.json"
+    report_path = target / "qa-aggregate-report.json"
+    markdown_path = target / "qa-aggregate-report.md"
+    atomic_write_json(receipt_path, receipt)
+    atomic_write_json(report_path, report)
+    markdown_path.write_text(
+        render_qa_aggregate_report_markdown(receipt, report),
+        encoding="utf-8",
+    )
+    return receipt_path, report_path, markdown_path
+
+
+def render_qa_aggregate_report_markdown(
+    receipt: Mapping[str, Any],
+    report: Mapping[str, Any],
+) -> str:
+    """把机器 report 渲染成一份紧凑、可审阅的 Markdown 表格。"""
+
+    status = _require_non_empty_string(report.get("status"), "report status")
+    lines = [
+        "# QA Cohort Report",
+        "",
+        f"- status: `{status}`",
+        f"- aggregation contract: `{report.get('contract_version')}`",
+        f"- cohort receipt: `{receipt.get('receipt_sha256')}`",
+        "",
+        "## Coverage",
+        "",
+        "| expected cells | observed cells | missing | invalid | identity errors |",
+        "| ---: | ---: | ---: | ---: | ---: |",
+    ]
+    coverage = report.get("coverage")
+    if not isinstance(coverage, Mapping):
+        raise ConfigurationError("QA aggregate report coverage must be an object")
+    lines.append(
+        "| {expected} | {observed} | {missing} | {invalid} | {identity} |".format(
+            expected=coverage.get("expected_cell_count"),
+            observed=coverage.get("observed_cell_count"),
+            missing=len(_require_list(coverage.get("missing_cells"), "missing_cells")),
+            invalid=len(_require_list(coverage.get("invalid_cells"), "invalid_cells")),
+            identity=len(
+                _require_mapping(
+                    coverage.get("benchmark_identity_errors"),
+                    "benchmark_identity_errors",
+                )
+            ),
+        )
+    )
+    lines.extend(
+        [
+            "",
+            "## Selected runs",
+            "",
+            "| method | benchmark | run id | scope | included questions |",
+            "| --- | --- | --- | --- | ---: |",
+        ]
+    )
+    for cell in _require_list(receipt.get("cells"), "receipt cells"):
+        if not isinstance(cell, Mapping):
+            raise ConfigurationError("QA cohort receipt cell must be an object")
+        lines.append(
+            "| {method} | {benchmark} | `{run_id}` | {scope} | {count} |".format(
+                method=cell.get("method"),
+                benchmark=cell.get("benchmark"),
+                run_id=cell.get("run_id"),
+                scope=cell.get("run_scope"),
+                count=cell.get("included_question_count"),
+            )
+        )
+
+    lines.extend(["", "## Overall", ""])
+    if status != "ok":
+        lines.append("Ranking withheld: cohort is incomplete.")
+        return "\n".join(lines) + "\n"
+    lines.extend(
+        [
+            "| rank | method | QA score | credit sum | questions |",
+            "| ---: | --- | ---: | ---: | ---: |",
+        ]
+    )
+    for row in _require_list(report.get("overall"), "overall rows"):
+        if not isinstance(row, Mapping):
+            raise ConfigurationError("QA overall row must be an object")
+        lines.append(
+            "| {rank} | {method} | {score:.6f} | {credit:.3f} | {count} |".format(
+                rank=row.get("rank"),
+                method=row.get("method"),
+                score=float(row.get("overall_qa_score")),
+                credit=float(row.get("credit_sum")),
+                count=row.get("question_count"),
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _build_qa_cohort_receipt(
+    runs: Sequence[QARunScore],
+    *,
+    report: Mapping[str, Any],
+    require_run_scope: str,
+) -> dict[str, Any]:
+    """根据已验证 report 构造不含绝对路径与 secret 的收据。"""
+
+    roster = _require_list(report.get("roster"), "report roster")
+    method_order = {str(method): index for index, method in enumerate(roster)}
+    benchmark_order = {
+        benchmark: index for index, benchmark in enumerate(PHASE1_QA_BENCHMARKS)
+    }
+    cells: list[dict[str, Any]] = []
+    for run in sorted(
+        runs,
+        key=lambda item: (
+            method_order[item.method_name],
+            benchmark_order[item.benchmark_name],
+        ),
+    ):
+        question_identity = [
+            {
+                "question_id": item.question_id,
+                "isolation_id": item.isolation_id,
+                "source_native_task": item.source_native_task,
+                "native_task": item.native_task,
+                "capability": item.capability,
+            }
+            for item in sorted(run.question_scores, key=lambda item: item.question_id)
+        ]
+        score_input = [
+            {"question_id": item.question_id, "score": item.score}
+            for item in sorted(run.question_scores, key=lambda item: item.question_id)
+        ]
+        cell = {
+            "method": run.method_name,
+            "benchmark": run.benchmark_name,
+            "benchmark_variant": run.benchmark_variant,
+            "run_id": run.run_id,
+            "run_scope": run.run_scope,
+            "metric_name": run.metric_name,
+            "dataset_identity_sha256": run.dataset_identity_sha256,
+            "answer_identity_sha256": run.answer_identity_sha256,
+            "evaluator_identity_sha256": run.evaluator_identity_sha256,
+            "question_cohort_sha256": _stable_sha256(question_identity),
+            "score_input_sha256": _stable_sha256(score_input),
+            "excluded_question_ids_sha256": _stable_sha256(
+                list(run.excluded_question_ids)
+            ),
+            "included_question_count": len(run.question_scores),
+            "excluded_question_count": len(run.excluded_question_ids),
+        }
+        cell["cell_identity_sha256"] = _stable_sha256(cell)
+        cells.append(cell)
+
+    coverage = report.get("coverage")
+    if not isinstance(coverage, Mapping):
+        raise ConfigurationError("QA aggregate report coverage must be an object")
+    payload: dict[str, Any] = {
+        "contract_version": QA_COHORT_RECEIPT_CONTRACT_VERSION,
+        "aggregation_contract_version": QA_TASK_AGGREGATION_CONTRACT_VERSION,
+        "status": report.get("status"),
+        "required_run_scope": require_run_scope,
+        "roster": report.get("roster"),
+        "benchmarks": report.get("benchmarks"),
+        "coverage": dict(coverage),
+        "cells": cells,
+        "report_identity_sha256": _stable_sha256(report),
+    }
+    payload["receipt_sha256"] = _stable_sha256(payload)
+    return payload
+
+
 def _build_capability_slices(
     questions: Sequence[QAQuestionScore],
 ) -> tuple[QACapabilitySlice, ...]:
@@ -744,7 +961,17 @@ def _benchmark_identity_errors(
             if len(values) != 1:
                 reasons.append(f"{field_name}_mismatch")
         question_sets = {
-            tuple(item.question_id for item in run.question_scores) for run in runs
+            tuple(
+                (
+                    item.question_id,
+                    item.isolation_id,
+                    item.source_native_task,
+                    item.native_task,
+                    item.capability,
+                )
+                for item in run.question_scores
+            )
+            for run in runs
         }
         if len(question_sets) != 1:
             reasons.append("question_cohort_mismatch")
@@ -1105,6 +1332,22 @@ def _require_non_empty_string(value: Any, label: str) -> str:
 
     if type(value) is not str or not value.strip() or value != value.strip():
         raise ConfigurationError(f"{label} must be a non-blank trimmed string")
+    return value
+
+
+def _require_list(value: Any, label: str) -> list[Any]:
+    """要求 report 字段保持 JSON list 形态。"""
+
+    if not isinstance(value, list):
+        raise ConfigurationError(f"{label} must be a list")
+    return value
+
+
+def _require_mapping(value: Any, label: str) -> Mapping[str, Any]:
+    """要求 report 字段保持 JSON object 形态。"""
+
+    if not isinstance(value, Mapping):
+        raise ConfigurationError(f"{label} must be an object")
     return value
 
 

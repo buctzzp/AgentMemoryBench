@@ -1,7 +1,7 @@
 # QA Task Aggregation v3 Spec
 
-状态：**taxonomy/score/weight 已于 2026-08-26 获用户确认；M0-R2 实现已验收，正式 cohort
-receipt 尚待 M1。**
+状态：**taxonomy/score/weight 已于 2026-08-26 获用户确认；M0-R2 与 M1 receipt/write surface
+已实现。正式 10×5 artifact 尚未产生，因此 `status=ok` 的实物 cohort receipt 仍待首批 formal。**
 稳定的人类可读合同见 `docs/survey/qa-task-types/aggregation.md`。
 
 ## 1. Estimand
@@ -18,6 +18,8 @@ Recall/Precision/NDCG、HaluMem extraction/update/memory-type 与成本效率不
   identity。
 - 正式 cohort 必须锁 method roster、benchmark variant、dataset/question identity、answer/judge
   transport、prompt/model/decode identity 与完整 question coverage。
+- cohort 只能由调用方显式给出的 run 目录组成；不得扫描 `outputs/` 后按时间、名字或“看起来最新”
+  自动挑选。
 - 缺格、失败、旧 identity、重复 question 或覆盖不一致均为 `incomplete`，不补零、不缩分母排名。
 
 ## 3. 唯一能力映射
@@ -69,6 +71,8 @@ overall_qa(m)          = sum(q.credit for q in fixed_Q)    / len(fixed_Q)
   conversation、MemBench tid、HaluMem UUID。
 - 报告必须含 overall、capability、benchmark-native metrics、task/count/coverage、guardrail 与成本。
 - overall 不替代原生表；framework-standardized BEAM 三档不得重标为官方分。
+- M1 固定写出 `qa-cohort-receipt.json`、`qa-aggregate-report.json` 与
+  `qa-aggregate-report.md`。收据不含本机绝对路径或 secret；incomplete 报告不生成 overall 排名。
 
 ## 7. 硬反例
 
