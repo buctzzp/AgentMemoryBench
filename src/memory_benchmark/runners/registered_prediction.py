@@ -269,6 +269,7 @@ def run_registered_conversation_qa_prediction(
     smoke_session_limit: int | None = None,
     smoke_max_workers: int | None = None,
     max_new_conversations: int | None = None,
+    conversation_ids: tuple[str, ...] | None = None,
     retry_failed_conversations: bool = False,
     question_limit_per_conversation: int | None = None,
     enable_efficiency_observability: bool = True,
@@ -300,6 +301,8 @@ def run_registered_conversation_qa_prediction(
             与后续 admission control 负责。
         max_new_conversations: 本次命令最多推进多少个未完成 conversation；它只属于
             当前命令预算，不属于实验 identity。
+        conversation_ids: 可选的有序 isolation 白名单；它属于实验 cohort identity，
+            resume 时必须保持不变。
         retry_failed_conversations: 是否重试 checkpoint 中已标记 failed 的 conversation；
             默认 False，避免失败项在 resume 时反复触发付费调用。
         question_limit_per_conversation: 本次命令每个 conversation 最多回答的问题数；
@@ -341,6 +344,7 @@ def run_registered_conversation_qa_prediction(
             smoke_session_limit=smoke_session_limit,
             smoke_max_workers=smoke_max_workers,
             max_new_conversations=max_new_conversations,
+            conversation_ids=conversation_ids,
             retry_failed_conversations=retry_failed_conversations,
             question_limit_per_conversation=question_limit_per_conversation,
             enable_efficiency_observability=enable_efficiency_observability,
@@ -585,6 +589,7 @@ def run_registered_conversation_qa_prediction(
         )
         policy = PredictionRunPolicy(
             max_workers=max_workers,
+            conversation_ids=conversation_ids,
             question_limit_per_conversation=_question_limit_for_scope(
                 run_scope,
                 explicit_limit=question_limit_per_conversation,
@@ -869,6 +874,7 @@ def _run_custom_conversation_qa_prediction(
     smoke_session_limit: int | None,
     smoke_max_workers: int | None,
     max_new_conversations: int | None,
+    conversation_ids: tuple[str, ...] | None,
     retry_failed_conversations: bool,
     question_limit_per_conversation: int | None,
     enable_efficiency_observability: bool,
@@ -1016,6 +1022,7 @@ def _run_custom_conversation_qa_prediction(
         )
         policy = PredictionRunPolicy(
             max_workers=max_workers,
+            conversation_ids=conversation_ids,
             question_limit_per_conversation=_question_limit_for_scope(
                 run_scope,
                 explicit_limit=question_limit_per_conversation,

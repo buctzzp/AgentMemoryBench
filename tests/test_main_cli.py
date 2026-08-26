@@ -265,6 +265,7 @@ def test_execute_predict_delegates_to_registered_prediction(
             "smoke_session_limit": None,
             "smoke_max_workers": 1,
             "max_new_conversations": None,
+            "conversation_ids": None,
             "retry_failed_conversations": False,
             "question_limit_per_conversation": None,
             "enable_efficiency_observability": True,
@@ -1960,6 +1961,10 @@ def test_main_maps_predict_formal_v2_arguments_to_command(
             "--allow-api",
             "--conversation-budget",
             "5",
+            "--isolation-id",
+            "instance-50",
+            "--isolation-id",
+            "instance-25",
             "--workers",
             "4",
         ]
@@ -1979,9 +1984,66 @@ def test_main_maps_predict_formal_v2_arguments_to_command(
             smoke_round_limit=None,
             smoke_max_workers=4,
             max_new_conversations=5,
+            conversation_ids=("instance-50", "instance-25"),
             output_layout="hierarchical",
         )
     ]
+
+
+@pytest.mark.parametrize("mode", ["smoke", "pilot"])
+def test_non_formal_prediction_rejects_isolation_id(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    mode: str,
+) -> None:
+    """精确 cohort 选择只属于 formal，不能改变 smoke/pilot 固定语义。"""
+
+    exit_code = main_cli.main(
+        [
+            "predict",
+            mode,
+            "--root",
+            str(tmp_path),
+            "--method",
+            "mem0",
+            "--benchmark",
+            "locomo",
+            "--allow-api",
+            "--isolation-id",
+            "conv-1",
+        ]
+    )
+
+    assert exit_code == 2
+    assert "isolation" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("values", [("",), ("conv-1", "conv-1")])
+def test_predict_formal_rejects_invalid_isolation_cohort(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    values: tuple[str, ...],
+) -> None:
+    """空白或重复 isolation 会产生歧义/重复执行，必须在 API 前拒绝。"""
+
+    argv = [
+        "predict",
+        "formal",
+        "--root",
+        str(tmp_path),
+        "--method",
+        "mem0",
+        "--benchmark",
+        "locomo",
+        "--allow-api",
+    ]
+    for value in values:
+        argv.extend(("--isolation-id", value))
+
+    exit_code = main_cli.main(argv)
+
+    assert exit_code == 2
+    assert "--isolation-id" in capsys.readouterr().err
 
 
 def test_predict_formal_accepts_explicit_registered_profile_name(

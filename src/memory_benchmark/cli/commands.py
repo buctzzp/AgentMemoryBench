@@ -69,6 +69,7 @@ class PredictCommand:
     smoke_session_limit: int | None = None
     smoke_max_workers: int | None = None
     max_new_conversations: int | None = None
+    conversation_ids: tuple[str, ...] | None = None
     retry_failed_conversations: bool = False
     question_limit_per_conversation: int | None = None
     enable_efficiency_observability: bool = True
@@ -165,6 +166,7 @@ def execute_predict(command: PredictCommand) -> PredictionBatchResult:
         smoke_session_limit=command.smoke_session_limit,
         smoke_max_workers=command.smoke_max_workers,
         max_new_conversations=command.max_new_conversations,
+        conversation_ids=command.conversation_ids,
         retry_failed_conversations=command.retry_failed_conversations,
         question_limit_per_conversation=command.question_limit_per_conversation,
         enable_efficiency_observability=command.enable_efficiency_observability,

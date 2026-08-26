@@ -2428,6 +2428,44 @@ def test_resume_accepts_json_stable_conversation_id_policy_and_skips_work(
     assert [row["question_id"] for row in predictions] == ["conv-2:q1"]
 
 
+def test_resume_rejects_changed_conversation_id_cohort_before_work(
+    tmp_path: Path,
+) -> None:
+    """isolation cohort 属于实验 identity，resume 不得换名单或顺序。"""
+
+    run_predictions(
+        dataset=_build_dataset(),
+        system=RecordingPredictionSystem(),
+        run_context=_create_context(tmp_path),
+        policy=PredictionRunPolicy(
+            max_workers=1,
+            conversation_ids=("conv-2", "conv-1"),
+        ),
+        method_manifest={"adapter": "recording-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+    )
+    resumed_system = RecordingPredictionSystem()
+
+    with pytest.raises(ConfigurationError, match="Resume manifest mismatch"):
+        run_predictions(
+            dataset=_build_dataset(),
+            system=resumed_system,
+            run_context=_create_context(tmp_path, resume=True),
+            policy=PredictionRunPolicy(
+                max_workers=1,
+                conversation_ids=("conv-1", "conv-2"),
+                resume=True,
+            ),
+            method_manifest={"adapter": "recording-v1"},
+            benchmark_variant="test_variant",
+            run_scope=RunScope.FULL,
+        )
+
+    assert resumed_system.added_payloads == []
+    assert resumed_system.answered_questions == []
+
+
 def test_policy_can_limit_conversations_and_questions_without_changing_dataset(
     tmp_path: Path,
 ) -> None:

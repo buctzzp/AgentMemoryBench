@@ -260,6 +260,17 @@ def _add_prediction_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--isolation-id",
+        dest="isolation_ids",
+        action="append",
+        default=None,
+        metavar="ID",
+        help=(
+            "formal mode only: select one exact benchmark isolation ID; "
+            "repeat the flag to lock an ordered cohort for staged resume."
+        ),
+    )
+    parser.add_argument(
         "--retry-failed",
         dest="retry_failed_conversations",
         action="store_true",
@@ -468,6 +479,7 @@ def _prediction_command_from_args(args: argparse.Namespace) -> PredictCommand:
         smoke_session_limit=normalized["smoke_session_limit"],
         smoke_max_workers=normalized["workers"],
         max_new_conversations=normalized["max_new_conversations"],
+        conversation_ids=normalized["conversation_ids"],
         retry_failed_conversations=args.retry_failed_conversations,
         question_limit_per_conversation=normalized[
             "question_limit_per_conversation"
@@ -576,6 +588,10 @@ def _normalize_legacy_prediction_args(args: argparse.Namespace) -> dict[str, Any
         stacklevel=3,
     )
     _validate_smoke_axis_args(args)
+    if args.isolation_ids is not None:
+        raise MemoryBenchmarkError(
+            "--isolation-id requires 'predict formal' or 'run formal'"
+        )
     default_history_limit = _default_smoke_history_limit(args.benchmark)
     smoke = (args.profile or "smoke") == "smoke"
     return {
@@ -601,6 +617,7 @@ def _normalize_legacy_prediction_args(args: argparse.Namespace) -> dict[str, Any
             args.conversation_budget,
             field_name="conversation budget",
         ),
+        "conversation_ids": None,
         # cost-safety: smoke 默认只评 1 个问题（验证链路足够，省 token）。
         # formal/official-full 路径不设帽（None=全题），显式传值始终覆盖默认。
         "question_limit_per_conversation": (
@@ -635,6 +652,10 @@ def _normalize_smoke_prediction_args(args: argparse.Namespace) -> dict[str, Any]
     if args.conversation_budget is not None:
         raise MemoryBenchmarkError(
             "predict smoke does not support --conversation-budget; use --conversations"
+        )
+    if args.isolation_ids is not None:
+        raise MemoryBenchmarkError(
+            "predict smoke does not support --isolation-id"
         )
     smoke_policy = get_benchmark_registration(args.benchmark).smoke_policy
     if smoke_policy is None:
@@ -672,6 +693,7 @@ def _normalize_smoke_prediction_args(args: argparse.Namespace) -> dict[str, Any]
         ),
         "workers": _positive_or_none(args.workers, field_name="workers"),
         "max_new_conversations": None,
+        "conversation_ids": None,
         "question_limit_per_conversation": _positive_or_default(
             None if fixed_shape else args.questions_per_conversation,
             default=smoke_policy.default_question_limit,
@@ -697,6 +719,7 @@ def _normalize_pilot_prediction_args(args: argparse.Namespace) -> dict[str, Any]
         "membench sources": args.membench_sources,
         "conversations": args.conversations,
         "conversation budget": args.conversation_budget,
+        "isolation id": args.isolation_ids,
         "questions per conversation": args.questions_per_conversation,
     }
     supplied = tuple(name for name, value in forbidden.items() if value is not None)
@@ -714,6 +737,7 @@ def _normalize_pilot_prediction_args(args: argparse.Namespace) -> dict[str, Any]
         "smoke_session_limit": None,
         "workers": _positive_or_none(args.workers, field_name="workers"),
         "max_new_conversations": None,
+        "conversation_ids": None,
         "question_limit_per_conversation": None,
         "output_layout": "hierarchical",
         "membench_sources": (),
@@ -759,10 +783,26 @@ def _normalize_formal_prediction_args(args: argparse.Namespace) -> dict[str, Any
             args.conversation_budget,
             field_name="conversation budget",
         ),
+        "conversation_ids": _normalize_isolation_ids(args.isolation_ids),
         "question_limit_per_conversation": None,
         "output_layout": "hierarchical",
         "membench_sources": (),
     }
+
+
+def _normalize_isolation_ids(
+    raw_isolation_ids: list[str] | None,
+) -> tuple[str, ...] | None:
+    """校验 formal isolation 白名单并保留用户声明顺序。"""
+
+    if raw_isolation_ids is None:
+        return None
+    normalized = tuple(item.strip() for item in raw_isolation_ids)
+    if any(not item for item in normalized):
+        raise MemoryBenchmarkError("--isolation-id cannot be blank")
+    if len(set(normalized)) != len(normalized):
+        raise MemoryBenchmarkError("--isolation-id values must be unique")
+    return normalized
 
 
 def _warn_or_reject_legacy_config_track(config_track: str | None) -> None:

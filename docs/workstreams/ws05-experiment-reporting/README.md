@@ -8,8 +8,8 @@ created: 2026-07-05
 
 ## Codex 恢复胶囊（2026-08-26）
 
-- **当前目标**：runtime/观测、十家参数/source/embedding provenance 与 isolation 并行门已关闭；
-  真实 API 仍暂停。[QA task aggregation v3](branches/qa-task-aggregation/README.md) 的 taxonomy、
+- **当前目标**：runtime/观测、十家参数/source/embedding provenance、isolation 并行门与 formal
+  精确 cohort 选择已关闭；真实 API 仍暂停。[QA task aggregation v3](branches/qa-task-aggregation/README.md) 的 taxonomy、
   answer-only abstention M0、BEAM 三档题分、题目级 pooled micro 与 M1 receipt/write surface 已
   实现。用户已说明还会给出一项开跑前任务；收到前不自行进入 M2 或恢复实验。
 - **当前批次**：
@@ -27,7 +27,8 @@ created: 2026-07-05
   `2297 passed, 3 deselected, 25 warnings, 29 subtests passed`。M0-R2 承重集为
   `125 passed`；M1 同批已机械同步五份 ledger 的两条模板 requirement，定向 ledger+QA 门为
   `31 passed`，最终文档门为 `38 passed`，current 全量为
-  `2333 passed, 3 deselected, 25 warnings, 29 subtests passed`。扩大 pilot 尚未恢复。
+  `2338 passed, 3 deselected, 25 warnings, 29 subtests passed`；该 current 数包含 formal 精确
+  isolation 选择的 CLI/双 runner/resume 强反例。扩大真实实验尚未恢复。
 - **并行断点**：[开跑前 isolation 并行门](notes/2026-08-25-pre-experiment-parallelism-gate.md)
   已实现 HaluMem UUID 级稳定 worker lane、Letta 独立 product runtime、MemOS v6 独立
   runtime/embedder；W2 是最小竞态哨兵，不是能力天花板，显式 worker 接受任意正整数，实际
@@ -36,12 +37,13 @@ created: 2026-07-05
   授权/执行。
 - **禁止事项**：用户重新批准规模/run_id 前，不恢复真实 pilot；不得改写旧
   artifact、把旧 embedding build 重标为新 controlled identity，或用 lineage 伪造 metric 资格。
-- **当前动作**：M1 机制已关闭；等待用户宣布的另一项开跑前任务。真正收据必须显式输入首批
-  formal 的 50 个 run 目录，当前不能用 smoke/pilot 伪造。M2 paired cluster bootstrap 尚未开工。
-  现有 `predict pilot` 只含固定首 isolation，
-  `predict formal --conversation-budget` 虽可续跑却绑定正式 runtime；两者均不能直接冒充用户提出的
-  “代表 isolation 先跑 1 个、随后同 cheap-runtime run 继续”的身份。模型、规模、run-id 与新命令面
-  未经用户裁定前不创建 run。M11 前的 method state 不 resume；作者校准与主 controlled run 分开。
+- **当前动作**：M1 机制已关闭；`predict formal --isolation-id` 已把既有 ordered
+  `conversation_ids` policy 暴露为薄 CLI seam，首轮即可锁定完整代表 cohort，再用
+  `--conversation-budget 1` 与后续 resume 的 `2 (+2)` 逐步推进；实现收据见
+  [formal isolation selection](notes/2026-08-26-formal-isolation-selection.md)。真正 QA 收据仍须显式
+  输入 formal run 目录，不能用 smoke/pilot 伪造；M2 paired cluster bootstrap 尚未开工。真实 API
+  开跑前只剩用户确认 LightMem 首批 benchmark/variant、公开 shape 选出的 isolation id、runtime/model、
+  run_id 与预算授权。M11 前的 method state 不 resume；作者校准与主 controlled run 分开。
 
 ## 目标
 
@@ -78,6 +80,11 @@ created: 2026-07-05
   数，resume 不得改。W2 只是最小并发哨兵，不是 method 能力上限；样本候选集须在首批前由
   公开输入形状一次锁定，
   不用 gold/答案/method 输出选样；这样后续增量才不改变实验人群或 resume identity。
+- 2026-08-26：用户裁定不在开跑前重构 `max_workers` 与 `worker_N` 状态所有权；该工程债不影响
+  固定 worker identity 的当前实验。框架复用既有 `PredictionRunPolicy.conversation_ids`，新增 formal-only
+  可重复 `--isolation-id`，把代表 cohort 的选择从隐式 dataset 顺序升级为显式、可审计、严格 resume
+  identity；`--conversation-budget` 仍是可变的单次推进预算。本批零 API，不改变 runner、provider 或
+  method 算法。
 - W1/W2/W10 只是单个 run 的 isolation worker 数示例，不是 method 内部算法并行。HaluMem 已改为
   UUID 级 worker lane，UUID 内 session 顺序不变；Letta 与 MemOS 也使用每 worker 独立 runtime，
   不再需要另造“W1 child run + artifact 合并”旁路。execution profile 的 W1/W10 是默认值，

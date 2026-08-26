@@ -178,6 +178,12 @@
     解释会改变实验身份、配置、预算、数据范围或外部写入，而当前证据无法唯一消歧，必须追问；
     若含义已由源码、现行裁决和上下文唯一闭合，则直接说明理解并推进，避免为形式完整反复确认。
     澄清不是停工借口，未经对齐的执行也不是效率。
+37. **不要让产品拓扑重构阻塞研究开跑**：先区分会改变 estimand/artifact/identity 的研究正确性，
+    与只影响部署便利性的 runtime/state ownership。现有 `worker_N` 状态映射使 worker 数成为
+    resume identity，属于已知工程债；但当每个 isolation 结果仍正确、当前实验可固定 worker 数时，
+    不应为“以后任意扩缩 worker”重写调度与状态迁移。优先把 runner 已有的有序 isolation 白名单
+    以薄 CLI seam 暴露，锁 cohort 后分批 resume；产品发布时再让 method service 自己承担并发、
+    namespace 与扩缩容。只有当前实验正确性或可完成性被阻断时，才升级为主线重构。
 
 完整历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

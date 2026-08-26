@@ -806,6 +806,7 @@ def test_registered_prediction_builds_system_from_registry_context(
         smoke_turn_limit=2,
         smoke_conversation_limit=1,
         smoke_max_workers=None,
+        conversation_ids=("conv-1",),
         enable_efficiency_observability=False,
     )
 
@@ -829,6 +830,7 @@ def test_registered_prediction_builds_system_from_registry_context(
     assert runner_calls[0]["system"] is fake_system
     assert runner_calls[0]["benchmark_variant"] == "locomo10"
     assert runner_calls[0]["run_scope"] is RunScope.SMOKE
+    assert runner_calls[0]["policy"].conversation_ids == ("conv-1",)
     assert runner_calls[0]["method_manifest"]["source"] == {
         "source_sha256": "abc"
     }
@@ -1002,6 +1004,7 @@ def test_registered_operation_level_w2_passes_factory_context_and_clean_hook(
         confirm_api=True,
         smoke_conversation_limit=1,
         smoke_max_workers=2,
+        conversation_ids=("conv-1",),
         enable_efficiency_observability=False,
     )
 
@@ -1010,6 +1013,7 @@ def test_registered_operation_level_w2_passes_factory_context_and_clean_hook(
     assert runner_calls[0]["provider_factory"] is method_registration.system_factory
     assert runner_calls[0]["build_context_template"].storage_root.name == "method_state"
     assert runner_calls[0]["consume_granularity"] == "session"
+    assert runner_calls[0]["policy"].conversation_ids == ("conv-1",)
     assert (
         runner_calls[0]["method_manifest"]["composition"]["execution"][
             "resolved_max_workers"

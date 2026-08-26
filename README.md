@@ -327,6 +327,7 @@ OpenAI-compatible framework reader；完整多 provider 配置仍处于设计后
 - `predict smoke`：极小真实链路测试。允许裁剪 conversation、历史 round 和每个
   conversation 的问题数；不支持 `--resume` 或 `--retry-failed`。
 - `predict formal`：正式 profile 运行。不能裁剪历史或问题；可用
+  `--isolation-id`（可重复）锁定有序 isolation cohort，再用
   `--conversation-budget` 分批推进，并可用 `--resume` 继续同一个 `run_id`。
 - `--allow-api` 是 `--confirm-api` 的直观别名；旧名称仍兼容。
 
@@ -384,7 +385,9 @@ LongMemEval 支持 `s_cleaned`、`m_cleaned` 和命令层 selector `all`。`--va
 S/M 合并成一个 dataset，而是创建独立 child run，保证 resume、指标比较和排行榜口径清晰。
 
 formal profile 会产生大量真实 API 调用；新入口只需要显式 `--allow-api`，并建议先用
-`--conversation-budget` 分批推进：
+`--isolation-id` 选择公开输入形状预先锁定的代表 cohort，再用
+`--conversation-budget` 分批推进。下面三项 isolation 在首轮就全部写入 identity，首轮只推进
+第一项：
 
 ```bash
 uv run memory-benchmark predict formal \
@@ -392,7 +395,10 @@ uv run memory-benchmark predict formal \
   --benchmark locomo \
   --run-id mem0-locomo-full-YYYYMMDD \
   --allow-api \
-  --conversation-budget 2 \
+  --isolation-id conv-median \
+  --isolation-id conv-lower \
+  --isolation-id conv-upper \
+  --conversation-budget 1 \
   --workers 2
 ```
 
@@ -405,12 +411,18 @@ uv run memory-benchmark predict formal \
   --run-id mem0-locomo-full-YYYYMMDD \
   --allow-api \
   --resume \
+  --isolation-id conv-median \
+  --isolation-id conv-lower \
+  --isolation-id conv-upper \
   --conversation-budget 2 \
   --workers 2
 ```
 
 `--conversation-budget` 的语义是“本次命令最多推进 N 个尚未完成的 conversation”。
 它是运行预算，不是实验 identity；同一个 `run_id` 后续可以用不同预算继续 `--resume`。
+`--isolation-id` 则是实验 cohort identity：按参数出现顺序选择，未知、空白或重复 id 会
+fail-fast；resume 必须原样重复同一份有序名单。精确选择时建议显式传一个 concrete
+`--variant`，避免把一个 variant 的 id 误用于另一个 child run。
 如果某个 conversation 已在 `checkpoints/conversation_status.json` 中标记为 `failed`，默认
 `--resume` 不会再次处理它；确认资源和修复原因后，可用 `--retry-failed` 显式重试。
 
