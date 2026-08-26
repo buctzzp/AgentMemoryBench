@@ -62,6 +62,7 @@ from memory_benchmark.runners.prediction import (
     _validate_consume_granularity,
     _validate_protocol_version,
 )
+from memory_benchmark.runners.prediction_answer import _persisted_retrieval_metadata
 from memory_benchmark.runners.prediction_parallel import (
     _WORKER_HEARTBEAT_POLL_SECONDS,
     _WorkerHeartbeat,
@@ -1495,9 +1496,11 @@ def _answer_prompt_record(
     record = {
         "question_id": retrieval.question_id,
         "conversation_id": retrieval.conversation_id,
-        "answer_prompt": retrieval.answer_prompt,
         "prompt_messages": [message.to_dict() for message in retrieval.prompt_messages],
-        "metadata": retrieval.metadata,
+        "metadata": _persisted_retrieval_metadata(
+            retrieval.metadata,
+            formatted_memory=retrieval_result.formatted_memory,
+        ),
         "formatted_memory": retrieval_result.formatted_memory,
         "retrieved_items": [
             asdict(item) for item in retrieval_result.items or ()

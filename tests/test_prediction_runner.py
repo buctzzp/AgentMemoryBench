@@ -1274,7 +1274,7 @@ def test_runner_uses_retrieve_first_provider_and_framework_reader(
         "framework answer",
         "framework answer",
     ]
-    assert retrievals[0]["answer_prompt"] == "[user]\nmemory for 问题 1"
+    assert "answer_prompt" not in retrievals[0]
     assert retrievals[0]["prompt_messages"] == [
         {"role": "user", "content": "memory for 问题 1"}
     ]
@@ -1282,6 +1282,53 @@ def test_runner_uses_retrieve_first_provider_and_framework_reader(
     assert answer_client.calls[0]["messages"] == [
         {"role": "user", "content": "memory for 问题 1"}
     ]
+
+
+def test_runner_does_not_persist_reconstructible_retrieval_duplicates(
+    tmp_path: Path,
+) -> None:
+    """answer artifact 应保留精确 messages，而不重复 prompt/context/raw debug list。"""
+
+    class DuplicateMetadataProvider(RecordingMemoryProvider):
+        """返回含三份重复 retrieval 文本的测试 provider。"""
+
+        def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+            """构造 canonical 字段及 method-specific 调试副本。"""
+
+            question = query.source_question
+            assert question is not None
+            memory = f"memory for {query.query_text}"
+            return RetrievalResult(
+                formatted_memory=memory,
+                prompt_messages=(PromptMessage(role="user", content=memory),),
+                metadata={
+                    "provider": "duplicate-metadata",
+                    "answer_context": memory,
+                    "retrieved_memories": [{"content": memory, "score": 0.9}],
+                },
+            )
+
+    context = _create_context(tmp_path)
+    run_predictions(
+        dataset=_build_dataset(),
+        system=DuplicateMetadataProvider(),
+        run_context=context,
+        policy=PredictionRunPolicy(max_workers=1),
+        answer_reader=FrameworkAnswerReader(
+            client=FakeAnswerLLMClient(answer="framework answer")
+        ),
+        method_manifest={"adapter": "duplicate-metadata-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+    )
+
+    retrieval = read_jsonl(context.artifacts_dir / "answer_prompts.prediction.jsonl")[0]
+    assert "answer_prompt" not in retrieval
+    assert retrieval["formatted_memory"] == "memory for 问题 1"
+    assert retrieval["prompt_messages"] == [
+        {"role": "user", "content": "memory for 问题 1"}
+    ]
+    assert retrieval["metadata"] == {"provider": "duplicate-metadata"}
 
 
 def test_runner_ingests_native_v3_provider_with_event_stream_and_reports(
@@ -1714,13 +1761,13 @@ def test_runner_uses_membench_unified_prompt_builder_and_choice_parser(
         "v3 memory for What does Alex prefer?"
     )
     assert retrievals[0]["prompt_messages"] == answer_client.calls[0]["messages"]
-    assert "Past memory: v3 memory for What does Alex prefer?" in retrievals[0][
-        "answer_prompt"
-    ]
+    assert "answer_prompt" not in retrievals[0]
+    persisted_prompt = retrievals[0]["prompt_messages"][0]["content"]
+    assert "Past memory: v3 memory for What does Alex prefer?" in persisted_prompt
     assert "Question: (current time is 2026-01-02) What does Alex prefer?" in (
-        retrievals[0]["answer_prompt"]
+        persisted_prompt
     )
-    assert "B. Coffee" in retrievals[0]["answer_prompt"]
+    assert "B. Coffee" in persisted_prompt
     assert manifest["method"]["prompt_track"] == "unified"
 
 
@@ -1956,6 +2003,10 @@ def test_resume_reuses_completed_retrieval_when_answer_failed(
     assert provider.retrieved_question_ids == ["conv-1:q1"]
     assert [record["question_id"] for record in retrievals_after_failure] == [
         "conv-1:q1"
+    ]
+    assert "answer_prompt" not in retrievals_after_failure[0]
+    assert retrievals_after_failure[0]["prompt_messages"] == [
+        {"role": "user", "content": "memory for 问题 1"}
     ]
 
     provider_after_resume = RecordingMemoryProvider()

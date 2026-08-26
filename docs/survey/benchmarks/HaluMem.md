@@ -260,6 +260,12 @@ judge(question, qa["answer"], qa["evidence"], system_response)
 
 官方 Mem0 wrapper 会把 retrieved memory context 和 question 填入 `PROMPT_MEMZERO`，再调用统一 LLM 生成 `system_response`。QA 阶段每个问题默认检索 top_k=20。
 
+这里的 `top_k=20` 与 update 的 `top_k=10` 一样，只是 Mem0 wrapper 对自身检索接口的
+参数，不是 HaluMem shared scorer 对所有 method 的统一截断。其他 method 应把其产品接口
+自然返回、可直接填入 answer prompt 的 `formatted_memory` 交给 QA；update 也消费该 method
+实际返回的 memory window。artifact 可记录 wrapper/request hint 与实际返回条数，但不能为对齐
+Mem0 的数字而在框架层硬裁 method 输出。
+
 ### 3.5 输出 artifact 关键字段
 
 官方 eval wrapper 会输出新的 user/session JSON，关键字段包括：

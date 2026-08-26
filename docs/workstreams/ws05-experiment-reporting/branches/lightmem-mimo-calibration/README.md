@@ -38,7 +38,8 @@ shape cohort，分批推进 prediction/resume，验收运行身份、公开 arti
 HaluMem 同时写出 70 条 session memory report、171 条 update probe 与 4,855 条
 prediction efficiency observation。五个 manifest 均已初验为 `calibration`、
 `opencodego/mimo-v2.5`、thinking disabled、workers 10；完整字段合理性验收已通过，
-current 全量零 API 门为 `2350 passed, 3 deselected, 25 warnings, 29 subtests passed`。
+artifact 瘦身/分批 evaluator 合同后的 current 全量零 API 门为
+`2356 passed, 3 deselected, 25 warnings, 29 subtests passed`。
 
 ### 当前施工
 
@@ -49,7 +50,11 @@ current 全量零 API 门为 `2350 passed, 3 deselected, 25 warnings, 29 subtest
   `checkpoints/progress.json`。
 - [x] 完成五格 manifest、answer/readout、效率、时间/speaker、空值与边界字段
   [验货收据](notes/first-batch-prediction-receipt.md)。
-- [ ] 字段门通过后执行适用 evaluator；此前不启动 judge API。
+- [x] 完成 HaluMem top-k、artifact 体积与分批 evaluator 对齐预检；主 QA/update
+  均消费 LightMem 自然 top-60 `formatted_memory`，不套 Mem0 wrapper 的 20/10。
+- [x] 对当前五格 answer artifact 与 BEAM private label 做无 API 确定性瘦身，合计减少
+  19,689,199 bytes；未来 prediction 默认写 compact shape。
+- [ ] 用户执行适用 evaluator；judge API 调用量已在预检 note 中展开。
 - [ ] evaluator 验收后再裁定第二批 resume，不提前扩大。
 
 ## 已知边界
@@ -63,7 +68,8 @@ current 全量零 API 门为 `2350 passed, 3 deselected, 25 warnings, 29 subtest
 
 ## 当前断点
 
-进度 M0 与首批 artifact 字段门已通过。下一动作是生成同一 calibration identity 下的
-evaluate 命令、先核适用 metric/N/A 与 judge call 数，再由用户确认后调用 API；不得改变
-既有 run 的 profile、worker、cohort 顺序或 runtime 后强行 resume。HaluMem 当前分数只表示
-LightMem product top-60 calibration，不宣称 benchmark 官方 top-20/top-10 parity。
+进度 M0 与首批 artifact 字段门已通过。HaluMem 的 20/10 已核实为官方 Mem0 wrapper
+参数而非 benchmark-wide scorer contract；LightMem product top-60 是本 method 的自然
+`formatted_memory`，无需另做 parity 裁决或重跑 prediction。下一动作是由用户执行同一
+calibration identity 下的 evaluator 命令；不得改变既有 run 的 profile、worker、cohort
+顺序或 runtime 后强行 resume。

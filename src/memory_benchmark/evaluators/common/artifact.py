@@ -36,10 +36,10 @@ def load_retrieval_artifacts(
     answers = read_jsonl(paths.answer_prompts_path)
     private = read_jsonl(paths.evaluator_private_labels_path)
     public = read_jsonl(paths.public_questions_path)
-    _validate_matching_question_ids(
-        answers,
-        private,
-        public,
+    private, public = _align_completed_question_records(
+        answer_records=answers,
+        private_records=private,
+        public_records=public,
         mismatch_error=mismatch_error,
     )
     return RetrievalArtifacts(
@@ -53,22 +53,46 @@ def load_retrieval_artifacts(
     )
 
 
-def _validate_matching_question_ids(
-    *record_groups: list[dict[str, Any]],
+def _align_completed_question_records(
+    *,
+    answer_records: list[dict[str, Any]],
+    private_records: list[dict[str, Any]],
+    public_records: list[dict[str, Any]],
     mismatch_error: str,
-) -> None:
-    """校验每组 question id 唯一且各组集合完全一致。"""
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """校验完整 cohort 标签，并投影到本批已完成 question。
 
-    id_lists = [
-        [record.get("question_id") for record in records]
-        for records in record_groups
-    ]
+    formal run 会先写出所选 cohort 的完整 public/private 标签，再由
+    `conversation_budget` 分批追加 answer artifact。因此 private/public 必须彼此
+    完全一致，但允许它们包含尚未回答的未来 question；每条已完成 answer 仍必须在
+    两份标签中唯一存在。
+    """
+
+    answer_ids = [record.get("question_id") for record in answer_records]
+    private_ids = [record.get("question_id") for record in private_records]
+    public_ids = [record.get("question_id") for record in public_records]
     if (
-        not id_lists
-        or any(len(ids) != len(set(ids)) for ids in id_lists)
-        or any(set(ids) != set(id_lists[0]) for ids in id_lists[1:])
+        any(
+            not isinstance(question_id, str) or not question_id.strip()
+            for question_id in (*answer_ids, *private_ids, *public_ids)
+        )
+        or len(answer_ids) != len(set(answer_ids))
+        or len(private_ids) != len(set(private_ids))
+        or len(public_ids) != len(set(public_ids))
+        or set(private_ids) != set(public_ids)
+        or not set(answer_ids).issubset(set(private_ids))
     ):
         raise ConfigurationError(mismatch_error)
+    private_by_id = {
+        record["question_id"]: record for record in private_records
+    }
+    public_by_id = {
+        record["question_id"]: record for record in public_records
+    }
+    return (
+        [private_by_id[question_id] for question_id in answer_ids],
+        [public_by_id[question_id] for question_id in answer_ids],
+    )
 
 
 __all__ = ["RetrievalArtifacts", "load_retrieval_artifacts"]

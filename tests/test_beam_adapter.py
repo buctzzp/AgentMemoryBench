@@ -371,8 +371,8 @@ def test_public_conversation_excludes_rubric_and_private_fields(
         assert private_key not in public_questions_text
 
 
-def test_gold_answers_preserve_all_question_obj_fields(tmp_path: Path) -> None:
-    """GoldAnswerInfo 应保留 question_obj 的全部原始字段。"""
+def test_gold_answers_keep_only_scorer_required_private_fields(tmp_path: Path) -> None:
+    """GoldAnswerInfo 不应按题重复 source-locked row 的大块生成上下文。"""
 
     _make_beam_arrow(
         tmp_path / "data" / "BEAM" / "beam_dataset" / "100K",
@@ -386,11 +386,17 @@ def test_gold_answers_preserve_all_question_obj_fields(tmp_path: Path) -> None:
     gold = conversation.gold_answers[first_q.question_id]
 
     assert gold.metadata["rubric"] is not None
-    assert gold.metadata["ideal_response"] is not None
     assert "difficulty" in gold.metadata
-    # row 级私有元信息也应保留在 gold metadata
-    assert gold.metadata["conversation_seed"] == "seed"
-    assert gold.metadata["user_profile"] == "profile"
+    assert set(gold.metadata) == {
+        "ability",
+        "rubric",
+        "difficulty",
+        "ambiguous_gold_id_count",
+        "unmatched_gold_id_count",
+    }
+    assert "ideal_response" not in gold.metadata
+    assert "conversation_seed" not in gold.metadata
+    assert "user_profile" not in gold.metadata
 
 
 def test_gold_evidence_maps_raw_ids_to_all_public_turn_ids(tmp_path: Path) -> None:
@@ -423,10 +429,12 @@ def test_gold_evidence_maps_raw_ids_to_all_public_turn_ids(tmp_path: Path) -> No
     conversation = BeamAdapter(tmp_path, variant="100k").load().conversations[0]
     gold = conversation.gold_answers[conversation.questions[0].question_id]
 
-    assert gold.metadata["source_chat_ids"] == [[7], ["--"]]
-    assert gold.metadata["evidence_turn_ids"] == ["s1:t1", "s2:t1"]
     assert gold.metadata["ambiguous_gold_id_count"] == 1
     assert gold.metadata["unmatched_gold_id_count"] == 1
+    assert gold.evidence_group_sets[0].groups[0].child_ids == (
+        "s1:t1",
+        "s2:t1",
+    )
 
 
 def test_dataset_metadata_locks_source_identity_and_actual_counts(tmp_path: Path) -> None:
@@ -524,9 +532,12 @@ def test_beam_10m_real_data_expands_plans_and_preserves_invalid_evidence() -> No
         if item.category == "event_ordering" and item.question_id.endswith(":q1")
     )
     gold = regression.gold_answers[question.question_id]
-    assert gold.metadata["source_chat_ids"][-1] == ["--"]
     assert gold.metadata["unmatched_gold_id_count"] == 1
-    assert "--" not in gold.metadata["evidence_turn_ids"]
+    assert gold.evidence_group_sets[0].groups[-1].to_dict() == {
+        "unit_id": "--",
+        "child_ids": [],
+        "mapping_status": "unmatched",
+    }
     public = regression.to_public_dict()
     validate_no_private_keys(public)
     public_text = json.dumps(public, ensure_ascii=False)

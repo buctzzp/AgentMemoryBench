@@ -344,25 +344,20 @@ def _conversation_from_row(
             # instruction_following/preference_following → expected_compliance;
             # summarization → ideal_summary
             gold_answer_text = _resolve_answer_field(q_obj, question_id)
-            evidence_turn_ids, ambiguous_count, unmatched_count = _map_evidence_turn_ids(
+            _, ambiguous_count, unmatched_count = _map_evidence_turn_ids(
                 q_obj.get("source_chat_ids"),
                 raw_id_to_public_turn_ids,
             )
 
-            # 防御性保留原始 question_obj 全部字段（不含 question 文本自身），
-            # 对齐 actor 好行为判例（raw_evidence 保留）。
+            # evaluator-private label 只保存 scorer 与 evidence 映射实际消费的字段。
+            # 原始 row/question_obj 由 source-locked dataset 保留，不能在每道题重复
+            # 复制整段 conversation plan、user questions 与 narratives。
             gold_metadata: dict[str, Any] = {
                 "ability": ability,
-                **{k: copy.deepcopy(v) for k, v in q_obj.items() if k != "question"},
-                "evidence_turn_ids": evidence_turn_ids,
+                "rubric": q_obj.get("rubric"),
+                "difficulty": q_obj.get("difficulty"),
                 "ambiguous_gold_id_count": ambiguous_count,
                 "unmatched_gold_id_count": unmatched_count,
-                # row 级私有元信息
-                "conversation_seed": row.get("conversation_seed"),
-                "user_profile": row.get("user_profile"),
-                "conversation_plan": row.get("conversation_plan"),
-                "user_questions": row.get("user_questions"),
-                "narratives": row.get("narratives"),
             }
 
             questions.append(

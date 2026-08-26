@@ -26,8 +26,8 @@ created: 2026-07-05
   十家 source closure v2 与 EverOS effective strategy 均已闭合。M11 最终零 API 全量门为
   `2297 passed, 3 deselected, 25 warnings, 29 subtests passed`。M0-R2 承重集为
   `125 passed`；M1 同批已机械同步五份 ledger 的两条模板 requirement，定向 ledger+QA 门为
-  `31 passed`，最终文档门为 `38 passed`，current 全量为
-  `2350 passed, 3 deselected, 25 warnings, 29 subtests passed`；该 current 数包含 formal 精确
+  `31 passed`，最终文档门为 `38 passed`；artifact 瘦身/分批 evaluator 合同后的 current 全量为
+  `2356 passed, 3 deselected, 25 warnings, 29 subtests passed`；该 current 数包含 formal 精确
   isolation 选择与 Mimo calibration profile 的 CLI/config/十家 registry/full-scope 强反例。扩大真实
   实验尚未恢复。
 - **并行断点**：[开跑前 isolation 并行门](notes/2026-08-25-pre-experiment-parallelism-gate.md)
@@ -46,8 +46,9 @@ created: 2026-07-05
   LightMem 首批五格现已按公开 shape 锁定 Mimo calibration cohort、run id 与 `workers=10` 分批预算，
   见 [LightMem Mimo calibration 支线](branches/lightmem-mimo-calibration/README.md)。首批五格
   prediction 已全部完成且 conversation/question 零失败；HaluMem operation-level 进度、效率
-  派生汇总与五格 artifact 字段门已闭合，下一步是先核 metric/N/A 与 judge call 数，再由用户
-  确认 calibration evaluator。M11 前的 method state 不 resume；作者校准、Mimo calibration
+  派生汇总与五格 artifact 字段门已闭合。HaluMem top-k、分批 evaluator 子集合同与 artifact
+  瘦身已完成预检，judge 调用量已展开；下一步由用户执行 calibration evaluator。M11 前的
+  method state 不 resume；作者校准、Mimo calibration
   与主 controlled run 分开。
 
 ## 目标
@@ -94,7 +95,8 @@ created: 2026-07-05
   `workers=10`。新增独立 `calibration` runtime/execution profile，不改 `smoke` ox 或
   `official_full` GPT-4o-mini；method `[method]` 与 benchmark answer resolver 原样复用。cohort 在首轮
   manifest 即锁 5 个代表 isolation（MemBench 每 lane 5 个、轮次交错），首批实际推进 1 或 4，保留
-  `1+2(+2)` / `4+8(+8)` resume 能力。本条尚未授权/调用真实 API。
+  `1+2(+2)` / `4+8(+8)` resume 能力。首批 prediction 已于 2026-08-26 完成；该运行身份只用于
+  calibration，不与 `official_full` 分数混用。
 - W1/W2/W10 只是单个 run 的 isolation worker 数示例，不是 method 内部算法并行。HaluMem 已改为
   UUID 级 worker lane，UUID 内 session 顺序不变；Letta 与 MemOS 也使用每 worker 独立 runtime，
   不再需要另造“W1 child run + artifact 合并”旁路。execution profile 的 W1/W10 是默认值，

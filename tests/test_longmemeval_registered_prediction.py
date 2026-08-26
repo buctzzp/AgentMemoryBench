@@ -187,7 +187,7 @@ def test_longmemeval_registered_prediction_offline_probe_workflow(
     )
     prompt = answer_prompts[0]["prompt_messages"][0]["content"]
     assert answer_prompts[0]["formatted_memory"] == expected_memory
-    assert answer_prompts[0]["metadata"]["answer_context"] == expected_memory
+    assert "answer_context" not in answer_prompts[0]["metadata"]
     assert f"History Chats:\n\n{expected_memory}\n\nCurrent Date:" in prompt
     assert f"Current Date: {public_questions[0]['question_time']}" in prompt
     assert "### Session" not in prompt

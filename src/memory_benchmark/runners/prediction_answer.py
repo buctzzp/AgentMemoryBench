@@ -381,11 +381,13 @@ def _answer_question_retrieve_first(
     answer_prompt_record = {
         "question_id": retrieval.question_id,
         "conversation_id": retrieval.conversation_id,
-        "answer_prompt": retrieval.answer_prompt,
         "prompt_messages": [
             message.to_dict() for message in retrieval.prompt_messages
         ],
-        "metadata": retrieval.metadata,
+        "metadata": _persisted_retrieval_metadata(
+            retrieval.metadata,
+            formatted_memory=retrieval_result.formatted_memory,
+        ),
         "formatted_memory": retrieval_result.formatted_memory,
         "retrieved_items": _retrieved_items_payload(retrieval_result),
         "retrieval_query_top_k": query.top_k,
@@ -418,6 +420,26 @@ def _answer_question_retrieve_first(
             latency_ms=_elapsed_ms(answer_started_ns)
         )
     return prediction, answer_prompt_record
+
+
+def _persisted_retrieval_metadata(
+    metadata: dict[str, Any],
+    *,
+    formatted_memory: str,
+) -> dict[str, Any]:
+    """移除可由顶层 canonical 字段替代的 retrieval 调试副本。
+
+    `prompt_messages` 是 answer LLM 的精确请求，顶层 `formatted_memory` 与
+    `retrieved_items` 是框架公开检索产物；artifact 不再逐题重复保存完整
+    `answer_prompt`、`answer_context` 或 method-specific `retrieved_memories`。
+    运行期对象不修改，answer 生成与效率观测仍看到完整 metadata。
+    """
+
+    persisted = dict(metadata)
+    if persisted.get("answer_context") == formatted_memory:
+        persisted.pop("answer_context", None)
+    persisted.pop("retrieved_memories", None)
+    return persisted
 
 
 def _answer_question_retrieve_first_or_reuse(

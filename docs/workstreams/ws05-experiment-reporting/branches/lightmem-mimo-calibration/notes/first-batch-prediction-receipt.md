@@ -76,19 +76,16 @@ LongMemEval 当前已答题的 `question_time` 1/1 出现在最终 answer prompt
 | --- | --- | --- | --- | --- |
 | LoCoMo | 10 | 60 | `valid/turn` | `pending` |
 | LongMemEval | 10 | 60 | `n_a/none`（pair lineage 不能证明具体 child） | `pending` |
-| HaluMem QA | 20 | 22–60 | `n_a/none`（无 turn qrel） | `pending` |
+| HaluMem QA | 20（Mem0 wrapper 观测 hint） | 22–60 | `n_a/none`（无 turn qrel） | `pending` |
 | BEAM | 10 | 60 | `n_a/none`（gold 是单 message，pair 过粗） | `pending` |
 | MemBench | 10 | 20–60 | `valid/turn` | `pending` |
 
-这里必须区分两层：`retrieval_query_top_k` 是 framework/benchmark 的请求与 metric observation
-深度；LightMem 当前主算法配置仍先以 `retrieve_limit=60` 调产品 retriever。generic recall evaluator
-只消费前 `retrieval_query_top_k` 条；HaluMem operation artifact 当前保留产品返回的完整列表，
-update probe 171 条均返回 60 条。该事实在 manifest 与 artifact 中可重建，不是字段丢失。
-
-因此本轮可以用于 calibration 的流通、稳定性和成本观测，但 HaluMem 的 QA/update 分数必须标
-`LightMem product top-60 calibration`，不得宣称官方 top-20/top-10 parity。正式主表前需在
-“method 固定 retrieval depth”与“HaluMem benchmark top-k”之间做一次统一裁决，不能在本轮中途
-暗改后 resume。
+这里必须区分两层：`retrieval_query_top_k` 是 request/metric observation hint；LightMem
+当前主算法配置以 `retrieve_limit=60` 调产品 retriever，answer builder 与 update scorer 都消费
+产品实际返回的完整 `formatted_memory`/memory list。generic Recall@K 才按 artifact 中的 K
+观察前 K 条。HaluMem 官方 Mem0 wrapper 的 QA=20、update=10 不是 shared scorer 上限；Memobase
+等 wrapper 也使用不同的原生窗口。因此本轮 top-60 正是 LightMem calibration 的合法 method
+输出，不存在需要另裁或重跑的 top-k parity blocker。
 
 ## 6. 效率观测
 

@@ -448,6 +448,11 @@ BEAM 适合 artifact-only evaluation，只要保存：
 就可以在不重新跑 method 的情况下重跑 judge。但如果 judge prompt 或 judge LLM 改变，
 metric 结果也会改变，因此 manifest 必须记录 judge model、judge prompt profile、代码版本。
 
+框架 private label 只需逐题保存 `ability/rubric/difficulty`、gold answer、gold evidence groups
+及歧义/未匹配计数。`conversation_seed/user_profile/conversation_plan/user_questions/narratives`
+等生成上下文仍由 source-locked dataset 保留，不应在每一道 probing question 中重复复制；
+当前 scorer 不消费这些字段。
+
 ### 4.4 当前官方代码风险
 
 这里必须记录，因为它会影响我们未来是否直接复用官方 scorer：

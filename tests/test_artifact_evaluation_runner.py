@@ -730,8 +730,10 @@ def test_registered_membench_mock_v3_prediction_and_evaluation_e2e(
     assert predictions[0]["metadata"]["raw_answer"] == '{"choice": "B"}'
     assert retrievals[0]["formatted_memory"] == "memory says B is correct"
     assert retrievals[0]["metadata"]["prompt_track"] == "unified"
-    assert "Past memory: memory says B is correct" in retrievals[0]["answer_prompt"]
-    assert "B. B choice" in retrievals[0]["answer_prompt"]
+    assert "answer_prompt" not in retrievals[0]
+    persisted_prompt = retrievals[0]["prompt_messages"][0]["content"]
+    assert "Past memory: memory says B is correct" in persisted_prompt
+    assert "B. B choice" in persisted_prompt
     assert private_labels[0]["metadata"]["ground_truth"] == "B"
     assert evaluation.mean_score == 1.0
     assert summary["mean_score"] == 1.0
