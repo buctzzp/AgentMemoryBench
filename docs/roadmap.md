@@ -1,6 +1,6 @@
 # 项目路线图
 
-更新日期：2026-08-24。本文件是唯一方向文档：Phase 1 目标、workstream 索引与
+更新日期：2026-08-26。本文件是唯一方向文档：Phase 1 目标、workstream 索引与
 全局约束。逐任务状态见各 workstream README；2026-06 的历史阶段记录（Phase E-S）
 已归档到 `archive/status/2026-07-04-current-roadmap.md` 与
 `archive/status/2026-07-04-task-ledger.md`。
@@ -118,7 +118,7 @@ Letta/MemOS/HaluMem 的新 run 多 isolation sentinel 与 staged calibration 命
 | [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | done | P0 | 5×10 smoke matrix 与 A-Mem B5/GRID 精确 closure 均关闭；无在途施工 |
 | [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | done | P0 | M1-A→E 已关闭：依赖方向、TOML profile、worker transport、prediction 拆责与 legacy 退役 |
 | [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | done | P0 | isolated heartbeat 与第三方输出治理已关闭；完整诊断进 method.log |
-| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | in-progress | P0 | profile provenance 已闭合；当前关闭多 isolation 并行门与 staged calibration identity，真实 pilot 待预算/run-id 批准 |
+| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | in-progress | P0 | profile provenance、isolation 并行门与 QA aggregation M0 已闭合；当前补 cohort receipt/bootstrap 报告面，再恢复 staged calibration；真实 pilot 暂停 |
 | [ws05.1](workstreams/ws05.1-method-profile-provenance/README.md) | method-profile-provenance | done | P1 | 十家纵向机制卡 + M11 source/embedding/run identity v2 已闭合；零 author profile，真实 pilot 待用户批准 |
 | [ws06](workstreams/ws06-tests-restructure/README.md) | tests-restructure | open | P2 | tests 分组重组、大文件拆分、过时断言排查 |
 

@@ -128,7 +128,13 @@
     provider registry 或环境补齐。必须沿到最终 product object/请求 payload 才能写“未使用”。
     controlled 统一也只覆盖算法实际消费且公开 seam 兼容的组件；给 N/A 方法填一个同名模型只会
     制造虚假公平。Letta `skip_vector_storage=True` 与显式 `embedding_config=None` 是本条判例。
-30. **constructor default 不等于完整算法，也不等于作者实验值**：参数审计按 paper identity、
+30. **跨 benchmark 聚合先冻结 estimand，再写平均数**：先区分 overall、能力画像、guardrail 与
+    cost，锁 roster、score selector、权重、缺失策略和重复计权边界。异构 raw metric 即使都在
+    `[0,1]` 也不能直接平均；可先在同一 benchmark/task slice 内排名，再跨 benchmark 等权。
+    同一道题只能有一个 primary task，secondary slice 不得再回灌 overall；缺格不补零、不缩分母，
+    pilot/smoke 不发布正式排名。触发器：设计 leaderboard、总分、任务聚合或导师汇报时，先读
+    `qa-task-aggregation.md`。
+31. **constructor default 不等于完整算法，也不等于作者实验值**：参数审计按 paper identity、
     author-reported effective config、current product default 与 framework main identity 四栏取证。
     论文主流程/消融中的组件若在代码里被做成开关，不能仅因通用默认关闭就删掉；反过来也不能
     看到 bool 就全部开启。沿到最终调用分支，并对关键开关或高影响数值做零 API mutation。
@@ -137,29 +143,29 @@
     `DEAD_CONFIG`，不能继续把它写进 active identity。一个 benchmark 报告多组 backbone/参数/
     lifecycle 时，也不能压成一个假唯一 `author_<benchmark>`。LightMem 的
     `pre_compress=False` 默认、dead `extract_threshold` 与多组 `(r,th)` 是本条判例。
-31. **同一论文谱系的多个“官方仓库”也不得自动视为等价**：先锁 paper 页实际链接、current
+32. **同一论文谱系的多个“官方仓库”也不得自动视为等价**：先锁 paper 页实际链接、current
     product、benchmark eval 与各自 commit，再逐函数对最终 state/index/update 对表。repo 更晚、
     owner 相同、README 互相链接都不是算法等价证明；若邻居 id、embedding document、自动
     analysis 或失败语义不同，就分类 `SOURCE_VARIANT` 并保留旧 artifact identity，不能用一次
     fast-forward 偷换。A-Mem 的 `agiresearch/A-mem`、`WujiangXu/A-mem-sys` 与
     `WujiangXu/A-mem` 三源分叉是本条判例。
-32. **比较第三方设计不是为现行方案找赞成票**：先重建对方要解决的问题、约束、estimand 与
+33. **比较第三方设计不是为现行方案找赞成票**：先重建对方要解决的问题、约束、estimand 与
     保护的不变量，再追到 final payload/effective config 判断代价；最后才裁其对本项目是否可
     迁移。设计与现行政策相反时，既不能因“别人这样做”照搬，也不能因“不符合我们目标”立即
     否定。应明确它在自己的目标下是否合理，以及换到本项目的公平性、复现性、成本和 identity
     约束后为何保留、改造或拒绝。
-33. **论文阅读要产出可复用机制卡，而不是一次性上下文**：完整取证留 workstream note；稳定
+34. **论文阅读要产出可复用机制卡，而不是一次性上下文**：完整取证留 workstream note；稳定
     integration 页摘要 paper/source identity、算法阶段、状态变化、关键参数语义、与 current
     product 的已知分叉及适用边界，并从文档索引可定位。以后回答机制问题优先复用机制卡；只有
     upstream/paper 版本变化、现有 locator 失效、问题涉及未覆盖分支或新反证时才定点重读，不能
     在无新信息时从头再调查，也不能把旧机制卡冒充 current-source 证明。
-34. **默认值探针必须复现 final consumer 的可选参数**：同一个依赖的默认行为可能随是否安装
+35. **默认值探针必须复现 final consumer 的可选参数**：同一个依赖的默认行为可能随是否安装
     embedding function、provider、metadata 或 config object 改变。不能用“少传一个对象”的最小
     探针替代真实调用面。2026-08-25 M11 中，架构师用无 embedding function 的 Chroma collection
     探到 fallback L2，险些把 A-Mem manifest 从正确的 cosine 改错；Luna 调查沿到产品实际安装的
     `SentenceTransformerEmbeddingFunction.default_space()` 后推翻该结论。修法是先逐项对齐 final
     constructor 参数，再运行零下载探针；subagent 反证仍须由架构师复核源码与可执行最小反例。
-35. **先对齐真正的问题，再开始求解**：面对可能有多种解释的需求，先用自己的话复述用户要作的
+36. **先对齐真正的问题，再开始求解**：面对可能有多种解释的需求，先用自己的话复述用户要作的
     决策、成功标准、已知约束和明确非目标；不能把相邻但更容易回答的问题偷偷替换进来。若不同
     解释会改变实验身份、配置、预算、数据范围或外部写入，而当前证据无法唯一消歧，必须追问；
     若含义已由源码、现行裁决和上下文唯一闭合，则直接说明理解并推进，避免为形式完整反复确认。

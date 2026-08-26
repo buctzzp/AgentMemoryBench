@@ -37,6 +37,9 @@
 - 想知道 method 超参数、作者配置与 answer prompt 如何选择：
   `reference/method-toml-and-answer-builder-policy.md`；十家逐项参数/prompt 取证的当前进度看
   `workstreams/ws05.1-method-profile-provenance/README.md`。
+- 想知道五个 benchmark 的 QA task 如何对齐、总榜/能力榜如何计算、为什么 retrieval 与
+  HaluMem operation 指标不进主总分：`reference/qa-task-aggregation.md`；当前实现与研究证据看
+  `workstreams/ws05-experiment-reporting/branches/qa-task-aggregation/README.md`。
 - 想知道 smoke/official 使用哪个 API provider、model、transport，以及如何进入
   manifest/resume：`reference/api-runtime-profiles.md`。
 - 想生成不会误带 HaluMem 裁剪轴、错误 worker 或 variant run-id 的 smoke 命令：

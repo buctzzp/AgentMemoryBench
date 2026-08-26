@@ -13,6 +13,19 @@ from .efficiency import (
     NumericStats,
     aggregate_efficiency,
 )
+from .qa_task_aggregation import (
+    PHASE1_QA_BENCHMARKS,
+    PHASE1_QA_METHODS,
+    PRIMARY_QA_METRIC_BY_BENCHMARK,
+    QA_TASK_AGGREGATION_CONTRACT_VERSION,
+    QACapabilitySlice,
+    QANativeTaskScore,
+    QAQuestionScore,
+    QARunScore,
+    build_qa_aggregate_report,
+    classify_qa_task,
+    load_qa_run_score,
+)
 
 __all__ = [
     "APIEmbeddingPrice",
@@ -26,5 +39,16 @@ __all__ = [
     "LLMTokenSummary",
     "NumericStats",
     "aggregate_efficiency",
+    "PHASE1_QA_BENCHMARKS",
+    "PHASE1_QA_METHODS",
+    "PRIMARY_QA_METRIC_BY_BENCHMARK",
+    "QA_TASK_AGGREGATION_CONTRACT_VERSION",
+    "QACapabilitySlice",
+    "QANativeTaskScore",
+    "QAQuestionScore",
+    "QARunScore",
+    "build_qa_aggregate_report",
+    "classify_qa_task",
+    "load_qa_run_score",
     "calculate_cost",
 ]
