@@ -731,9 +731,13 @@ def test_registered_membench_mock_v3_prediction_and_evaluation_e2e(
     assert retrievals[0]["formatted_memory"] == "memory says B is correct"
     assert retrievals[0]["metadata"]["prompt_track"] == "unified"
     assert "answer_prompt" not in retrievals[0]
-    persisted_prompt = retrievals[0]["prompt_messages"][0]["content"]
-    assert "Past memory: memory says B is correct" in persisted_prompt
-    assert "B. B choice" in persisted_prompt
+    assert "prompt_messages" not in retrievals[0]
+    assert manifest["answer_prompt_artifact"] == {
+        "contract_version": "v2",
+        "answer_builder": "benchmark",
+        "prompt_track": "unified",
+        "per_question_prompt_messages": False,
+    }
     assert private_labels[0]["metadata"]["ground_truth"] == "B"
     assert evaluation.mean_score == 1.0
     assert summary["mean_score"] == 1.0

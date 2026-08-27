@@ -310,7 +310,8 @@ def _assert_prompt_and_artifact_layout(
     assert record["metadata"]["prompt_track"] == "unified"
     assert record["metadata"]["answer_prompt_profile"] == BEAM_ANSWER_PROMPT_PROFILE
 
-    prompt_text = record["prompt_messages"][0]["content"]
+    assert "prompt_messages" not in record
+    prompt_text = fake_client.calls[0]
     formatted_memory = record["formatted_memory"]
     assert formatted_memory, "probe 探针应产出非空 formatted_memory"
     assert formatted_memory in prompt_text, (

@@ -62,7 +62,10 @@ from memory_benchmark.runners.prediction import (
     _validate_consume_granularity,
     _validate_protocol_version,
 )
-from memory_benchmark.runners.prediction_answer import _persisted_retrieval_metadata
+from memory_benchmark.runners.prediction_answer import _answer_prompt_record
+from memory_benchmark.runners.prediction_preflight import (
+    _answer_prompt_artifact_manifest,
+)
 from memory_benchmark.runners.prediction_parallel import (
     _WORKER_HEARTBEAT_POLL_SECONDS,
     _WorkerHeartbeat,
@@ -1357,6 +1360,7 @@ def _answer_operation_question(
             retrieval=retrieval,
             retrieval_result=retrieval_result,
             retrieval_query_top_k=query.top_k,
+            persist_prompt_messages=False,
         )
     )
     prediction_records[question.question_id] = {
@@ -1483,37 +1487,6 @@ def _memories_from_retrieval(retrieval: RetrievalResult) -> list[str]:
     if retrieval.items is not None:
         return [item.content for item in retrieval.items]
     return [line for line in retrieval.formatted_memory.splitlines() if line.strip()]
-
-
-def _answer_prompt_record(
-    *,
-    retrieval: AnswerPromptResult,
-    retrieval_result: RetrievalResult,
-    retrieval_query_top_k: int,
-) -> dict[str, Any]:
-    """构造 QA answer prompt artifact 记录，并保留实际请求的 top-k。"""
-
-    record = {
-        "question_id": retrieval.question_id,
-        "conversation_id": retrieval.conversation_id,
-        "prompt_messages": [message.to_dict() for message in retrieval.prompt_messages],
-        "metadata": _persisted_retrieval_metadata(
-            retrieval.metadata,
-            formatted_memory=retrieval_result.formatted_memory,
-        ),
-        "formatted_memory": retrieval_result.formatted_memory,
-        "retrieved_items": [
-            asdict(item) for item in retrieval_result.items or ()
-        ],
-        "retrieval_query_top_k": retrieval_query_top_k,
-        "retrieval_evidence": (
-            asdict(retrieval_result.evidence)
-            if retrieval_result.evidence is not None
-            else None
-        ),
-    }
-    validate_no_private_keys(record)
-    return record
 
 
 def _validate_prediction(prediction: AnswerResult, question: Question) -> None:
@@ -1649,6 +1622,7 @@ def _build_operation_manifest(
     dataset_fingerprint = build_dataset_fingerprint(dataset, list(source_paths))
     manifest: dict[str, Any] = {
         "schema_version": 2,
+        "answer_prompt_artifact": _answer_prompt_artifact_manifest(method_manifest),
         "runner": "operation_level_prediction",
         "run_id": run_context.run_id,
         "benchmark_name": run_context.benchmark_name,

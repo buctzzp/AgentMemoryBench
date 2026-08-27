@@ -1818,10 +1818,16 @@ def test_custom_method_class_writes_prediction_artifacts(
     run_dir = tmp_path / "outputs" / "custom-e2e-smoke"
     predictions = read_jsonl(run_dir / "artifacts" / "method_predictions.jsonl")
     prompts = read_jsonl(run_dir / "artifacts" / "answer_prompts.prediction.jsonl")
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert predictions[0]["answer"] == "fixture answer"
-    assert prompts[0]["prompt_messages"]
+    assert "prompt_messages" not in prompts[0]
     assert prompts[0]["formatted_memory"]
-    assert prompts[0]["formatted_memory"] in prompts[0]["prompt_messages"][0]["content"]
+    assert manifest["answer_prompt_artifact"] == {
+        "contract_version": "v2",
+        "answer_builder": "benchmark",
+        "prompt_track": "unified",
+        "per_question_prompt_messages": False,
+    }
 
 
 def test_registered_prediction_builds_framework_answer_reader(

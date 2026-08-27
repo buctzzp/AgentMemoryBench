@@ -144,8 +144,11 @@ provider v3 契约表达；legacy 负担删除或明确降级；
   第一版仍只实现 OpenAI-compatible provider。
 - [ ] 减重 evaluator registry：F1 / LLM judge 统一为 metric profile +
   prompt profile，不为每个 benchmark 复制 evaluator 类。
-- [ ] prediction artifact 瘦身长期兼容：旧 artifact 回读策略、更多
-  conversation-level metadata key、evaluator 是否引用 `conversation_prompts.jsonl`。
+- [ ] prediction artifact 瘦身长期兼容：2026-08-27 已完成 answer-prompt artifact v2——注册
+  builder 的逐题记录只保留动态 retrieval payload，run 级锁 builder identity，旧 v1/native
+  messages 可回读且 compact resume 不重复检索；现有 LightMem/SimpleMem calibration 已经逐题
+  字节重建门后迁移。剩余范围仅是更多 conversation-level metadata key 与 evaluator 是否引用
+  `conversation_prompts.jsonl`，不能把本项误标成全部关闭。
 - [ ] evaluator category 汇总里 `correct_count` 是否更名
   `perfect_match_count`（防止 F1 连续指标被误读为 accuracy）。
 - [ ] 评估可选 `--method-file` 单文件快速测试入口（method 接入轻量化遗留项）。

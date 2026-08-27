@@ -20,7 +20,10 @@ from memory_benchmark.core import (
 from memory_benchmark.core.exceptions import ConfigurationError
 from memory_benchmark.core.interfaces import BaseMemorySystem
 from memory_benchmark.core.provider_protocol import (
+    EvidenceAssertion,
     MemoryProvider,
+    RetrievedItem,
+    RetrievalEvidence,
     RetrievalQuery,
     RetrievalResult,
 )
@@ -378,22 +381,12 @@ def _answer_question_retrieve_first(
             ),
         )
 
-    answer_prompt_record = {
-        "question_id": retrieval.question_id,
-        "conversation_id": retrieval.conversation_id,
-        "prompt_messages": [
-            message.to_dict() for message in retrieval.prompt_messages
-        ],
-        "metadata": _persisted_retrieval_metadata(
-            retrieval.metadata,
-            formatted_memory=retrieval_result.formatted_memory,
-        ),
-        "formatted_memory": retrieval_result.formatted_memory,
-        "retrieved_items": _retrieved_items_payload(retrieval_result),
-        "retrieval_query_top_k": query.top_k,
-        "retrieval_evidence": _retrieval_evidence_payload(retrieval_result),
-    }
-    validate_no_private_keys(answer_prompt_record)
+    answer_prompt_record = _answer_prompt_record(
+        retrieval=retrieval,
+        retrieval_result=retrieval_result,
+        retrieval_query_top_k=query.top_k,
+        persist_prompt_messages=unified_prompt_builder is None,
+    )
 
     answer_started_ns = perf_counter_ns()
     try:
@@ -422,6 +415,47 @@ def _answer_question_retrieve_first(
     return prediction, answer_prompt_record
 
 
+def _answer_prompt_record(
+    *,
+    retrieval: AnswerPromptResult,
+    retrieval_result: RetrievalResult,
+    retrieval_query_top_k: int,
+    persist_prompt_messages: bool,
+) -> dict[str, Any]:
+    """构造逐题 retrieval artifact，避免重复保存可重建的完整 answer prompt。
+
+    注册 builder 路径只保存动态检索载荷；公开 question 与 run manifest 已分别保存
+    question/time 和 builder identity，resume 可确定性重建完整请求。只有没有可调用
+    builder 的 native 兼容路径才保留精确 ``prompt_messages``。
+    """
+
+    record: dict[str, Any] = {
+        "question_id": retrieval.question_id,
+        "conversation_id": retrieval.conversation_id,
+        "metadata": _persisted_retrieval_metadata(
+            retrieval.metadata,
+            formatted_memory=retrieval_result.formatted_memory,
+        ),
+        "formatted_memory": retrieval_result.formatted_memory,
+        "retrieved_items": _retrieved_items_payload(retrieval_result),
+        "retrieval_query_top_k": retrieval_query_top_k,
+        "retrieval_evidence": _retrieval_evidence_payload(retrieval_result),
+    }
+    if persist_prompt_messages:
+        record["prompt_messages"] = [
+            message.to_dict() for message in retrieval.prompt_messages
+        ]
+    else:
+        retrieval_metadata = _persisted_retrieval_metadata(
+            retrieval_result.metadata,
+            formatted_memory=retrieval_result.formatted_memory,
+        )
+        if retrieval_metadata != record["metadata"]:
+            record["retrieval_metadata"] = retrieval_metadata
+    validate_no_private_keys(record)
+    return record
+
+
 def _persisted_retrieval_metadata(
     metadata: dict[str, Any],
     *,
@@ -429,10 +463,11 @@ def _persisted_retrieval_metadata(
 ) -> dict[str, Any]:
     """移除可由顶层 canonical 字段替代的 retrieval 调试副本。
 
-    `prompt_messages` 是 answer LLM 的精确请求，顶层 `formatted_memory` 与
-    `retrieved_items` 是框架公开检索产物；artifact 不再逐题重复保存完整
-    `answer_prompt`、`answer_context` 或 method-specific `retrieved_memories`。
-    运行期对象不修改，answer 生成与效率观测仍看到完整 metadata。
+    顶层 `formatted_memory` 与 `retrieved_items` 是框架公开检索产物；artifact
+    不再逐题重复保存完整 `answer_prompt`、`answer_context` 或 method-specific
+    `retrieved_memories`。注册 builder 的完整 `prompt_messages` 同样可由公开
+    question + 动态检索载荷重建，只有 native 兼容路径才逐题持久化。运行期对象
+    不修改，answer 生成与效率观测仍看到完整 metadata。
     """
 
     persisted = dict(metadata)
@@ -460,7 +495,11 @@ def _answer_question_retrieve_first_or_reuse(
     if existing_record is not None:
         if answer_reader is None:
             raise ConfigurationError("Retrieve-first prediction requires answer_reader")
-        retrieval = _retrieval_from_record(existing_record)
+        retrieval = _answer_prompt_from_record(
+            question=question,
+            record=existing_record,
+            unified_prompt_builder=unified_prompt_builder,
+        )
         _validate_retrieval(retrieval, question)
         answer_started_ns = perf_counter_ns()
         prediction, answer_prompt, answer_response = answer_reader.generate_answer_with_trace(
@@ -558,7 +597,7 @@ def _retrieval_evidence_payload(
 
 
 def _retrieval_from_record(record: dict[str, Any]) -> AnswerPromptResult:
-    """从 answer prompt artifact 还原 AnswerPromptResult。"""
+    """从旧 v1 answer prompt artifact 逐字还原 AnswerPromptResult。"""
 
     prompt_messages = [
         PromptMessage(
@@ -573,6 +612,110 @@ def _retrieval_from_record(record: dict[str, Any]) -> AnswerPromptResult:
         answer_prompt=str(record.get("answer_prompt") or ""),
         prompt_messages=prompt_messages,
         metadata=dict(record.get("metadata") or {}),
+    )
+
+
+def _answer_prompt_from_record(
+    *,
+    question: Question,
+    record: dict[str, Any],
+    unified_prompt_builder: (
+        Callable[[Question, RetrievalResult], AnswerPromptResult] | None
+    ),
+) -> AnswerPromptResult:
+    """兼容 v1 精确 prompt，并从 v2 动态 retrieval 载荷重建完整请求。"""
+
+    prompt_messages = record.get("prompt_messages")
+    if isinstance(prompt_messages, list) and prompt_messages:
+        return _retrieval_from_record(record)
+    if unified_prompt_builder is None:
+        raise ConfigurationError(
+            "Compact answer prompt artifact requires a registered answer builder: "
+            f"{question.question_id}"
+        )
+    return _answer_prompt_from_retrieval_result(
+        question=question,
+        retrieval_result=_retrieval_result_from_record(record),
+        unified_prompt_builder=unified_prompt_builder,
+    )
+
+
+def _retrieval_result_from_record(record: dict[str, Any]) -> RetrievalResult:
+    """从 compact artifact 重建 builder 所需的公开 RetrievalResult。"""
+
+    items_payload = record.get("retrieved_items")
+    if not isinstance(items_payload, list):
+        raise ConfigurationError("retrieved_items must be a list in answer artifact")
+    items: list[RetrievedItem] = []
+    for payload in items_payload:
+        if not isinstance(payload, dict):
+            raise ConfigurationError("retrieved_items entries must be objects")
+        source_turn_ids = payload.get("source_turn_ids") or []
+        metadata = payload.get("metadata") or {}
+        if not isinstance(source_turn_ids, list) or not isinstance(metadata, dict):
+            raise ConfigurationError(
+                "retrieved item source_turn_ids/metadata has an invalid shape"
+            )
+        score = payload.get("score")
+        items.append(
+            RetrievedItem(
+                item_id=str(payload["item_id"]),
+                content=str(payload["content"]),
+                score=None if score is None else float(score),
+                timestamp=(
+                    None
+                    if payload.get("timestamp") is None
+                    else str(payload["timestamp"])
+                ),
+                source_turn_ids=tuple(str(item) for item in source_turn_ids),
+                metadata=dict(metadata),
+            )
+        )
+    metadata_payload = record.get(
+        "retrieval_metadata",
+        record.get("metadata"),
+    ) or {}
+    if not isinstance(metadata_payload, dict):
+        raise ConfigurationError("metadata must be an object in answer artifact")
+    return RetrievalResult(
+        formatted_memory=str(record["formatted_memory"]),
+        items=tuple(items),
+        metadata=dict(metadata_payload),
+        evidence=_retrieval_evidence_from_payload(record.get("retrieval_evidence")),
+    )
+
+
+def _retrieval_evidence_from_payload(payload: Any) -> RetrievalEvidence | None:
+    """把 JSON retrieval evidence 还原为强类型协议对象。"""
+
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise ConfigurationError("retrieval_evidence must be an object or null")
+    semantic = payload.get("semantic_provenance")
+    ranking = payload.get("stable_ranking")
+    if not isinstance(semantic, dict) or not isinstance(ranking, dict):
+        raise ConfigurationError(
+            "retrieval_evidence assertions must be objects"
+        )
+    return RetrievalEvidence(
+        semantic_provenance=_evidence_assertion_from_payload(semantic),
+        provenance_granularity=str(payload["provenance_granularity"]),
+        stable_ranking=_evidence_assertion_from_payload(ranking),
+    )
+
+
+def _evidence_assertion_from_payload(payload: dict[str, Any]) -> EvidenceAssertion:
+    """还原一个 evidence assertion，并沿用协议层强校验。"""
+
+    return EvidenceAssertion(
+        status=str(payload["status"]),
+        reason_code=(
+            None
+            if payload.get("reason_code") is None
+            else str(payload["reason_code"])
+        ),
+        reason=None if payload.get("reason") is None else str(payload["reason"]),
     )
 
 

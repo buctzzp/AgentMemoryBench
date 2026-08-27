@@ -185,7 +185,14 @@ def test_longmemeval_registered_prediction_offline_probe_workflow(
         f"{turn.speaker_name or turn.role}: {turn.content}"
         for turn in probe.ingested_turns
     )
-    prompt = answer_prompts[0]["prompt_messages"][0]["content"]
+    assert "prompt_messages" not in answer_prompts[0]
+    assert manifest["answer_prompt_artifact"] == {
+        "contract_version": "v2",
+        "answer_builder": "benchmark",
+        "prompt_track": "unified",
+        "per_question_prompt_messages": False,
+    }
+    prompt = fake_client.calls[0]
     assert answer_prompts[0]["formatted_memory"] == expected_memory
     assert "answer_context" not in answer_prompts[0]["metadata"]
     assert f"History Chats:\n\n{expected_memory}\n\nCurrent Date:" in prompt

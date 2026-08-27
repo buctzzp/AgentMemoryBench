@@ -10,8 +10,9 @@ created: 2026-07-05
 
 - **当前目标**：runtime/观测、十家参数/source/embedding provenance、isolation 并行门与 formal
   精确 cohort 选择已关闭；LightMem 与 SimpleMem 两家 Mimo calibration 均已在自适应样本门收口，
-  当前没有获授权的真实 API run 在途。下一步是用两份 SDK usage 收据离线组装目标模型成本区间，
-  再与用户决定其余八家或少量 GPT-4o-mini 校准，不抢跑。
+  当前没有获授权的真实 API run 在途。用户已暂停简单成本外推；下一步等 GPT-4o-mini 经费就绪后，
+  用同一 paired cohort 实测 GPT-4o-mini/Mimo 的真实 SDK usage 比例，再裁成本区间与其余八家，
+  不抢跑。
   [QA task aggregation v3](branches/qa-task-aggregation/README.md) 的 taxonomy、
   answer-only abstention M0、BEAM 三档题分、题目级 pooled micro 与 M1 receipt/write surface 已
   实现；M2 paired bootstrap 仍等待更多 method 的 paired formal 结果，不抢跑。
@@ -32,15 +33,18 @@ created: 2026-07-05
   `31 passed`，最终文档门为 `38 passed`；artifact 瘦身/分批 evaluator 合同后的 current 全量为
   `2358 passed, 3 deselected, 25 warnings, 29 subtests passed`；该 current 数包含 formal 精确
   isolation 选择与 Mimo calibration profile 的 CLI/config/十家 registry/full-scope 强反例。
-  LightMem 最终 current 零 API门为 `2364 passed, 3 deselected, 25 warnings, 29 subtests passed`。
+  LightMem 最终门曾为 `2364 passed, 3 deselected, 25 warnings, 29 subtests passed`；answer-prompt
+  artifact v2、compact resume 与迁移文档后的 current 全量为
+  `2365 passed, 3 deselected, 25 warnings, 29 subtests passed in 184.24s`。
 - **并行断点**：[开跑前 isolation 并行门](notes/2026-08-25-pre-experiment-parallelism-gate.md)
   已实现 HaluMem UUID 级稳定 worker lane、Letta 独立 product runtime、MemOS v6 独立
   runtime/embedder；W2 是最小竞态哨兵，不是能力天花板，显式 worker 接受任意正整数，实际
   数量由 selected isolation 与 execution/resource policy 控制。真实 LightMem HaluMem W10 run
   已证明 3 个 UUID 稳定分到独立 worker lane，UUID 内 session 顺序守恒。
-- **禁止事项**：当前真实 API 授权只覆盖完成 LightMem 与 SimpleMem calibration；不得顺带启动
-  其余八家、改写旧 artifact、把旧 embedding build 重标为新 controlled identity，或用 lineage
-  伪造 metric 资格。
+- **禁止事项**：当前真实 API 授权只覆盖已完成的 LightMem 与 SimpleMem calibration；不得顺带
+  启动其余八家、把旧 embedding build 重标为新 controlled identity，或用 lineage 伪造 metric
+  资格。2026-08-27 用户明确要求的 answer-prompt serializer v2 迁移已经逐题重建验真并关闭；
+  除该有收据迁移外，不得任意改写旧 artifact。
 - **当前动作**：LightMem 最终五格累计 8,620,622 个 SDK `api_usage` tokens，详见
   [LightMem 收据](branches/lightmem-mimo-calibration/notes/second-batch-receipt.md)；SimpleMem 同一
   paired cohort 累计 30,894,972 tokens，12,787 次 API LLM observation 全部为 `api_usage`，详见
@@ -49,8 +53,10 @@ created: 2026-07-05
   1.21×–1.34×，首轮停表，MemBench 20 点达 11.45×，保留分层样本。目标模型费用只按运行时点
   实价离线外推，不能外推 Mimo 分数或速度；任何未来成功 API LLM observation 若不是
   `api_usage`，对应收据仍须标 incomplete。
-  M11 前的 method state 不 resume；作者校准、Mimo calibration
-  与主 controlled run 分开。
+  两家现有 2,176 条 answer artifact 已迁 v2：完整 prompt 不再逐题复制，manifest 只存一次
+  builder identity，动态 retrieval payload 与旧回读/resume 保留；总计减少 14,497,228 bytes，见
+  [迁移收据](notes/2026-08-27-answer-prompt-artifact-v2.md)。M11 前的 method state 不 resume；
+  作者校准、Mimo calibration 与主 controlled run 分开。
 
 ## 目标
 
@@ -63,6 +69,13 @@ created: 2026-07-05
 运行账：
 [`ox 完整 isolation pilot 矩阵账`](notes/2026-08-21-ox-complete-isolation-pilot-ledger.md)。
 
+- 2026-08-27：用户发现 `answer_prompts.prediction.jsonl` 逐题复制完整 prompt。current serializer
+  已升级为 v2：run manifest 锁一次 builder，benchmark builder 行只落动态 retrieval payload；旧
+  v1/native 精确回读保留，compact resume 以公开 question 重建 prompt、不重新检索。LightMem/
+  SimpleMem 10 个 calibration run 共 2,176 行全部先逐字重建一致再原子迁移，节省 14.50 MB；
+  artifact-only retrieval score 逐题守恒。验收同时发现 LightMem MemBench source summary 停在
+  12/20 题，已按现有 choice score 零 API重算为 14/20=0.70。简单成本外推继续暂停，等待同 cohort
+  的 GPT-4o-mini/Mimo 真实 SDK usage 比例实验。
 - 2026-08-27：LightMem Mimo calibration 在自适应停表点完成。四个普通 benchmark 各三个完整
   isolation；MemBench 基于 lane 内 1.6×–5.2× 的三点差异条件补齐四 lane 五点；最终五格累计
   8,620,622 个真实 SDK `api_usage` tokens。下一家 SimpleMem 使用同一 paired cohort，HaluMem
@@ -177,6 +190,9 @@ created: 2026-07-05
   `api_usage` 与失败尝试；按运行时点目标模型价格离线外推。GPT-4o-mini 经费优先用于
   LightMem、SimpleMem 及后续由 observation 证明效率较高的方法；A-Mem 等高调用方法允许只给
   低价模型 token 外推，但报告必须标明“非目标模型实测”，不能外推分数或速度。
+- [ ] GPT-4o-mini/Mimo 可迁移性门：在同一 paired isolation、同一 method/benchmark/stage 上
+  分别采集真实 SDK input/output usage 与调用次数；比例稳定才允许点估计，不稳定则给区间。
+  用户补充经费并再次授权前，本项不调用 API，也不先产出简单比例外推。
 - [ ] 自适应样本门：方法间复用同一 public-shape paired cohort；LoCoMo/LME 等先以
   p25/p50/p75 三个完整 isolation 形成首轮外推，MemBench 至少四 lane×三条。只有 shape/token/
   runtime 敏感性足以影响预算决策时才补 p10/p90，不机械要求每个 benchmark 同样 n。

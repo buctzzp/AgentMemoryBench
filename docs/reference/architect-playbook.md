@@ -217,6 +217,12 @@
     三个，公开形状或实测 API token/runtime 的敏感性区间足以改变预算决策时，再补 p10/p90 或对应
     strata；单纯多跑相似样本不会自动修复抽样偏差。调度时在资源门允许下优先启动最长关键路径
     （当前 HaluMem），再用短 run 填充等待时间；这只是 makespan 优化，不改变 run identity 或算法。
+44. **可确定重建的完整 prompt 属于 run identity，不应逐题复制**：benchmark/author builder 的
+    来源在同一 run 内必须唯一并进入 manifest；逐题 artifact 只保存 question 之外的动态 retrieval
+    载荷。answer 失败后 resume 应用 source-locked public question + 已保存 retrieval + 同一 builder
+    重建请求，不重新检索。迁移旧 artifact 前必须逐题重建并与旧 messages 字节比较；旧 v1 messages
+    继续回读，没有可调用 builder 的 provider-native 路径仍保存精确请求。不要为省空间删掉
+    `formatted_memory`、structured items、evidence 或 question time；那些不是模板冗余。
 
 完整历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

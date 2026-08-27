@@ -446,6 +446,16 @@ def test_halumem_fake_registered_chain_runs_three_evaluators(tmp_path: Path) -> 
     assert manifest["method"]["protocol_version"] == "v3"
     assert manifest["method"]["prompt_track"] == "unified"
     assert manifest["method"]["retrieval_evidence_contract_version"] == "v1"
+    assert manifest["answer_prompt_artifact"] == {
+        "contract_version": "v2",
+        "answer_builder": "benchmark",
+        "prompt_track": "unified",
+        "per_question_prompt_messages": False,
+    }
+    assert all(
+        "prompt_messages" not in record
+        for record in read_jsonl(paths.answer_prompts_path)
+    )
     assert read_jsonl(paths.session_memory_reports_path)
     assert read_jsonl(paths.artifacts_dir / "update_probe_results.jsonl")
     assert read_jsonl(paths.method_predictions_path)

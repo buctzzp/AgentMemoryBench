@@ -43,6 +43,38 @@ from memory_benchmark.storage import (
 from memory_benchmark.utils.run_logger import RunLogger
 
 
+ANSWER_PROMPT_ARTIFACT_CONTRACT_VERSION = "v2"
+
+
+def _answer_prompt_artifact_manifest(
+    method_manifest: dict[str, object],
+) -> dict[str, object]:
+    """构造一次性 run 级 prompt builder 与逐题载荷合同。"""
+
+    prompt_track = method_manifest.get("prompt_track")
+    run_identity = method_manifest.get("run_identity")
+    answer_builder = (
+        run_identity.get("answer_builder")
+        if isinstance(run_identity, dict)
+        else method_manifest.get("answer_builder")
+    )
+    if not isinstance(answer_builder, str) or not answer_builder.strip():
+        answer_builder = (
+            "benchmark" if prompt_track == "unified" else "provider_native"
+        )
+    normalized_track = (
+        prompt_track
+        if isinstance(prompt_track, str) and prompt_track.strip()
+        else "native"
+    )
+    return {
+        "contract_version": ANSWER_PROMPT_ARTIFACT_CONTRACT_VERSION,
+        "answer_builder": answer_builder,
+        "prompt_track": normalized_track,
+        "per_question_prompt_messages": normalized_track == "native",
+    }
+
+
 _PredictionSystem = BaseMemorySystem | MemoryProvider
 
 
@@ -129,6 +161,7 @@ def _build_manifest(
     }
     manifest = {
         "schema_version": 2,
+        "answer_prompt_artifact": _answer_prompt_artifact_manifest(method_manifest),
         "runner": "generic_conversation_qa_prediction",
         "run_id": run_context.run_id,
         "benchmark_name": run_context.benchmark_name,
@@ -459,6 +492,13 @@ def _manifests_match_for_resume(
 
     existing_normalized = _normalize_manifest_for_resume_compare(existing)
     current_normalized = _normalize_manifest_for_resume_compare(manifest)
+    if (
+        "answer_prompt_artifact" not in existing_normalized
+        or "answer_prompt_artifact" not in current_normalized
+    ):
+        # v1 逐题保存完整 prompt_messages；current reader 仍可逐字回读。
+        existing_normalized.pop("answer_prompt_artifact", None)
+        current_normalized.pop("answer_prompt_artifact", None)
     existing_method = existing_normalized.get("method")
     current_method = current_normalized.get("method")
     if isinstance(existing_method, dict) and isinstance(current_method, dict):

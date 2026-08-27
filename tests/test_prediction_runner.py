@@ -650,8 +650,19 @@ def test_preflight_prediction_run_accepts_matching_resume_without_writes(
     assert dataset_fingerprint["dataset_name"] == "fake-conversation-qa"
     assert sorted(path.name for path in run_context.run_dir.iterdir()) == ["manifest.json"]
     assert manifest["schema_version"] == 2
+    assert manifest["answer_prompt_artifact"] == {
+        "contract_version": "v2",
+        "answer_builder": "provider_native",
+        "prompt_track": "native",
+        "per_question_prompt_messages": True,
+    }
     assert manifest["benchmark_variant"] == "test_variant"
     assert manifest["run_scope"] == "full"
+
+    legacy_prompt_manifest = json.loads(json.dumps(manifest))
+    legacy_prompt_manifest.pop("answer_prompt_artifact")
+    assert _manifests_match_for_resume(legacy_prompt_manifest, manifest)
+    assert _manifests_match_for_resume(manifest, legacy_prompt_manifest)
 
 
 def test_prediction_manifest_keeps_benchmark_policy_outside_method_identity(
@@ -1760,15 +1771,21 @@ def test_runner_uses_membench_unified_prompt_builder_and_choice_parser(
     assert retrievals[0]["formatted_memory"] == (
         "v3 memory for What does Alex prefer?"
     )
-    assert retrievals[0]["prompt_messages"] == answer_client.calls[0]["messages"]
     assert "answer_prompt" not in retrievals[0]
-    persisted_prompt = retrievals[0]["prompt_messages"][0]["content"]
-    assert "Past memory: v3 memory for What does Alex prefer?" in persisted_prompt
+    assert "prompt_messages" not in retrievals[0]
+    sent_prompt = answer_client.calls[0]["messages"][0]["content"]
+    assert "Past memory: v3 memory for What does Alex prefer?" in sent_prompt
     assert "Question: (current time is 2026-01-02) What does Alex prefer?" in (
-        persisted_prompt
+        sent_prompt
     )
-    assert "B. Coffee" in persisted_prompt
+    assert "B. Coffee" in sent_prompt
     assert manifest["method"]["prompt_track"] == "unified"
+    assert manifest["answer_prompt_artifact"] == {
+        "contract_version": "v2",
+        "answer_builder": "benchmark",
+        "prompt_track": "unified",
+        "per_question_prompt_messages": False,
+    }
 
 
 def test_isolated_worker_ingests_native_v3_provider_with_event_stream(
@@ -2034,6 +2051,83 @@ def test_resume_reuses_completed_retrieval_when_answer_failed(
     assert [record["answer"] for record in predictions] == [
         "resumed answer",
         "resumed answer",
+    ]
+
+
+def test_resume_rebuilds_compact_answer_prompt_without_retrieving_again(
+    tmp_path: Path,
+) -> None:
+    """v2 artifact 应以公开 question + retrieval payload 重建同一 unified prompt。"""
+
+    def unified_builder(
+        question: Question,
+        retrieval_result: RetrievalResult,
+    ) -> AnswerPromptResult:
+        """让测试同时依赖 question、memory 与 provider metadata。"""
+
+        content = (
+            f"Question: {question.text}\n"
+            f"Memory: {retrieval_result.formatted_memory}\n"
+            f"Provider: {retrieval_result.metadata['provider']}"
+        )
+        return AnswerPromptResult(
+            question_id=question.question_id,
+            conversation_id=question.conversation_id,
+            answer_prompt=content,
+            prompt_messages=[PromptMessage(role="user", content=content)],
+            metadata={
+                "prompt_track": "unified",
+                "answer_prompt_profile": "test-unified-v1",
+            },
+        )
+
+    dataset = _build_two_question_dataset()
+    provider = RecordingMemoryProvider()
+    context = _create_context(tmp_path)
+    with pytest.raises(RuntimeError, match="answer failed once"):
+        run_predictions(
+            dataset=dataset,
+            system=provider,
+            run_context=context,
+            policy=PredictionRunPolicy(max_workers=1),
+            answer_reader=FrameworkAnswerReader(client=FailingAnswerClient()),
+            method_manifest={"adapter": "recording-provider-v1"},
+            benchmark_variant="test_variant",
+            run_scope=RunScope.FULL,
+            unified_prompt_builder=unified_builder,
+        )
+
+    compact_records = read_jsonl(
+        context.artifacts_dir / "answer_prompts.prediction.jsonl"
+    )
+    assert [record["question_id"] for record in compact_records] == ["conv-1:q1"]
+    assert "prompt_messages" not in compact_records[0]
+    assert compact_records[0]["formatted_memory"] == "memory for 问题 1"
+    assert compact_records[0]["retrieval_metadata"] == {"provider": "recording"}
+
+    resumed_provider = RecordingMemoryProvider()
+    resumed_client = FakeAnswerLLMClient(answer="resumed compact answer")
+    run_predictions(
+        dataset=dataset,
+        system=resumed_provider,
+        run_context=_create_context(tmp_path, resume=True),
+        policy=PredictionRunPolicy(max_workers=1, resume=True),
+        answer_reader=FrameworkAnswerReader(client=resumed_client),
+        method_manifest={"adapter": "recording-provider-v1"},
+        benchmark_variant="test_variant",
+        run_scope=RunScope.FULL,
+        unified_prompt_builder=unified_builder,
+    )
+
+    assert resumed_provider.retrieved_question_ids == ["conv-1:q2"]
+    assert resumed_client.calls[0]["messages"] == [
+        {
+            "role": "user",
+            "content": (
+                "Question: 问题 1\nMemory: memory for 问题 1\n"
+                "Provider: recording"
+            ),
+        }
     ]
 
 

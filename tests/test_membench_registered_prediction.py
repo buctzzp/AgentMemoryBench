@@ -246,8 +246,8 @@ def test_membench_registered_prediction_offline_probe_workflow(
     assert fake_client.calls, "框架 answer reader 未被调用"
 
     # prompt 结构：含 4 个选项行 + 官方 "only one corresponding letter" 指令
-    for record in answer_prompts:
-        prompt_text = record["prompt_messages"][0]["content"]
+    for record, prompt_text in zip(answer_prompts, fake_client.calls, strict=True):
+        assert "prompt_messages" not in record
         assert "A." in prompt_text
         assert "B." in prompt_text
         assert "C." in prompt_text
