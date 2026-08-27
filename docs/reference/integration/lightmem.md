@@ -774,3 +774,7 @@ Open `47/96`、Single `650/841`；论文百分比反推为 `176/282`、`238/321`
 分别高约 0.70%/3.38%/2.85%。judge 另有 1,540 calls / 631,065 tokens，不混进论文
 memory-con + QA token 对表。W10 本机墙钟、Qdrant product search 与官方脚本的 NumPy
 search/GPU runtime 不直接对表；它们是已披露的部署差异，不改写为“字节级官方复现”。
+按 2026-08-27 OpenAI GPT-4o-mini 标准同步价（input `$0.15/M`、output `$0.60/M`，
+artifact 未保存 cached-token split，故保守按全部 input 未缓存），prediction + judge 的
+5,550,836 input / 228,642 output 对应 `$0.9698106`。APILIO 的真实折扣、加价、缓存和税费
+不由该 OpenAI list-price 收据代替。

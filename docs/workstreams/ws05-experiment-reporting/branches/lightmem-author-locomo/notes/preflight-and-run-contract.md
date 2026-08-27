@@ -196,3 +196,27 @@ prediction token 与官方 README 对表：
 official NumPy retrieval 部署面的共同作用；现有证据不支持把其中任一项单独宣称为唯一因果。
 本机 W10 墙钟 17m37s 也不能与官方 GPU/worker/runtime 直接比较。主 ACC、四类分母、调用量和
 token 均落在窄差异内，本支线判为 `ACCEPTED_AUTHOR_REPRODUCTION`。
+
+## 10. 调用次数与 OpenAI list-price 收据
+
+服务商面板由用户报告 3,507 calls。框架两份 efficiency artifact 可逐条证明的正式 run 成功
+调用是 3,500：
+
+| 阶段 | calls | input tokens | output tokens | OpenAI 未缓存标准价 |
+| --- | ---: | ---: | ---: | ---: |
+| memory build | 420 | 796,832 | 207,778 | $0.2441916 |
+| answer | 1,540 | 4,133,746 | 10,057 | $0.6260961 |
+| judge | 1,540 | 620,258 | 10,807 | $0.0995229 |
+| **正式 run** | **3,500** | **5,550,836** | **228,642** | **$0.9698106** |
+
+开跑前另有两次明确记录的 APILIO transport probe：413 input + 10 output、423 tokens，按同价
+`$0.00006795`；因此当前有证据闭合到 3,502 calls / `$0.96987855`。面板剩余 5 次可能来自
+SDK/provider 自动 retry 或同一统计窗口内较早的连通性请求，但 run/log/artifact 没有它们的成功
+usage，故只记 `unreconciled_request_attempts=5`，不虚构 token 或费用。若 APILIO 能导出逐请求
+日志，再以 request id/timestamp 对账即可关闭。
+
+价格源按 2026-08-27 OpenAI GPT-4o-mini model page：标准同步 input `$0.15/M`、cached input
+`$0.075/M`、output `$0.60/M`。现有 SDK artifact 只记录总 input/output，没有 cached-token split，
+所以本收据保守把全部 input 按未缓存计价；也不宣称等于 APILIO 的真实账单、折扣、加价、税费或
+汇率。机器可读版已写入本 run：
+`summaries/list_price_estimate.gpt-4o-mini.json`。

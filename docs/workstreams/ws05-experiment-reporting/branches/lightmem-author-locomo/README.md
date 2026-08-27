@@ -52,5 +52,12 @@
 substring EM=`0.331818`；post-update semantic lineage 不可证明，LoCoMo Recall 诚实为 N/A。
 BLEU-1 尚未注册，未伪装成已复现。current repair 后全量零 API门为
 `2387 passed, 3 deselected, 25 warnings, 29 subtests passed in 158.69s`。
+
+调用/费用口径也已闭合：正式 run 有 3,500 次成功 SDK usage（420 build + 1,540 answer +
+1,540 judge），开跑前另有 2 次已知极小 transport probe；用户服务商面板显示 3,507，剩余 5 次
+没有成功 usage artifact，只能标记为未闭合 request attempts，不能凭猜测分配 token。正式 run
+5,550,836 input / 228,642 output 按 OpenAI GPT-4o-mini 全部未缓存标准价为 `$0.9698106`；加上
+两个已知 probe 为 `$0.96987855`。机器收据：
+`summaries/list_price_estimate.gpt-4o-mini.json`。
 完整证据、可比性边界与运行收据见
 [preflight and run contract](notes/preflight-and-run-contract.md)。
