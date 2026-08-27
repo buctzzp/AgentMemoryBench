@@ -10,9 +10,9 @@ created: 2026-07-05
 
 - **当前目标**：runtime/观测、十家参数/source/embedding provenance、isolation 并行门与 formal
   精确 cohort 选择已关闭；LightMem 与 SimpleMem 两家 Mimo calibration 均已在自适应样本门收口，
-  当前没有获授权的真实 API run 在途。用户已暂停简单成本外推；下一步等 GPT-4o-mini 经费就绪后，
-  用同一 paired cohort 实测 GPT-4o-mini/Mimo 的真实 SDK usage 比例，再裁成本区间与其余八家，
-  不抢跑。
+  当前没有获授权的真实 API run 在途。五组 paired synthetic probe 已经否决 Mimo→GPT-4o-mini
+  单一 token scalar；下一步若继续，只先跑 LightMem×LoCoMo paired p50 `conv-50` 的真实 stage
+  usage，再决定是否追加 p25/p75，不抢跑。
   [QA task aggregation v3](branches/qa-task-aggregation/README.md) 的 taxonomy、
   answer-only abstention M0、BEAM 三档题分、题目级 pooled micro 与 M1 receipt/write surface 已
   实现；M2 paired bootstrap 仍等待更多 method 的 paired formal 结果，不抢跑。
@@ -56,7 +56,9 @@ created: 2026-07-05
   两家现有 2,176 条 answer artifact 已迁 v2：完整 prompt 不再逐题复制，manifest 只存一次
   builder identity，动态 retrieval payload 与旧回读/resume 保留；总计减少 14,497,228 bytes，见
   [迁移收据](notes/2026-08-27-answer-prompt-artifact-v2.md)。M11 前的 method state 不 resume；
-  作者校准、Mimo calibration 与主 controlled run 分开。
+  作者校准、Mimo calibration 与主 controlled run 分开。Synthetic GPT/Mimo 五组总 token ratio
+  分别为 0.059/0.786/0.872/1.081/0.819，任意合计 0.845 不得用于预算换算；见
+  [synthetic probe](notes/2026-08-27-mimo-gpt4omini-synthetic-token-probe.md)。
 
 ## 目标
 
@@ -69,6 +71,10 @@ created: 2026-07-05
 运行账：
 [`ox 完整 isolation pilot 矩阵账`](notes/2026-08-21-ox-complete-isolation-pilot-ledger.md)。
 
+- 2026-08-27：为避免直接烧三个完整 LoCoMo isolation，先执行 5×2 paired synthetic token
+  probe。GPT/Mimo prompt ratio 随短请求、英文、中文、结构化抽取与 LoCoMo-style context 在
+  0.047–0.999 间变化；结构化 extraction 的 completion ratio 又为 2.352。单一 scalar 机制性失败，
+  禁止使用任意合计 0.845 外推正式成本。若继续，先只跑真实 paired p50 `conv-50`。
 - 2026-08-27：用户发现 `answer_prompts.prediction.jsonl` 逐题复制完整 prompt。current serializer
   已升级为 v2：run manifest 锁一次 builder，benchmark builder 行只落动态 retrieval payload；旧
   v1/native 精确回读保留，compact resume 以公开 question 重建 prompt、不重新检索。LightMem/
@@ -190,9 +196,9 @@ created: 2026-07-05
   `api_usage` 与失败尝试；按运行时点目标模型价格离线外推。GPT-4o-mini 经费优先用于
   LightMem、SimpleMem 及后续由 observation 证明效率较高的方法；A-Mem 等高调用方法允许只给
   低价模型 token 外推，但报告必须标明“非目标模型实测”，不能外推分数或速度。
-- [ ] GPT-4o-mini/Mimo 可迁移性门：在同一 paired isolation、同一 method/benchmark/stage 上
-  分别采集真实 SDK input/output usage 与调用次数；比例稳定才允许点估计，不稳定则给区间。
-  用户补充经费并再次授权前，本项不调用 API，也不先产出简单比例外推。
+- [ ] GPT-4o-mini/Mimo 可迁移性门：synthetic M0 已完成并否决单一 scalar；不得把五组任意合计
+  0.845 用于正式成本。若继续 M1，只在用户再次确认 run identity 后跑 LightMem×LoCoMo paired
+  p50，按 memory build/answer/judge 分 stage 采集 SDK usage；p25/p75 为条件追加。
 - [ ] 自适应样本门：方法间复用同一 public-shape paired cohort；LoCoMo/LME 等先以
   p25/p50/p75 三个完整 isolation 形成首轮外推，MemBench 至少四 lane×三条。只有 shape/token/
   runtime 敏感性足以影响预算决策时才补 p10/p90，不机械要求每个 benchmark 同样 n。

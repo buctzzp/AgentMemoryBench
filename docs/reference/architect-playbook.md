@@ -223,6 +223,12 @@
     重建请求，不重新检索。迁移旧 artifact 前必须逐题重建并与旧 messages 字节比较；旧 v1 messages
     继续回读，没有可调用 builder 的 provider-native 路径仍保存精确请求。不要为省空间删掉
     `formatted_memory`、structured items、evidence 或 question time；那些不是模板冗余。
+45. **跨模型 token 不能先假设单一换算倍率**：先用同 payload 的短/长、不同语言、结构化与自然
+    生成 paired probe 尝试证伪。API usage 可能包含 provider chat-template 固定开销；tokenizer 让
+    input ratio 随语言/长度变化，生成内容又改变 output 及后续 memory state/input。任意 synthetic
+    合计只反映人为样本权重，没有成本 estimand。若 scalar 被拒绝，只能报告原模型实测，或在真正
+    method×benchmark paired isolation 上分 build/answer/judge 采集；不得把一个格子的比例传播到
+    五格十家。
 
 完整历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

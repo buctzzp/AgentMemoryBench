@@ -107,8 +107,9 @@ v3：answer-only abstention M0、BEAM 三档题分与题目级 pooled micro 已�
 结果。LightMem 与 SimpleMem 已用同一 Mimo paired cohort 完成 staged calibration：分别累计
 8,620,622 与 30,894,972 个真实 SDK `api_usage` tokens，conversation/question 零失败。两家十个
 run 的 2,176 条 answer artifact 已经 v2 逐题重建门迁移，不再复制完整 prompt，动态 retrieval/
-resume/evaluator 语义守恒。当前不启动真实 API run，也不做简单成本比例外推；等待用户补充
-GPT-4o-mini 经费后，在同一 paired cohort 实测 GPT-4o-mini/Mimo 的真实 SDK usage 比例再裁下一批。
+resume/evaluator 语义守恒。五组 GPT-4o-mini/Mimo paired synthetic probe 已否决单一 token
+scalar：总 ratio 跨样本为 0.059–1.081；任意合计不得外推预算。当前不启动完整目标模型 run；
+若继续，只先跑 LightMem×LoCoMo paired p50 的分 stage usage，再条件决定 p25/p75。
 
 ## Workstream 索引
 
@@ -125,7 +126,7 @@ GPT-4o-mini 经费后，在同一 paired cohort 实测 GPT-4o-mini/Mimo 的真�
 | [ws02.7](workstreams/ws02.7-method-track/README.md) | method-track-m0 | done | P0 | 5×10 smoke matrix 与 A-Mem B5/GRID 精确 closure 均关闭；无在途施工 |
 | [ws03](workstreams/ws03-architecture-slimming/README.md) | architecture-slimming | done | P0 | M1-A→E 已关闭：依赖方向、TOML profile、worker transport、prediction 拆责与 legacy 退役 |
 | [ws04](workstreams/ws04-terminal-observability/README.md) | terminal-observability | done | P0 | isolated heartbeat 与第三方输出治理已关闭；完整诊断进 method.log |
-| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | in-progress | P0 | profile provenance、并行门、QA M0-R2/M1 与 prompt artifact v2 已闭合；等待 GPT-4o-mini/Mimo 同 cohort usage 比例实验与后续预算裁决 |
+| [ws05](workstreams/ws05-experiment-reporting/README.md) | experiment-reporting | in-progress | P0 | profile provenance、并行门、QA 与 prompt artifact v2 已闭合；synthetic probe 已否决跨模型单一 token scalar，真实 paired p50 待后续预算裁决 |
 | [ws05.1](workstreams/ws05.1-method-profile-provenance/README.md) | method-profile-provenance | done | P1 | 十家纵向机制卡 + M11 source/embedding/run identity v2 已闭合；零 author profile，真实 pilot 待用户批准 |
 | [ws06](workstreams/ws06-tests-restructure/README.md) | tests-restructure | open | P2 | tests 分组重组、大文件拆分、过时断言排查 |
 

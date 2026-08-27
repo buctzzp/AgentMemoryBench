@@ -57,7 +57,7 @@ token 仍以 `tokenizer_estimate` 单列在原始 observation，不混入本表�
 | BEAM rubric judge | 0.4418253968 | 60 | 198 / 145,627 / 12,461 | 0 |
 | HaluMem QA | 0.5783365571 | 517 | 348 / 394,407 / 38,632 | 0 |
 | HaluMem update | 0.7650727651 | 481 | 310 / 1,090,625 / 42,696 | 0 |
-| MemBench choice/source accuracy | 0.7 / 0.6666666667 | 20 / 12 eligible | N/A（离线） | 0 |
+| MemBench choice/source accuracy | 0.7 / 0.7 | 20 / 20 | N/A（离线） | 0 |
 
 其他累计结果：LoCoMo official-style F1=0.4598101317、generic F1=0.4420374483、recall=
 0.6741022639；LongMemEval generic F1=0.0791047117、recall/rank 继续为 N/A；BEAM recall
@@ -70,6 +70,11 @@ LoCoMo、LongMemEval、BEAM 的首批 score/observation 保留门已通过；Hal
 前缀 SHA-256 分别仍为 `9f27a761…` / `7dffc438…`。两项在无新增单元下立即复跑，四份最终
 score/observation SHA-256 全部不变。全部 API LLM observation 都是 `api_usage`，没有用 tokenizer
 估算补账。
+
+> 2026-08-27 freshness correction：首版 source accuracy 行停在第二批中途的 12 题派生
+> summary；prediction/choice score 已达到 20 题。answer artifact v2 验收时用既有 choice score
+> 零 API重跑 source evaluator，current source accuracy 为 14/20=0.7。本修正不改变任何 prediction、
+> choice score、LLM judge 或 token observation。
 
 ## 5. 自适应停表依据
 
