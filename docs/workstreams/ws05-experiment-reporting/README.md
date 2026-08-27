@@ -9,10 +9,11 @@ created: 2026-07-05
 ## Codex 恢复胶囊（2026-08-27）
 
 - **当前目标**：runtime/观测、十家参数/source/embedding provenance、isolation 并行门与 formal
-  精确 cohort 选择已关闭；LightMem 与 SimpleMem 两家 Mimo calibration 均已在自适应样本门收口，
-  当前没有获授权的真实 API run 在途。五组 paired synthetic probe 已经否决 Mimo→GPT-4o-mini
-  单一 token scalar；下一步若继续，只先跑 LightMem×LoCoMo paired p50 `conv-50` 的真实 stage
-  usage，再决定是否追加 p25/p75，不抢跑。
+  精确 cohort 选择已关闭；LightMem 与 SimpleMem 两家 Mimo calibration 已在自适应样本门收口，
+  五组 paired synthetic probe 也已否决 Mimo→GPT-4o-mini 单一 token scalar。用户现已改判并授权
+  [LightMem×LoCoMo author reproduction](branches/lightmem-author-locomo/README.md)：只跑论文
+  `(r=.7, STM=512)` post-update row、10 conversation/1,540 QA、W10、APILIO/GPT-4o-mini answer +
+  显式官方 judge，不扩到其他格子。
   [QA task aggregation v3](branches/qa-task-aggregation/README.md) 的 taxonomy、
   answer-only abstention M0、BEAM 三档题分、题目级 pooled micro 与 M1 receipt/write surface 已
   实现；M2 paired bootstrap 仍等待更多 method 的 paired formal 结果，不抢跑。
@@ -41,11 +42,14 @@ created: 2026-07-05
   runtime/embedder；W2 是最小竞态哨兵，不是能力天花板，显式 worker 接受任意正整数，实际
   数量由 selected isolation 与 execution/resource policy 控制。真实 LightMem HaluMem W10 run
   已证明 3 个 UUID 稳定分到独立 worker lane，UUID 内 session 顺序守恒。
-- **禁止事项**：当前真实 API 授权只覆盖已完成的 LightMem 与 SimpleMem calibration；不得顺带
-  启动其余八家、把旧 embedding build 重标为新 controlled identity，或用 lineage 伪造 metric
+- **禁止事项**：当前新增真实 API 授权只覆盖 LightMem×LoCoMo author reproduction；不得顺带
+  启动其他 method/benchmark、把旧 embedding build 重标为新 controlled identity，或用 lineage 伪造 metric
   资格。2026-08-27 用户明确要求的 answer-prompt serializer v2 迁移已经逐题重建验真并关闭；
   除该有收据迁移外，不得任意改写旧 artifact。
-- **当前动作**：LightMem 最终五格累计 8,620,622 个 SDK `api_usage` tokens，详见
+- **当前动作**：先完成 author-locomo adapter v8、显式 author judge 与 source/runtime identity 的
+  零 API 全量门；通过后直接启动
+  `lm-author-locomo-gpt4omini-r07-th512-postupdate-v1` prediction/evaluate，并持续写收据。
+  历史 LightMem 五格累计 8,620,622 个 SDK `api_usage` tokens，详见
   [LightMem 收据](branches/lightmem-mimo-calibration/notes/second-batch-receipt.md)；SimpleMem 同一
   paired cohort 累计 30,894,972 tokens，12,787 次 API LLM observation 全部为 `api_usage`，详见
   [SimpleMem 收据](branches/simplemem-mimo-calibration/notes/calibration-receipt.md)。SimpleMem 的
@@ -70,6 +74,12 @@ created: 2026-07-05
 
 运行账：
 [`ox 完整 isolation pilot 矩阵账`](notes/2026-08-21-ox-complete-isolation-pilot-ledger.md)。
+
+- 2026-08-27：用户放弃 Mimo→GPT token scalar，把既有 Mimo calibration 定位为框架探路；新增
+  LightMem LoCoMo paper reproduction。目标锁 Table 3 `LightMem(.7,512)` 的 post-update ACC 71.95，
+  answer/judge 均使用 LightMem 官方 harness，W10、APILIO/GPT-4o-mini、10 conversation/1,540 QA。
+  current script `.6` 与 paper/README `.7` 的冲突已按“复现已报告 row”裁为 `.7`；完整合同见
+  [author branch](branches/lightmem-author-locomo/README.md)。
 
 - 2026-08-27：为避免直接烧三个完整 LoCoMo isolation，先执行 5×2 paired synthetic token
   probe。GPT/Mimo prompt ratio 随短请求、英文、中文、结构化抽取与 LoCoMo-style context 在

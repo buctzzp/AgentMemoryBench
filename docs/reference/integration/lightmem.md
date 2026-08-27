@@ -738,3 +738,24 @@ distinct raw timestamps 仍保持，repeated raw timestamps 才形成 method-der
    `No entries found`=WARNING :474/:554），INFO 级连它自己的内部日志文件都不落
    （实测 0 字节）；框架 `logs/method.log` 亦未捕获。真需要内部 INFO 时再查其
    logger 配置，当前不阻塞。
+
+## 2026-08-27：首个正式 `author-locomo` paper row
+
+早先本页与 ws05.1 note 中“author row 尚未注册”的结论由本节取代。当前只注册一个边界明确的
+profile：`author-locomo` = GPT-4o-mini、LoCoMo、paper/README `(r=.7, STM=512)`、post-update。
+它不泛化为 LongMemEval，也不覆盖主表 `[method]`。
+
+- build：`user_only`、每 utterance 真实 user + 空 assistant、作者 caption/time renderer、flat
+  extraction、最后一条 force、full-library offline update threshold .9；
+- retrieval：MiniLM/384、combined product cosine top-60；官方 Python `get_all+cosine` 与 Qdrant
+  product search 的部署面差异进入复现收据；
+- answer：`lightmem_locomo_paper_native_v1` 完整 builder，最终只有一条 system message，
+  temperature=0，不发送 max_tokens/top_p；
+- judge：不会由 answer builder 暗换。evaluate 必须显式传
+  `--judge-profile lightmem_locomo_paper`，逐字使用官方 ACCURACY_PROMPT，并标
+  `metric_tier=author_calibration`；
+- identity：adapter `conversation-qa-v8`、source closure v2、APILIO/GPT-4o-mini runtime、
+  workers 与全部 method 参数进入 manifest/resume；旧 v7/main build 不可 resume。
+
+完整合同与运行收据入口：
+[`lightmem-author-locomo`](../../workstreams/ws05-experiment-reporting/branches/lightmem-author-locomo/README.md)。

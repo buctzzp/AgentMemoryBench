@@ -30,11 +30,16 @@ from memory_benchmark.cli.run_prediction import (
 )
 from memory_benchmark.config import OpenAISettings
 from memory_benchmark.core import ConfigurationError
+from memory_benchmark.evaluators.locomo_judge import LoCoMoJudgeEvaluator
 from memory_benchmark.methods.config_track import (
     build_native_track_identity,
     resolve_config_track,
 )
-from memory_benchmark.methods.registry import resolve_registered_build_identity
+from memory_benchmark.methods.registry import (
+    resolve_method_profile,
+    resolve_registered_build_identity,
+)
+from memory_benchmark.methods.run_identity import build_method_run_identity
 from memory_benchmark.runners import EvaluationRunSummary
 from memory_benchmark.runners.prediction import PredictionRunSummary
 
@@ -523,6 +528,63 @@ def test_execute_evaluate_uses_prediction_api_runtime_for_judge(
     ]
     assert evaluator_calls[0]["model"] == "mimo-v2.5"
     assert evaluator_calls[0]["openai_settings"] is settings
+
+
+def test_explicit_lightmem_author_judge_requires_matching_author_run_identity() -> None:
+    """官方 judge profile 必须与 author answer run 双向配对，不能单边冒充复现。"""
+
+    resolved = resolve_method_profile("lightmem", "author-locomo", PROJECT_ROOT)
+    assert resolved.method_config_manifest is not None
+    run_identity = build_method_run_identity(
+        profile_name=resolved.public_name,
+        profile_section=resolved.section_name,
+        answer_builder=resolved.answer_builder,
+        build_identity=resolve_registered_build_identity(
+            "lightmem",
+            resolved.method_config_manifest,
+        ),
+        project_root=PROJECT_ROOT,
+    )
+    settings = OpenAISettings(
+        api_key="test",
+        base_url="https://apilio.example/v1",
+        model="gpt-4o-mini",
+        provider="apilio",
+        judge_transport="chat_completions",
+    )
+    profile = SimpleNamespace(
+        mode="compact",
+        prompt_profile="lightmem_locomo_paper_native_judge_v1",
+    )
+
+    evaluator = commands._resolve_explicit_author_judge(
+        evaluator=object(),
+        metric_name="locomo-judge",
+        benchmark_name="locomo",
+        evaluator_profile=profile,
+        run_identity=run_identity,
+        judge_model="gpt-4o-mini",
+        project_root=PROJECT_ROOT,
+        openai_settings=settings,
+    )
+
+    assert isinstance(evaluator, LoCoMoJudgeEvaluator)
+    assert evaluator._prompt_profile_override == (
+        "lightmem_locomo_paper_native_judge_v1"
+    )
+    assert evaluator._metric_tier_override == "author_calibration"
+    assert evaluator._official_label_parser is True
+    with pytest.raises(ConfigurationError, match="requires a run built"):
+        commands._resolve_explicit_author_judge(
+            evaluator=object(),
+            metric_name="locomo-judge",
+            benchmark_name="locomo",
+            evaluator_profile=profile,
+            run_identity=None,
+            judge_model="gpt-4o-mini",
+            project_root=PROJECT_ROOT,
+            openai_settings=settings,
+        )
 
 
 def test_execute_evaluate_rejects_api_runtime_environment_drift(

@@ -33,3 +33,27 @@ text_summary = true
 lifecycle_profile = "online_soft"
 missing_timestamp_policy = "preserve_none"
 messages_use = "hybrid"
+locomo_input_profile = "framework_shared_v1"
+
+# LightMem Table 3 的 GPT-4o-mini `(r=0.7, th=512)`、post-update 作者校准轨。
+# 这不是主表配置：它逐项复现 LoCoMo 官方 user-only 输入、图片/时间渲染、
+# combined top-60 与 conversation 末尾全库 offline consolidation（threshold=.9）。
+[author_locomo]
+answer_builder = "lightmem_locomo_paper_native_v1"
+embedding_model_path = "models/all-MiniLM-L6-v2"
+llmlingua_model_path = "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+retrieve_limit = 60
+offline_update_score_threshold = 0.9
+pre_compress = true
+compression_rate = 0.7
+stm_threshold = 512
+topic_segment = true
+text_summary = true
+lifecycle_profile = "locomo_offline_consolidated"
+missing_timestamp_policy = "require"
+messages_use = "user_only"
+locomo_input_profile = "author_harness_v1"
+embedding_dimensions = 384
+embedding_device = "cpu"
+llmlingua_device_map = "cpu"
+extraction_mode = "flat"

@@ -60,8 +60,10 @@
   回读。2026-08-26 新增独立 `calibration` profile：使用
   `opencodego/mimo-v2.5` + `thinking={type:disabled}`，只配合 `predict formal` 的完整、显式
   isolation cohort 做预算/扩大稳定性实验；它不改变 method 主算法和 benchmark answer 参数，也
-  不与 ox 或正式分数混算。`official_full` 与作者正式校准仍使用
-  `primary/gpt-4o-mini`。provider/model/answer transport/judge transport 必须进入
+  不与 ox 或正式分数混算。`official_full` 使用 `primary/gpt-4o-mini`；2026-08-27
+  显式注册的 LightMem `author-locomo` 使用独立 `apilio/gpt-4o-mini` Chat runtime，
+  不构成 primary 失败 fallback，也不自动推广到其他 author profile。provider/model/answer
+  transport/judge transport 必须进入
   manifest/resume identity；不同 runtime 的分数不得直接比较。secret/base URL 只从
   `.env` 读取、不落 artifact。现行细则见
   `docs/reference/api-runtime-profiles.md`。

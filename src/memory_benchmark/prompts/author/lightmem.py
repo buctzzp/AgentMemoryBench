@@ -98,8 +98,8 @@ class LightMemNativeAnswerSettings:
     """LightMem `LLMModel` 的 paper-native answer 调用参数。"""
 
     temperature: float
-    max_tokens: int
-    top_p: float
+    max_tokens: int | None
+    top_p: float | None
 
 
 @dataclass(frozen=True)
@@ -127,7 +127,13 @@ class LightMemNativeJudgeProfile:
     official_source: str
 
 
-LIGHTMEM_NATIVE_ANSWER_SETTINGS = LightMemNativeAnswerSettings(
+LIGHTMEM_LOCOMO_NATIVE_ANSWER_SETTINGS = LightMemNativeAnswerSettings(
+    temperature=0.0,
+    max_tokens=None,
+    top_p=None,
+)
+
+LIGHTMEM_LONGMEMEVAL_NATIVE_ANSWER_SETTINGS = LightMemNativeAnswerSettings(
     temperature=0.0,
     max_tokens=2000,
     top_p=0.8,
@@ -210,7 +216,7 @@ LIGHTMEM_NATIVE_ANSWER_PROFILES = {
     "locomo": LightMemNativeAnswerProfile(
         profile_name=LIGHTMEM_LOCOMO_NATIVE_ANSWER_PROFILE,
         builder=build_lightmem_locomo_native_answer_prompt,
-        settings=LIGHTMEM_NATIVE_ANSWER_SETTINGS,
+        settings=LIGHTMEM_LOCOMO_NATIVE_ANSWER_SETTINGS,
         official_source=(
             "third_party/methods/LightMem/experiments/locomo/"
             "prompts.py:148-190; search_locomo.py:258-280"
@@ -219,7 +225,7 @@ LIGHTMEM_NATIVE_ANSWER_PROFILES = {
     "longmemeval": LightMemNativeAnswerProfile(
         profile_name=LIGHTMEM_LONGMEMEVAL_NATIVE_ANSWER_PROFILE,
         builder=build_lightmem_longmemeval_native_answer_prompt,
-        settings=LIGHTMEM_NATIVE_ANSWER_SETTINGS,
+        settings=LIGHTMEM_LONGMEMEVAL_NATIVE_ANSWER_SETTINGS,
         official_source=(
             "third_party/methods/LightMem/experiments/longmemeval/"
             "run_lightmem_gpt.py:51-80,182-188"
@@ -273,12 +279,13 @@ def lightmem_locomo_native_judge_skips_category(category: str | int | None) -> b
 __all__ = [
     "LIGHTMEM_LOCOMO_NATIVE_ANSWER_PROFILE",
     "LIGHTMEM_LOCOMO_NATIVE_ANSWER_PROMPT",
+    "LIGHTMEM_LOCOMO_NATIVE_ANSWER_SETTINGS",
     "LIGHTMEM_LOCOMO_NATIVE_JUDGE_PROMPT",
     "LIGHTMEM_LONGMEMEVAL_NATIVE_ANSWER_PROFILE",
+    "LIGHTMEM_LONGMEMEVAL_NATIVE_ANSWER_SETTINGS",
     "LIGHTMEM_LONGMEMEVAL_NATIVE_SYSTEM_PROMPT",
     "LIGHTMEM_LONGMEMEVAL_NATIVE_USER_PROMPT",
     "LIGHTMEM_NATIVE_ANSWER_PROFILES",
-    "LIGHTMEM_NATIVE_ANSWER_SETTINGS",
     "LIGHTMEM_NATIVE_JUDGE_PROFILES",
     "LightMemNativeAnswerProfile",
     "LightMemNativeAnswerSettings",

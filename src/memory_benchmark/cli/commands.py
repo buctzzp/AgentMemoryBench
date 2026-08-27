@@ -31,6 +31,10 @@ from memory_benchmark.methods.config_track import (
     resolve_config_track,
 )
 from memory_benchmark.methods.run_identity import MethodRunIdentity
+from memory_benchmark.prompts.author.lightmem import (
+    LIGHTMEM_NATIVE_ANSWER_PROFILES,
+    LIGHTMEM_NATIVE_JUDGE_PROFILES,
+)
 from memory_benchmark.runners.registered_prediction import (
     PredictionBatchResult,
     run_registered_conversation_qa_prediction,
@@ -200,7 +204,7 @@ def execute_evaluate(command: EvaluateCommand) -> tuple[Any, ...]:
     run_dir = _resolve_run_dir(root, command.run_id)
     manifest = _read_manifest(run_dir)
     benchmark_name = _required_manifest_text(manifest, "benchmark_name")
-    track_identity, native_bundle = _resolve_evaluation_track_identity(
+    track_identity, native_bundle, run_identity = _resolve_evaluation_track_identity(
         manifest=manifest,
         benchmark_name=benchmark_name,
     )
@@ -237,6 +241,16 @@ def execute_evaluate(command: EvaluateCommand) -> tuple[Any, ...]:
                 profile_name=profile.mode,
                 model=judge_model,
                 project_root=str(root),
+                openai_settings=run_api_settings,
+            )
+            evaluator = _resolve_explicit_author_judge(
+                evaluator=evaluator,
+                metric_name=metric_name,
+                benchmark_name=benchmark_name,
+                evaluator_profile=profile,
+                run_identity=run_identity,
+                judge_model=judge_model,
+                project_root=root,
                 openai_settings=run_api_settings,
             )
             if (
@@ -326,7 +340,11 @@ def _resolve_evaluation_track_identity(
     *,
     manifest: dict[str, Any],
     benchmark_name: str,
-) -> tuple[TrackIdentity | None, ConfigTrackBundle | None]:
+) -> tuple[
+    TrackIdentity | None,
+    ConfigTrackBundle | None,
+    MethodRunIdentity | None,
+]:
     """解析并交叉校验 evaluate 所消费的 method track identity。
 
     缺 v1 的历史 artifact 保留旧 evaluate 兼容；一旦声明 v1，就必须严格解析完整
@@ -335,7 +353,7 @@ def _resolve_evaluation_track_identity(
 
     method_manifest = manifest.get("method")
     if not isinstance(method_manifest, dict):
-        return None, None
+        return None, None, None
     method_name = _required_manifest_text(manifest, "method_name")
     config_track = method_manifest.get("config_track")
     contract_version = method_manifest.get("contract_version")
@@ -353,10 +371,10 @@ def _resolve_evaluation_track_identity(
             )
         if not isinstance(raw_run_identity, dict):
             raise ConfigurationError("method.run_identity must be an object")
-        MethodRunIdentity.from_manifest_dict(raw_run_identity)
-        # 新 profile run 的 judge 始终由 benchmark 统一 evaluator 选择；run identity
-        # 只在此做完整性校验，不再解析旧 native judge bundle。
-        return None, None
+        run_identity = MethodRunIdentity.from_manifest_dict(raw_run_identity)
+        # 新 profile run 不再解析旧 native judge bundle；显式 evaluator profile
+        # 可以在后续独立选择有身份的作者校准 judge。
+        return None, None, run_identity
 
     if contract_version is None:
         if raw_identity is not None:
@@ -370,8 +388,8 @@ def _resolve_evaluation_track_identity(
                 method_name,
                 benchmark_name,
                 "native",
-            )
-        return None, None
+            ), None
+        return None, None, None
 
     if contract_version != CONTRACT_VERSION:
         raise ConfigurationError(
@@ -410,7 +428,7 @@ def _resolve_evaluation_track_identity(
                 "native track identity disagrees with registered readout bundle: "
                 f"expected={expected}, actual={actual}"
             )
-        return identity, bundle
+        return identity, bundle, None
 
     if config_track not in (None, "unified"):
         raise ConfigurationError(f"Unknown method config_track={config_track!r}")
@@ -418,7 +436,55 @@ def _resolve_evaluation_track_identity(
         raise ConfigurationError(
             "unified method manifest requires track identity readout_track='unified'"
         )
-    return identity, None
+    return identity, None, None
+
+
+def _resolve_explicit_author_judge(
+    *,
+    evaluator: Any,
+    metric_name: str,
+    benchmark_name: str,
+    evaluator_profile: Any,
+    run_identity: MethodRunIdentity | None,
+    judge_model: str,
+    project_root: Path,
+    openai_settings: OpenAISettings | None,
+) -> Any:
+    """把显式 evaluator profile 解析为已锁定的作者 judge。
+
+    `answer_builder` 不暗中选择 judge；只有调用方明确传入作者 evaluator profile
+    才会进入本分支，并且该 profile 必须与 run 的作者 answer builder 同时匹配。
+    """
+
+    prompt_profile = getattr(evaluator_profile, "prompt_profile", "benchmark")
+    if prompt_profile == "benchmark":
+        return evaluator
+    native_judge = LIGHTMEM_NATIVE_JUDGE_PROFILES["locomo"]
+    native_answer = LIGHTMEM_NATIVE_ANSWER_PROFILES["locomo"]
+    if prompt_profile != native_judge.profile_name:
+        raise ConfigurationError(
+            f"Unsupported explicit judge prompt profile: {prompt_profile!r}"
+        )
+    if metric_name != native_judge.evaluator_key or benchmark_name != "locomo":
+        raise ConfigurationError(
+            "LightMem LoCoMo paper judge requires locomo-judge on benchmark 'locomo'"
+        )
+    if run_identity is None or run_identity.answer_builder != native_answer.profile_name:
+        raise ConfigurationError(
+            "LightMem LoCoMo paper judge requires a run built with answer_builder "
+            f"{native_answer.profile_name!r}"
+        )
+    return LoCoMoJudgeEvaluator(
+        mode=evaluator_profile.mode,
+        model=judge_model,
+        project_root=str(project_root),
+        openai_settings=openai_settings,
+        prompt_template_override=native_judge.prompt_template,
+        skipped_categories=native_judge.skipped_categories,
+        prompt_profile_override=native_judge.profile_name,
+        metric_tier_override="author_calibration",
+        official_label_parser=True,
+    )
 
 
 def execute_run(command: RunCommand) -> RunCommandResult:

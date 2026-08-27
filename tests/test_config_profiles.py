@@ -14,6 +14,7 @@ import pytest
 
 from memory_benchmark.config.profiles import load_typed_profile
 from memory_benchmark.config.settings import (
+    APILIO_API_PROVIDER,
     CHAT_COMPLETIONS_JUDGE_TRANSPORT,
     OPENCODEGO_API_PROVIDER,
     RESPONSES_JUDGE_TRANSPORT,
@@ -132,8 +133,17 @@ def test_retired_method_controls_fail_fast_for_new_profiles(
 
     project_profile = PROJECT_ROOT / "configs" / "methods" / f"{method_name}.toml"
     test_profile = tmp_path / f"{method_name}.toml"
+    profile_text = project_profile.read_text(encoding="utf-8")
+    if "\n[author_" in profile_text:
+        profile_text = profile_text.replace(
+            "\n[author_",
+            f"\n{retired_assignment}\n\n[author_",
+            1,
+        )
+    else:
+        profile_text += f"\n{retired_assignment}\n"
     test_profile.write_text(
-        project_profile.read_text(encoding="utf-8") + f"\n{retired_assignment}\n",
+        profile_text,
         encoding="utf-8",
     )
 
@@ -313,6 +323,88 @@ def test_load_openai_settings_reads_explicit_opencodego_profile(
     }
     assert "unit-test-opencode-key" not in repr(runtime)
     assert "opencode.example" not in repr(runtime)
+
+
+def test_load_openai_settings_reads_explicit_apilio_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """作者校准可从 APILIO 独立槽精确恢复 GPT-4o-mini runtime。"""
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "APILIO_API_KEY=unit-test-apilio-key",
+                "APILIO_base_url=https://apilio.example/v1",
+                "APILIO_model_name=gpt-4o-mini",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    for key in (
+        "APILIO_API_KEY",
+        "APILIO_base_url",
+        "APILIO_BASE_URL",
+        "APILIO_model_name",
+        "APILIO_MODEL_NAME",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = load_openai_settings(
+        project_root=tmp_path,
+        env_file=env_file,
+        api_provider=APILIO_API_PROVIDER,
+        expected_model="gpt-4o-mini",
+    )
+
+    assert settings.provider == "apilio"
+    assert settings.model == "gpt-4o-mini"
+    assert settings.judge_transport == CHAT_COMPLETIONS_JUDGE_TRANSPORT
+    assert settings.chat_completions_request_overrides() == {}
+    runtime = settings.to_runtime_manifest_dict()
+    assert runtime == {
+        "contract_version": "v2",
+        "provider": "apilio",
+        "model": "gpt-4o-mini",
+        "answer_transport": "chat_completions",
+        "judge_transport": "chat_completions",
+        "thinking_mode": "provider_default",
+    }
+    assert "unit-test-apilio-key" not in repr(runtime)
+    assert "apilio.example" not in repr(runtime)
+
+
+def test_load_openai_settings_rejects_apilio_model_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """APILIO 当前模型与 run identity 不同时必须在 API 前失败。"""
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "APILIO_API_KEY=test\n"
+        "APILIO_base_url=https://apilio.example/v1\n"
+        "APILIO_model_name=another-model\n",
+        encoding="utf-8",
+    )
+    for key in (
+        "APILIO_API_KEY",
+        "APILIO_base_url",
+        "APILIO_BASE_URL",
+        "APILIO_model_name",
+        "APILIO_MODEL_NAME",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    with pytest.raises(ConfigurationError, match="does not match expected"):
+        load_openai_settings(
+            project_root=tmp_path,
+            env_file=env_file,
+            api_provider=APILIO_API_PROVIDER,
+            expected_model="gpt-4o-mini",
+        )
 
 
 @pytest.mark.parametrize(
@@ -514,6 +606,7 @@ def test_load_openai_settings_rejects_unconfigured_expected_opencodego_model(
     ("provider", "judge_transport"),
     (
         ("opencodego", RESPONSES_JUDGE_TRANSPORT),
+        ("apilio", RESPONSES_JUDGE_TRANSPORT),
         ("primary", CHAT_COMPLETIONS_JUDGE_TRANSPORT),
     ),
 )
@@ -532,14 +625,20 @@ def test_openai_settings_rejects_provider_transport_contradiction(
         )
 
 
-@pytest.mark.parametrize(
-    "profile_name",
-    ("official-full", "official_full", "author-locomo", "author_locomo"),
-)
-def test_formal_and_author_profiles_use_primary_provider(profile_name: str) -> None:
-    """正式主表与作者校准不能因 smoke 预算路由而切到 opencodego。"""
+@pytest.mark.parametrize("profile_name", ("official-full", "official_full"))
+def test_formal_profiles_use_primary_provider(profile_name: str) -> None:
+    """正式主表不能因 smoke 或作者校准路由而切换 provider。"""
 
     assert resolve_api_provider_for_profile(profile_name) == "primary"
+
+
+@pytest.mark.parametrize("profile_name", ("author-locomo", "author_locomo"))
+def test_lightmem_author_locomo_profile_uses_apilio_provider(
+    profile_name: str,
+) -> None:
+    """当前 LightMem LoCoMo 作者校准显式锁 APILIO/GPT-4o-mini。"""
+
+    assert resolve_api_provider_for_profile(profile_name) == "apilio"
 
 
 def test_calibration_profile_uses_opencodego_provider() -> None:
@@ -591,6 +690,47 @@ def test_load_typed_profile_builds_matching_memoryos_smoke_and_official_profiles
     assert official_full.embedding_model_name == "models/all-MiniLM-L6-v2"
     assert smoke_resolved.method_config_manifest == (
         official_resolved.method_config_manifest
+    )
+
+
+def test_lightmem_author_locomo_profile_is_complete_and_independent() -> None:
+    """LightMem 作者轨应锁 paper row、官方输入/lifecycle 与独立 GPT runtime。"""
+
+    resolved = resolve_method_profile(
+        "lightmem",
+        "author-locomo",
+        PROJECT_ROOT,
+    )
+    config = resolved.config
+
+    assert isinstance(config, LightMemConfig)
+    assert resolved.public_name == "author-locomo"
+    assert resolved.section_name == "author_locomo"
+    assert resolved.answer_builder == "lightmem_locomo_paper_native_v1"
+    assert resolved.composition.runtime.provider == "apilio"
+    assert resolved.composition.runtime.model == "gpt-4o-mini"
+    assert resolved.composition.resolved_max_workers == 10
+    assert config.profile_name == "author_locomo"
+    assert config.llm_model == "gpt-4o-mini"
+    assert config.max_workers == 10
+    assert config.retrieve_limit == 60
+    assert config.pre_compress is True
+    assert config.compression_rate == 0.7
+    assert config.stm_threshold == 512
+    assert config.topic_segment is True
+    assert config.text_summary is True
+    assert config.lifecycle_profile == "locomo_offline_consolidated"
+    assert config.offline_update_score_threshold == 0.9
+    assert config.missing_timestamp_policy == "require"
+    assert config.messages_use == "user_only"
+    assert config.locomo_input_profile == "author_harness_v1"
+    assert config.embedding_dimensions == 384
+    assert config.extraction_mode == "flat"
+    assert resolved.method_config_manifest is not None
+    assert "llm_model" not in resolved.method_config_manifest
+    assert "max_workers" not in resolved.method_config_manifest
+    assert resolved.method_config_manifest["locomo_input_profile"] == (
+        "author_harness_v1"
     )
 
 

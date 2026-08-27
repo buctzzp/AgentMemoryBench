@@ -14,6 +14,7 @@
 | `pilot` | `opencodego` | `ox-alpha-free` | Chat Completions | Chat Completions | 一个完整 isolation 的调用拓扑与成本 observation |
 | `calibration` | `opencodego` | `mimo-v2.5` | Chat Completions | Chat Completions | 显式完整 cohort 的预算与扩大稳定性实验 |
 | `official_full` | `primary` | `gpt-4o-mini` | Chat Completions | Responses；官方 evaluator 自带 Chat 路径时保持其路径 | 主配置正式实验 |
+| `author-locomo` | `apilio` | `gpt-4o-mini` | Chat Completions | Chat Completions | LightMem LoCoMo paper row 作者校准 |
 
 这是**运行身份差异**，不是暗中 fallback。新 `smoke` 与旧
 历史 `deepseek-v4-flash`/`muse-spark-1.2-contributor`/旧 `mimo-v2.5` smoke、旧 `gpt-4o-mini` smoke 与
@@ -40,6 +41,9 @@ opencode_model_name   / OPENCODE_MODEL_NAME
 opencode_model_name_2 / OPENCODE_MODEL_NAME_2
 opencode_model_name_3 / OPENCODE_MODEL_NAME_3
 opencode_model_name_4 / OPENCODE_MODEL_NAME_4
+APILIO_API_KEY
+APILIO_base_url       / APILIO_BASE_URL
+APILIO_model_name     / APILIO_MODEL_NAME
 ```
 
 小写键优先。当前新 smoke 使用第四槽 `opencode_model_name_4`，并必须逐字等于 tracked
@@ -52,6 +56,10 @@ identity `ox-alpha-free`；第一槽保留旧 `deepseek-v4-flash`，第二槽保
 tracked TOML 只声明公开模型身份。prediction 在 secret load 前用 tracked identity 预检，
 evaluate 则按旧 run manifest 的模型在已配置 slot 中精确匹配；找不到就 fail-fast，不能用
 当前默认模型改写历史。
+
+`author-locomo` 使用独立 APILIO 槽；model 必须逐字等于 `gpt-4o-mini`。它不是 primary
+失败后的 fallback，也不会被其他 author profile 自动继承。key/base URL 仍只在 secret load
+阶段读取，manifest 只写 `provider=apilio`、model 与 Chat transport identity。
 
 ## 3. Transport 兼容性
 

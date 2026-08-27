@@ -162,6 +162,59 @@ class JudgePromptBuilderTest(unittest.TestCase):
             "framework_auxiliary_lightmem_reference_v1",
         )
 
+    def test_locomo_author_judge_tags_separate_calibration_identity(self) -> None:
+        """作者 judge 逐字 prompt 仍须标 author_calibration，不能污染主指标。"""
+
+        client = _FakeJudgeChatClient(response_text='{"label": "CORRECT"}')
+        result = LoCoMoJudgeEvaluator(
+            mode="compact",
+            model="gpt-4o-mini",
+            client=client,
+            prompt_template_override=(
+                "Question: {question}\nGold: {gold_answer}\n"
+                "Generated: {generated_answer}"
+            ),
+            prompt_profile_override="lightmem_locomo_paper_native_judge_v1",
+            metric_tier_override="author_calibration",
+            official_label_parser=True,
+        ).evaluate(self.question, self.prediction, self.gold)
+
+        self.assertEqual(result.details["metric_tier"], "author_calibration")
+        self.assertEqual(
+            result.details["prompt_profile"],
+            "lightmem_locomo_paper_native_judge_v1",
+        )
+
+    def test_locomo_author_parser_preserves_official_case_and_code_fence_semantics(
+        self,
+    ) -> None:
+        """官方 parser 只把精确 CORRECT 计 1，并支持上游 extract_json code fence。"""
+
+        lowercase = LoCoMoJudgeEvaluator(
+            mode="compact",
+            model="gpt-4o-mini",
+            client=_FakeJudgeChatClient(response_text='{"label": "correct"}'),
+            official_label_parser=True,
+        ).evaluate(self.question, self.prediction, self.gold)
+        fenced = LoCoMoJudgeEvaluator(
+            mode="compact",
+            model="gpt-4o-mini",
+            client=_FakeJudgeChatClient(
+                response_text='```json\n{"label": "CORRECT"}\n```'
+            ),
+            official_label_parser=True,
+        ).evaluate(self.question, self.prediction, self.gold)
+
+        self.assertFalse(lowercase.is_correct)
+        self.assertTrue(fenced.is_correct)
+        with self.assertRaises(JudgeOutputError):
+            LoCoMoJudgeEvaluator(
+                mode="compact",
+                model="gpt-4o-mini",
+                client=_FakeJudgeChatClient(response_text="CORRECT"),
+                official_label_parser=True,
+            ).evaluate(self.question, self.prediction, self.gold)
+
     def test_longmemeval_compact_prompt_requests_official_yes_no(self) -> None:
         """LongMemEval compact 模式应逐字保留官方 yes/no 输出要求。"""
 

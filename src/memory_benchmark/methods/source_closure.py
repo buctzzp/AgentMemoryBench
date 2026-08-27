@@ -73,6 +73,7 @@ _RECIPES: dict[str, MethodSourceRecipe] = {
                 "author_eval",
                 "third_party/methods/LightMem/experiments/locomo/add_locomo.py",
                 "third_party/methods/LightMem/experiments/locomo/search_locomo.py",
+                "third_party/methods/LightMem/experiments/locomo/llm_judge.py",
                 "third_party/methods/LightMem/experiments/locomo/prompts.py",
                 "third_party/methods/LightMem/experiments/longmemeval/run_lightmem_gpt.py",
                 "src/memory_benchmark/prompts/author/lightmem.py",

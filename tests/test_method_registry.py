@@ -687,6 +687,20 @@ def test_registered_profiles_declare_benchmark_answer_builder(
     assert resolved.config.profile_name == resolved.section_name
 
 
+def test_lightmem_registry_exposes_only_the_closed_author_locomo_profile() -> None:
+    """LightMem 当前只注册已闭合的 LoCoMo paper row，不泛化其他 author 名。"""
+
+    registration = get_method_registration("lightmem")
+    assert "author-locomo" in registration.profile_names
+    resolved = resolve_method_profile(
+        method_name="lightmem",
+        profile_name="author-locomo",
+        project_root=Path(__file__).resolve().parents[1],
+    )
+    assert resolved.section_name == "author_locomo"
+    assert resolved.answer_builder == "lightmem_locomo_paper_native_v1"
+
+
 def test_new_run_profile_requires_answer_builder_without_weakening_config_loader(
     tmp_path: Path,
 ) -> None:

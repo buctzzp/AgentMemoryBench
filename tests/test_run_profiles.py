@@ -135,8 +135,8 @@ def test_current_profiles_resolve_without_method_algorithm_config() -> None:
     assert official.resolved_max_workers == 1
 
 
-def test_author_profile_uses_formal_runtime_without_inventing_method_section() -> None:
-    """作者校准 run 应复用 formal runtime/execution，而不是隐式降到 smoke。"""
+def test_author_profile_uses_explicit_apilio_runtime_and_full_execution() -> None:
+    """作者校准应锁独立 GPT runtime 与 full-size execution，不隐式降 smoke。"""
 
     composition = load_run_composition(
         project_root=PROJECT_ROOT,
@@ -144,8 +144,12 @@ def test_author_profile_uses_formal_runtime_without_inventing_method_section() -
         method_max_workers_cap=10,
     )
 
-    assert composition.runtime.profile_name == "official_full"
-    assert composition.runtime.provider == "primary"
+    assert composition.runtime.profile_name == "author_locomo"
+    assert composition.runtime.provider == "apilio"
+    assert composition.runtime.model == "gpt-4o-mini"
+    assert composition.runtime.to_manifest_dict()["judge_transport"] == (
+        "chat_completions"
+    )
     assert composition.resolved_max_workers == 10
 
 

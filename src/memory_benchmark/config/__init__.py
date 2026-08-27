@@ -12,6 +12,7 @@ from .run_profiles import (
     load_run_composition,
 )
 from .settings import (
+    APILIO_API_PROVIDER,
     AppSettings,
     AnswerLLMSettings,
     CHAT_COMPLETIONS_JUDGE_TRANSPORT,
@@ -31,6 +32,7 @@ from .settings import (
 )
 
 __all__ = [
+    "APILIO_API_PROVIDER",
     "AppSettings",
     "AnswerLLMSettings",
     "ApiRuntimeProfile",

@@ -8,6 +8,7 @@ compact 模式下解析 JSON `{"label": "CORRECT"}`。
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from memory_benchmark.config import load_settings
@@ -48,6 +49,8 @@ class LoCoMoJudgeEvaluator(LLMJudgeEvaluator):
         prompt_template_override: str | None = None,
         skipped_categories: frozenset[str] = frozenset(),
         prompt_profile_override: str | None = None,
+        metric_tier_override: str | None = None,
+        official_label_parser: bool = False,
         **kwargs: Any,
     ) -> None:
         """初始化 LoCoMo judge，可选注入已锁定的 method-native judge 语义。"""
@@ -56,6 +59,8 @@ class LoCoMoJudgeEvaluator(LLMJudgeEvaluator):
         self._prompt_template_override = prompt_template_override
         self._skipped_categories = skipped_categories
         self._prompt_profile_override = prompt_profile_override
+        self._metric_tier_override = metric_tier_override
+        self._official_label_parser = official_label_parser
 
     def should_skip_category(self, category: str | int | None) -> bool:
         """判断 native profile 是否按官方规则跳过当前 category。"""
@@ -135,7 +140,11 @@ class LoCoMoJudgeEvaluator(LLMJudgeEvaluator):
         self._record_judge_llm_call(model_response)
 
         if self.mode.strip().lower() == "compact":
-            label = self._parse_compact_label(model_response.text)
+            label = (
+                self._parse_official_label(model_response.text)
+                if self._official_label_parser
+                else self._parse_compact_label(model_response.text)
+            )
             is_correct = label == "CORRECT"
             return MetricResult(
                 metric_name=self.metric_name,
@@ -143,7 +152,7 @@ class LoCoMoJudgeEvaluator(LLMJudgeEvaluator):
                 is_correct=is_correct,
                 details={
                     "raw_judge_response": model_response.text,
-                    "metric_tier": self.metric_tier,
+                    "metric_tier": self._metric_tier_override or self.metric_tier,
                     "prompt_profile": (
                         self._prompt_profile_override or self.prompt_profile
                     ),
@@ -158,7 +167,7 @@ class LoCoMoJudgeEvaluator(LLMJudgeEvaluator):
             details={
                 "reason": decision.reason,
                 "raw_judge_response": model_response.text,
-                "metric_tier": self.metric_tier,
+                "metric_tier": self._metric_tier_override or self.metric_tier,
                 "prompt_profile": self._prompt_profile_override or self.prompt_profile,
             },
         )
@@ -227,6 +236,26 @@ class LoCoMoJudgeEvaluator(LLMJudgeEvaluator):
                 "compact JSON label must be CORRECT or WRONG"
             )
         return label.upper()
+
+    @staticmethod
+    def _parse_official_label(text: str) -> str:
+        """逐字复现 LightMem `extract_json()+label` 的大小写与错误语义。"""
+
+        stripped = text.strip()
+        match = re.search(r"```(?:json)?\s*(.*?)\s*```", stripped, re.DOTALL)
+        raw_json = match.group(1) if match else stripped
+        try:
+            payload = json.loads(raw_json)
+        except json.JSONDecodeError as exc:
+            raise JudgeOutputError(
+                "official compact output must be a JSON object"
+            ) from exc
+        if not isinstance(payload, dict) or "label" not in payload:
+            raise JudgeOutputError("official compact JSON must contain label")
+        label = payload["label"]
+        if not isinstance(label, str):
+            raise JudgeOutputError("official compact JSON label must be a string")
+        return label
 
     @staticmethod
     def _tokenizer(model: str) -> Any:

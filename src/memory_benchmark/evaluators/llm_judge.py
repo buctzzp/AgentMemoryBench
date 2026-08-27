@@ -131,10 +131,12 @@ class LLMJudgeProfileConfig:
     字段:
         mode: 输出模式，只允许 `compact` 或 `detailed`。
         model: judge 使用的模型名称。
+        prompt_profile: evaluator 使用的 prompt/计分身份；默认 `benchmark`。
     """
 
     mode: str
     model: str
+    prompt_profile: str = "benchmark"
 
     def __post_init__(self) -> None:
         """校验输出模式和模型名称。"""
@@ -143,6 +145,13 @@ class LLMJudgeProfileConfig:
             raise ConfigurationError(f"Unsupported judge mode: {self.mode}")
         if not self.model.strip():
             raise ConfigurationError("Judge model is required")
+        if (
+            not self.prompt_profile.strip()
+            or self.prompt_profile != self.prompt_profile.strip()
+        ):
+            raise ConfigurationError(
+                "Judge prompt_profile must be a non-blank trimmed string"
+            )
 
 
 @dataclass(frozen=True)

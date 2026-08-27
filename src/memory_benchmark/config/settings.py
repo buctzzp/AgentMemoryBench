@@ -18,10 +18,11 @@ from memory_benchmark.core import ConfigurationError
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 PRIMARY_API_PROVIDER = "primary"
 OPENCODEGO_API_PROVIDER = "opencodego"
+APILIO_API_PROVIDER = "apilio"
 OPENCODEGO_SMOKE_MODEL = "ox-alpha-free"
 _OPENCODEGO_REASONING_EFFORT_LOW_MODELS = frozenset({"ox-alpha-free"})
 SUPPORTED_API_PROVIDERS = frozenset(
-    {PRIMARY_API_PROVIDER, OPENCODEGO_API_PROVIDER}
+    {APILIO_API_PROVIDER, PRIMARY_API_PROVIDER, OPENCODEGO_API_PROVIDER}
 )
 RESPONSES_JUDGE_TRANSPORT = "responses"
 CHAT_COMPLETIONS_JUDGE_TRANSPORT = "chat_completions"
@@ -140,9 +141,9 @@ class OpenAISettings:
                 f"Unsupported judge transport: {self.judge_transport!r}"
             )
         expected_transport = (
-            CHAT_COMPLETIONS_JUDGE_TRANSPORT
-            if self.provider == OPENCODEGO_API_PROVIDER
-            else RESPONSES_JUDGE_TRANSPORT
+            RESPONSES_JUDGE_TRANSPORT
+            if self.provider == PRIMARY_API_PROVIDER
+            else CHAT_COMPLETIONS_JUDGE_TRANSPORT
         )
         if self.judge_transport != expected_transport:
             raise ConfigurationError(
@@ -227,9 +228,9 @@ def build_api_runtime_manifest(
     if not normalized_model:
         raise ConfigurationError("API runtime model must not be blank")
     judge_transport = (
-        CHAT_COMPLETIONS_JUDGE_TRANSPORT
-        if normalized_provider == OPENCODEGO_API_PROVIDER
-        else RESPONSES_JUDGE_TRANSPORT
+        RESPONSES_JUDGE_TRANSPORT
+        if normalized_provider == PRIMARY_API_PROVIDER
+        else CHAT_COMPLETIONS_JUDGE_TRANSPORT
     )
     return {
         "contract_version": "v2",
@@ -481,7 +482,7 @@ def load_openai_settings(
     输入:
         project_root: 项目根目录；为空时使用当前工作目录推断。
         env_file: `.env` 文件路径；为空时默认读取 `project_root/.env`。
-        api_provider: `primary` 或 `opencodego`。
+        api_provider: `primary`、`opencodego` 或 `apilio`。
         expected_model: manifest/profile 已声明的公开模型。OpenCodeGo 会在已配置
             model slot 中精确匹配它；为空时选择当前第四槽 smoke 模型。
 
@@ -582,6 +583,34 @@ def load_openai_settings(
                 f"{expected_model!r}"
             )
         judge_transport = CHAT_COMPLETIONS_JUDGE_TRANSPORT
+    elif normalized_provider == APILIO_API_PROVIDER:
+        api_key = _first_non_empty_env("APILIO_API_KEY")
+        base_url = _first_non_empty_env("APILIO_base_url", "APILIO_BASE_URL")
+        configured_model = _first_non_empty_env(
+            "APILIO_model_name",
+            "APILIO_MODEL_NAME",
+        )
+        missing = [
+            field_name
+            for field_name, value in (
+                ("APILIO_API_KEY", api_key),
+                ("APILIO_base_url", base_url),
+                ("APILIO_model_name", configured_model),
+            )
+            if value is None
+        ]
+        if missing:
+            raise ConfigurationError(
+                "Missing apilio setting(s): " + ", ".join(missing)
+            )
+        assert configured_model is not None
+        if expected_model is not None and configured_model != expected_model:
+            raise ConfigurationError(
+                "APILIO model does not match expected runtime identity: "
+                f"{configured_model!r} != {expected_model!r}"
+            )
+        model = configured_model
+        judge_transport = CHAT_COMPLETIONS_JUDGE_TRANSPORT
     else:
         raise ConfigurationError(
             f"Unsupported API provider: {api_provider!r}; expected one of "
@@ -603,6 +632,8 @@ def resolve_api_provider_for_profile(profile_name: str) -> str:
     normalized = profile_name.strip().lower()
     if normalized in {"smoke", "pilot", "calibration"}:
         return OPENCODEGO_API_PROVIDER
+    if normalized in {"author-locomo", "author_locomo"}:
+        return APILIO_API_PROVIDER
     if (
         normalized in {"official-full", "official_full"}
         or normalized.startswith("author-")
@@ -620,7 +651,7 @@ def resolve_api_model_for_provider(api_provider: str) -> str:
     normalized = api_provider.strip().lower()
     if normalized == OPENCODEGO_API_PROVIDER:
         return OPENCODEGO_SMOKE_MODEL
-    if normalized == PRIMARY_API_PROVIDER:
+    if normalized in {APILIO_API_PROVIDER, PRIMARY_API_PROVIDER}:
         return DEFAULT_OPENAI_MODEL
     raise ConfigurationError(
         f"Unsupported API provider: {api_provider!r}"

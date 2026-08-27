@@ -229,6 +229,12 @@
     合计只反映人为样本权重，没有成本 estimand。若 scalar 被拒绝，只能报告原模型实测，或在真正
     method×benchmark paired isolation 上分 build/answer/judge 采集；不得把一个格子的比例传播到
     五格十家。
+46. **作者复现要审最终 effective experiment，不是只对超参数和 prompt 字符串**：同时锁数据
+    分母/跳题、输入 role/time/image、每次 product 调用粒度、flush/update 时点、retrieval candidate
+    与顺序、最终 message/decode、judge parser/tier。LightMem LoCoMo 判例中，category 5 是否在
+    answer 前排除、top-60 首次命中的 speaker 顺序，以及 current script `.6` 与 paper/README `.7`
+    的冲突，都会让“看似同 prompt”不再是 71.95 的同一 estimand。source 冲突必须明确选择复现
+    目标并留收据；product-equivalent retrieval 也要披露，不能写成 byte-identical harness。
 
 完整历史原则与实例见
 [`casebook-through-2026-07-23.md`](playbooks/architect/casebook-through-2026-07-23.md#3-核心原则每条都有本项目实战出处出处可在对应-notes-复查)。

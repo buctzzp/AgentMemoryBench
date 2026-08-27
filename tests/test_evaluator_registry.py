@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from memory_benchmark.config import OpenAISettings
@@ -47,6 +49,7 @@ from memory_benchmark.evaluators.registry import (
 
 
 pytestmark = pytest.mark.unit
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_registry_lists_only_currently_supported_unified_metrics() -> None:
@@ -314,13 +317,15 @@ def test_membench_source_accuracy_registration_is_offline_and_scoped() -> None:
 
 
 def test_locomo_judge_registration_requires_api_and_valid_profile() -> None:
-    """LoCoMo judge 应声明 API 成本，并只接受 compact/detailed profile。"""
+    """LoCoMo judge 应声明 API 成本，并显式注册 benchmark/author profiles。"""
 
     registration = get_evaluator_registration("locomo-judge")
 
     assert registration.metric_name == "locomo_judge_accuracy"
     assert registration.requires_api is True
-    assert registration.profile_names == frozenset({"compact", "detailed"})
+    assert registration.profile_names == frozenset(
+        {"compact", "detailed", "lightmem_locomo_paper"}
+    )
     assert registration.profile_relative_path is not None
 
     settings = OpenAISettings(
@@ -406,6 +411,22 @@ model = "gpt-4o-mini"
     assert config == LLMJudgeProfileConfig(
         mode="compact",
         model="gpt-4o-mini",
+    )
+
+
+def test_load_lightmem_locomo_paper_judge_profile_from_project() -> None:
+    """作者 judge 必须是显式 evaluator 配置，不由 answer builder 暗中切换。"""
+
+    config = load_evaluator_profile(
+        metric_name="locomo-judge",
+        profile_name="lightmem_locomo_paper",
+        project_root=PROJECT_ROOT,
+    )
+
+    assert config == LLMJudgeProfileConfig(
+        mode="compact",
+        model="gpt-4o-mini",
+        prompt_profile="lightmem_locomo_paper_native_judge_v1",
     )
 
 

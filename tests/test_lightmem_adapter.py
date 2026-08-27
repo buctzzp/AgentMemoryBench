@@ -79,6 +79,9 @@ from memory_benchmark.runners.prediction import (
 from tests.equivalence_utils import run_legacy_sequence, run_native_sequence
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 def test_lightmem_config_rejects_invalid_retrieve_limit() -> None:
     """retrieve_limit 是 method 内部检索数量，必须为正数。"""
 
@@ -136,12 +139,10 @@ def test_lightmem_config_accepts_valid_lifecycle_profiles(
     assert config.lifecycle_profile == lifecycle_profile
 
 
-def test_lightmem_config_manifest_includes_lifecycle_profile_and_adapter_version_v7() -> None:
+def test_lightmem_config_manifest_includes_lifecycle_profile_and_adapter_version_v8() -> None:
     """公开 manifest 必须携带 lifecycle_profile、missing_timestamp_policy 与
-    messages_use，adapter_version 升级为 v7：公共 unified readout 改用产品级
-    ISO timestamp 格式、新增真实 embedding observation、legacy provenance
-    metadata 改读同一份 v1 evidence，均属可观测契约变化，旧 v6 manifest 必须
-    被全 manifest 比较拒绝 resume（即便记忆构建算法本身未变）。"""
+    messages_use/LoCoMo 输入身份，adapter_version 升级为 v8：显式区分主表
+    shared renderer 与作者 harness renderer，旧 v7 build 不得跨身份 resume。"""
 
     config = LightMemConfig(
         llm_model="gpt-4o-mini",
@@ -159,7 +160,8 @@ def test_lightmem_config_manifest_includes_lifecycle_profile_and_adapter_version
     assert manifest["lifecycle_profile"] == "online_soft"
     assert manifest["missing_timestamp_policy"] == "require"
     assert manifest["messages_use"] == "user_only"
-    assert manifest["adapter_version"] == LIGHTMEM_ADAPTER_VERSION == "conversation-qa-v7"
+    assert manifest["locomo_input_profile"] == "framework_shared_v1"
+    assert manifest["adapter_version"] == LIGHTMEM_ADAPTER_VERSION == "conversation-qa-v8"
     assert manifest["adapter_version"] != "conversation-qa-v6"
 
 
@@ -192,6 +194,55 @@ def test_lightmem_toml_profiles_declare_online_soft_lifecycle_explicitly() -> No
     assert smoke_resolved.method_config_manifest == (
         official_resolved.method_config_manifest
     )
+
+
+@pytest.mark.parametrize(
+    ("override", "expected_fragment"),
+    [
+        ({"lifecycle_profile": "online_soft"}, "lifecycle_profile"),
+        ({"missing_timestamp_policy": "preserve_none"}, "missing_timestamp_policy"),
+        ({"messages_use": "hybrid"}, "messages_use"),
+    ],
+)
+def test_lightmem_author_input_profile_rejects_mixed_algorithm_identity(
+    override: dict[str, str],
+    expected_fragment: str,
+) -> None:
+    """author renderer 不能与主表 lifecycle/time/role 轴拼成不存在的混合轨。"""
+
+    values = {
+        "llm_model": "gpt-4o-mini",
+        "embedding_model_path": "models/all-MiniLM-L6-v2",
+        "llmlingua_model_path": (
+            "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+        ),
+        "retrieve_limit": 60,
+        "max_workers": 1,
+        "lifecycle_profile": "locomo_offline_consolidated",
+        "missing_timestamp_policy": "require",
+        "messages_use": "user_only",
+        "locomo_input_profile": "author_harness_v1",
+    }
+    values.update(override)
+
+    with pytest.raises(ConfigurationError, match=expected_fragment):
+        LightMemConfig(**values)
+
+
+def test_lightmem_rejects_unknown_locomo_input_profile() -> None:
+    """LoCoMo 输入 renderer 身份必须来自封闭枚举。"""
+
+    with pytest.raises(ConfigurationError, match="locomo_input_profile"):
+        LightMemConfig(
+            llm_model="gpt-4o-mini",
+            embedding_model_path="models/all-MiniLM-L6-v2",
+            llmlingua_model_path=(
+                "models/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+            ),
+            retrieve_limit=60,
+            max_workers=1,
+            locomo_input_profile="paper-ish",
+        )
 
 
 def test_lightmem_source_identity_covers_official_core_files() -> None:
@@ -241,7 +292,7 @@ def test_lightmem_source_identity_changes_with_sensory_buffer_bytes(
 
     assert before["source_sha256"] != after["source_sha256"]
     assert before["file_count"] == after["file_count"] == len(required_files)
-    assert LIGHTMEM_ADAPTER_VERSION == "conversation-qa-v7"
+    assert LIGHTMEM_ADAPTER_VERSION == "conversation-qa-v8"
 
 
 def test_lightmem_can_import_official_lightmemory_class() -> None:
@@ -6103,6 +6154,20 @@ def _caption_lightmem_system(benchmark_name: str) -> LightMem:
     )
 
 
+def _author_locomo_lightmem_system(
+    backend: FakeLightMemoryBackend | None = None,
+) -> LightMem:
+    """构造完整 author-locomo 配置的零 API LightMem。"""
+
+    resolved = resolve_method_profile("lightmem", "author-locomo", PROJECT_ROOT)
+    return LightMem(
+        config=resolved.config,
+        backend_factory=lambda _id: backend or FakeLightMemoryBackend(),
+        answer_client=FakeLightMemAnswerClient(),
+        benchmark_name="locomo",
+    )
+
+
 def _caption_image_ref(caption: str | None, index: int) -> ImageRef:
     """构造带 caption 的 canonical ImageRef，并在非 caption 通道埋入干扰字符串。
 
@@ -6152,6 +6217,166 @@ def _caption_locomo_conversation(
             "speaker_b": "Bob",
         },
     )
+
+
+def test_lightmem_author_locomo_payload_and_post_update_match_official_harness() -> None:
+    """author 轨锁图片、时间、空 assistant、末批 force 与 post-update .9。"""
+
+    backend = FakeLightMemoryBackend()
+    system = _author_locomo_lightmem_system(backend)
+    conversation = Conversation(
+        conversation_id="conv-author",
+        sessions=[
+            Session(
+                session_id="s-1",
+                session_time="(1:56 pm on 8 May, 2023)",
+                turns=[
+                    Turn(
+                        turn_id="D1:1",
+                        speaker="Alice",
+                        content="I like tea.",
+                        images=[_caption_image_ref("a red teapot", 0)],
+                    ),
+                    Turn(
+                        turn_id="D1:2",
+                        speaker="Bob",
+                        content="I will remember that.",
+                    ),
+                ],
+            )
+        ],
+        questions=[
+            Question(
+                question_id="q-author",
+                conversation_id="conv-author",
+                text="What does Alice like?",
+            )
+        ],
+        metadata={"speaker_a": "Alice", "speaker_b": "Bob"},
+    )
+
+    legacy_first = system._normalize_session_to_pairs(
+        conversation.sessions[0], conversation
+    )[0]
+    first_event = list(
+        build_turn_events(conversation, isolation_key="conv-author")
+    )[0]
+    native_first = system._native_turn_batch(first_event)
+
+    assert legacy_first == native_first
+    user_message, assistant_message = legacy_first
+    assert user_message["content"] == (
+        "I like tea. (image description: a red teapot)"
+    )
+    assert "Sharing image that shows" not in user_message["content"]
+    assert user_message["time_stamp"] == "2023-05-08 13:56:00"
+    assert assistant_message["role"] == "assistant"
+    assert assistant_message["content"] == ""
+    assert assistant_message["time_stamp"] == "2023-05-08 13:56:00"
+
+    system.add(conversation)
+
+    assert len(backend.added_messages) == 2
+    assert backend.added_messages[0]["kwargs"]["force_extract"] is False
+    assert backend.added_messages[1]["kwargs"]["force_extract"] is True
+    assert backend.construct_update_calls == [{}]
+    assert backend.offline_update_calls == [{"score_threshold": 0.9}]
+
+
+def test_lightmem_author_locomo_backend_config_locks_reported_row() -> None:
+    """最终 LightMemory.from_config payload 必须锁 r=.7/th=512 相关有效轴。"""
+
+    resolved = resolve_method_profile("lightmem", "author-locomo", PROJECT_ROOT)
+    backend_config = LightMem.build_backend_config(
+        config=resolved.config,
+        openai_settings=OpenAISettings(
+            api_key="test",
+            base_url="https://example.invalid/v1",
+            model="gpt-4o-mini",
+            provider="apilio",
+            judge_transport="chat_completions",
+        ),
+        storage_root=PROJECT_ROOT / "tmp" / "author-locomo-test-state",
+        conversation_id="conv-author",
+        project_root=PROJECT_ROOT,
+    )
+
+    assert backend_config["pre_compress"] is True
+    assert backend_config["pre_compressor"]["configs"]["compress_config"] == {
+        "instruction": "",
+        "rate": 0.7,
+        "target_token": -1,
+    }
+    assert backend_config["topic_segment"] is True
+    assert backend_config["precomp_topic_shared"] is True
+    assert backend_config["messages_use"] == "user_only"
+    assert backend_config["metadata_generate"] is True
+    assert backend_config["text_summary"] is True
+    assert backend_config["update"] == "offline"
+    assert backend_config["extraction_mode"] == "flat"
+    assert backend_config["lightmem_profile"] == {
+        "compression_rate": 0.7,
+        "stm_threshold": 512,
+    }
+
+
+def test_lightmem_author_locomo_answer_slots_follow_first_retrieved_speaker() -> None:
+    """官方 answer builder 的 speaker 顺序来自 top-60 首次命中，不是固定 A/B。"""
+
+    system = _author_locomo_lightmem_system()
+    system._conversation_metadata["conv-author"] = {
+        "speaker_a": "Alice",
+        "speaker_b": "Bob",
+    }
+    question = Question(
+        question_id="q-author",
+        conversation_id="conv-author",
+        text="Who remembered tea?",
+    )
+    memories = [
+        {
+            "payload": {
+                "speaker_name": "Bob",
+                "memory": "Bob remembered tea.",
+                "time_stamp": "2023-05-08T13:56:00",
+                "weekday": "Mon",
+            }
+        },
+        {
+            "payload": {
+                "speaker_name": "Alice",
+                "memory": "Alice likes tea.",
+                "time_stamp": "2023-05-08T13:55:00",
+                "weekday": "Mon",
+            }
+        },
+    ]
+
+    prompt = system._build_locomo_answer_prompt(question, memories)
+
+    assert prompt.index("Memories for user Bob:") < prompt.index(
+        "Memories for user Alice:"
+    )
+    assert prompt.index("Bob remembered tea.") < prompt.index("Alice likes tea.")
+
+
+def test_lightmem_author_locomo_zero_hit_uses_official_generic_speaker_slots() -> None:
+    """零命中时官方 prompt 使用 Speaker 1/2，不泄露 dataset speaker metadata。"""
+
+    system = _author_locomo_lightmem_system()
+    system._conversation_metadata["conv-author"] = {
+        "speaker_a": "Alice",
+        "speaker_b": "Bob",
+    }
+    prompt = system._build_locomo_answer_prompt(
+        Question("q", "conv-author", "Unknown?"),
+        [],
+    )
+
+    assert "Memories for user Speaker 1:" in prompt
+    assert "Memories for user Speaker 2:" in prompt
+    assert "Memories for user Alice:" not in prompt
+    assert prompt.count("No memories available.") == 2
 
 
 @pytest.mark.parametrize(

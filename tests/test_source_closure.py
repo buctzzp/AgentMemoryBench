@@ -36,7 +36,7 @@ EXPECTED_COMPONENT_COUNTS = {
         "product_algorithm": 63,
         "package_metadata": 1,
         "framework_runtime": 1,
-        "author_eval": 5,
+        "author_eval": 6,
     },
     "amem": {
         "product_algorithm": 4,

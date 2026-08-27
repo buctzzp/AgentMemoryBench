@@ -12,7 +12,6 @@ from typing import Any, Literal, Mapping, TypeAlias, cast, get_args
 from memory_benchmark.config.settings import AnswerLLMSettings, DEFAULT_OPENAI_MODEL
 from memory_benchmark.core import ConfigurationError
 from memory_benchmark.prompts.author.lightmem import (
-    LIGHTMEM_NATIVE_ANSWER_PROFILES,
     LIGHTMEM_NATIVE_JUDGE_PROFILES,
     LightMemNativeJudgeProfile,
 )
@@ -377,17 +376,20 @@ def build_native_track_identity(
 
 
 def _lightmem_bundle(benchmark: str) -> ConfigTrackBundle:
-    """构造 LightMem 官方 readout bundle。"""
+    """构造 LightMem 历史 native readout bundle。
 
-    settings = LIGHTMEM_NATIVE_ANSWER_PROFILES[benchmark].settings
+    旧 native prediction 当时把 LoCoMo/LME 共用的 `2000/.8` 写入 manifest；
+    本模块只负责历史回读，不能随当前 author profile 的精确调用修正而改写。
+    """
+
     return ConfigTrackBundle(
         answer_prompt_source="provider_prompt_messages",
         answer_llm_settings=AnswerLLMSettings(
             model=DEFAULT_OPENAI_MODEL,
             message_role="user",
-            temperature=settings.temperature,
-            max_tokens=settings.max_tokens,
-            top_p=settings.top_p,
+            temperature=0.0,
+            max_tokens=2000,
+            top_p=0.8,
         ),
         judge_profile=LIGHTMEM_NATIVE_JUDGE_PROFILES[benchmark],
         judge_source="official_parity",

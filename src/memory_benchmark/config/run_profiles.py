@@ -195,6 +195,8 @@ def _profile_section_name(profile_name: str) -> str:
         return normalized
     if normalized in {"official-full", "official_full"}:
         return "official_full"
+    if normalized in {"author-locomo", "author_locomo"}:
+        return "author_locomo"
     if normalized.startswith("author-") or normalized.startswith("author_"):
         return "official_full"
     raise ConfigurationError(f"Unsupported run profile: {profile_name!r}")

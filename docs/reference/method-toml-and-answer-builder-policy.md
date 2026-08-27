@@ -165,10 +165,12 @@ answer 构造。官方模板若需要 speaker 分组、日期、检索条目、�
 5. **可审计 artifact**：最终构造好的 messages 与 builder 身份进入公开 answer artifact/
    manifest；不能只记录一个模板文件名。
 
-`answer_builder` **不选择 judge**。主配置与作者校准都继续使用当前 benchmark 注册的统一
+`answer_builder` **不选择 judge**。主配置与普通作者校准继续使用当前 benchmark 注册的统一
 evaluator/judge LLM、prompt 与计分语义；不能因选了 method 官方 answer builder 就暗换 judge。
-若未来确需复现 method harness 的专属 judge，只能另立带身份与指标 tier 的补充研究卡，经用户
-拍板后实施，不能借 `author_<benchmark>` 默默带入。
+若要复现 method harness 的专属 judge，必须由 evaluate 命令显式选择独立 evaluator profile，
+锁 prompt/model/transport/parser/skipped cohort/metric tier，并与 prediction 的作者 builder identity
+交叉校验。2026-08-27 的 `lightmem_locomo_paper` 是首个判例：它只接受
+`lightmem_locomo_paper_native_v1` answer run，输出标 `author_calibration`，不污染主表 judge。
 
 现有代码中，benchmark unified builder 已直接返回 `AnswerPromptResult`；部分 method 官方路径
 则由 adapter 在 retrieve 阶段提前构造 `prompt_messages`，后层 builder 只做验证/透传。后者

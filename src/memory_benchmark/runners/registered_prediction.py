@@ -62,6 +62,9 @@ from memory_benchmark.observability.efficiency import (
     ModelDescriptor,
     RetrievalObservationContract,
 )
+from memory_benchmark.prompts.author.lightmem import (
+    LIGHTMEM_NATIVE_ANSWER_PROFILES,
+)
 from memory_benchmark.readers import (
     FrameworkAnswerReader,
     OpenAICompatibleAnswerLLMClient,
@@ -393,6 +396,10 @@ def run_registered_conversation_qa_prediction(
         profile_name=profile_name,
         project_root=path_settings.project_root,
     )
+    _validate_author_profile_benchmark(
+        profile_name=resolved_profile.public_name,
+        benchmark_name=benchmark_name,
+    )
     config = resolved_profile.config
     use_framework_answer_reader = (
         MethodCapability.MEMORY_RETRIEVAL
@@ -516,6 +523,10 @@ def run_registered_conversation_qa_prediction(
             benchmark_name=benchmark_registration.name,
             model=api_model,
         )
+        base_answer_settings = _apply_registered_author_answer_settings(
+            answer_settings=base_answer_settings,
+            answer_builder=resolved_profile.answer_builder,
+        )
         (
             answer_llm_settings,
             answer_compatibility_note,
@@ -528,7 +539,11 @@ def run_registered_conversation_qa_prediction(
         _build_answer_reader_manifest(
             project_root=path_settings.project_root,
             prompt_file=answer_prompt_file,
-            profile_name=answer_prompt_profile,
+            profile_name=(
+                resolved_profile.answer_builder
+                if resolved_profile.answer_builder != "benchmark"
+                else answer_prompt_profile
+            ),
             answer_settings=answer_llm_settings,
             api_runtime_manifest=api_runtime_manifest,
             provider_compatibility_note=answer_compatibility_note,
@@ -576,7 +591,11 @@ def run_registered_conversation_qa_prediction(
             answer_reader_manifest=answer_reader_manifest,
             prompt_track=(
                 prompt_track
-                if use_framework_answer_reader and prompt_track == "unified"
+                if (
+                    use_framework_answer_reader
+                    and resolved_profile.answer_builder == "benchmark"
+                    and prompt_track == "unified"
+                )
                 else None
             ),
             retrieval_evidence_contract_version=getattr(
@@ -712,7 +731,11 @@ def run_registered_conversation_qa_prediction(
             prompt_template=load_answer_prompt_template(
                 project_root=path_settings.project_root,
                 prompt_file=answer_prompt_file,
-                profile_name=answer_prompt_profile,
+                profile_name=(
+                    resolved_profile.answer_builder
+                    if resolved_profile.answer_builder != "benchmark"
+                    else answer_prompt_profile
+                ),
             ),
         )
     results: list[PredictionVariantResult] = []
@@ -1398,6 +1421,13 @@ def _resolve_registered_answer_builder(
     参数与最终消息校准后再在此注册，不能靠名字猜测或自动按 benchmark 切换。
     """
 
+    locomo_profile = LIGHTMEM_NATIVE_ANSWER_PROFILES["locomo"]
+    if answer_builder == locomo_profile.profile_name:
+        if benchmark_registration.name != "locomo":
+            raise ConfigurationError(
+                "LightMem LoCoMo author answer builder requires benchmark 'locomo'"
+            )
+        return locomo_profile.builder
     if answer_builder != "benchmark":
         raise ConfigurationError(
             f"Answer builder '{answer_builder}' is not registered for new runs"
@@ -1409,6 +1439,42 @@ def _resolve_registered_answer_builder(
             "registered answer builder"
         )
     return builder
+
+
+def _validate_author_profile_benchmark(
+    *,
+    profile_name: str,
+    benchmark_name: str,
+) -> None:
+    """拒绝把显式 `author-<benchmark>` profile 用到另一 benchmark。"""
+
+    normalized = profile_name.strip().lower().replace("_", "-")
+    if not normalized.startswith("author-"):
+        return
+    expected_benchmark = normalized.removeprefix("author-")
+    if expected_benchmark != benchmark_name.strip().lower().replace("_", "-"):
+        raise ConfigurationError(
+            f"Author profile '{profile_name}' requires benchmark "
+            f"'{expected_benchmark}', got '{benchmark_name}'"
+        )
+
+
+def _apply_registered_author_answer_settings(
+    *,
+    answer_settings: AnswerLLMSettings,
+    answer_builder: str,
+) -> AnswerLLMSettings:
+    """按已注册完整 builder 同步作者 harness 的 answer decode 参数。"""
+
+    profile = LIGHTMEM_NATIVE_ANSWER_PROFILES["locomo"]
+    if answer_builder != profile.profile_name:
+        return answer_settings
+    return replace(
+        answer_settings,
+        temperature=profile.settings.temperature,
+        max_tokens=profile.settings.max_tokens,
+        top_p=profile.settings.top_p,
+    )
 
 
 def _resolve_adapter_smoke_history_limit(

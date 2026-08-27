@@ -374,7 +374,9 @@ _REGISTRATIONS = {
         metric_name="locomo_judge_accuracy",
         supported_benchmarks=frozenset({"locomo"}),
         requires_api=True,
-        profile_names=frozenset({"compact", "detailed"}),
+        profile_names=frozenset(
+            {"compact", "detailed", "lightmem_locomo_paper"}
+        ),
         profile_relative_path=Path("configs/evaluators/llm_judge.toml"),
         config_type=LLMJudgeProfileConfig,
         factory=_build_locomo_judge,

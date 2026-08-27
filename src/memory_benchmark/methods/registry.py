@@ -1986,6 +1986,10 @@ _MAIN_PROFILE_SECTIONS = (
     ("official-full", "method"),
 )
 
+_LIGHTMEM_PROFILE_SECTIONS = _MAIN_PROFILE_SECTIONS + (
+    ("author-locomo", "author_locomo"),
+)
+
 _REGISTRATIONS = {
     "amem": MethodRegistration(
         name="amem",
@@ -2125,7 +2129,7 @@ _REGISTRATIONS = {
                 MethodCapability.MEMORY_RETRIEVAL,
             }
         ),
-        profile_sections=_MAIN_PROFILE_SECTIONS,
+        profile_sections=_LIGHTMEM_PROFILE_SECTIONS,
         profile_relative_path=Path("configs/methods/lightmem.toml"),
         config_type=LightMemConfig,
         requires_api=True,
@@ -2418,7 +2422,13 @@ def _load_registered_method_section(
     requested = registration.resolve_profile_section(profile_name)
     try:
         section = load_profile_section(profile_path, requested)
-        return section, requested == "method"
+        if requested == "method":
+            return section, True
+        try:
+            load_profile_section(profile_path, "method")
+        except ConfigurationError:
+            return section, False
+        return section, True
     except ConfigurationError as exc:
         if requested != "method" or "Missing profile section 'method'" not in str(exc):
             raise
@@ -2477,7 +2487,12 @@ def _build_current_method_config(
         config_type=registration.config_type,
         composition=composition,
     )
-    overlap = sorted(set(section.values).intersection(bindings))
+    method_values = {
+        key: value
+        for key, value in section.values.items()
+        if key not in FRAMEWORK_PROFILE_KEYS
+    }
+    overlap = sorted(set(method_values).intersection(bindings))
     if overlap:
         raise ConfigurationError(
             "Single-source method section must not redeclare framework-owned key(s): "
@@ -2486,7 +2501,7 @@ def _build_current_method_config(
     merged = ProfileSection(
         source_path=section.source_path,
         name=section.name,
-        values={**section.values, **bindings},
+        values={**method_values, **bindings},
     )
     config = build_typed_profile(merged, registration.config_type)
     manifest = config.to_manifest()
@@ -2582,7 +2597,7 @@ def resolve_method_profile(
     )
     method_config_manifest: dict[str, Any] | None = None
     if current_single_source:
-        if "answer_builder" in section.values:
+        if section_name == "method" and "answer_builder" in section.values:
             raise ConfigurationError(
                 "Main [method] section must not declare answer_builder; benchmark "
                 "evaluation owns the main builder"

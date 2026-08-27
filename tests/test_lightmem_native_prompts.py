@@ -97,16 +97,21 @@ def test_longmemeval_native_judge_reuses_existing_official_evaluator() -> None:
     assert (profile.temperature, profile.max_tokens, profile.n) == (0.0, 10, 1)
 
 
-def test_native_answer_parameters_match_lightmem_llm_model() -> None:
-    """两个 native answer profile 应共用官方 LLMModel 三个采样参数。"""
+def test_native_answer_parameters_match_each_official_final_call() -> None:
+    """LoCoMo 与 LME 的最终 API 调用参数不同，不能再误共用一组默认。"""
 
-    for benchmark in ("locomo", "longmemeval"):
-        settings = LIGHTMEM_NATIVE_ANSWER_PROFILES[benchmark].settings
-        assert (settings.temperature, settings.max_tokens, settings.top_p) == (
-            0.0,
-            2000,
-            0.8,
-        )
+    locomo = LIGHTMEM_NATIVE_ANSWER_PROFILES["locomo"].settings
+    longmemeval = LIGHTMEM_NATIVE_ANSWER_PROFILES["longmemeval"].settings
+    assert (locomo.temperature, locomo.max_tokens, locomo.top_p) == (
+        0.0,
+        None,
+        None,
+    )
+    assert (longmemeval.temperature, longmemeval.max_tokens, longmemeval.top_p) == (
+        0.0,
+        2000,
+        0.8,
+    )
 
 
 def test_native_and_unified_locomo_answer_tracks_are_textually_distinct() -> None:

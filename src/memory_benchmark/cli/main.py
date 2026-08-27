@@ -98,7 +98,11 @@ def _build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument(
         "--judge-profile",
         default="compact",
-        choices=["compact", "detailed"],
+        metavar="PROFILE",
+        help=(
+            "Evaluator profile (default: compact). Metric-specific author profiles "
+            "are validated by the evaluator registry."
+        ),
     )
     evaluate_parser.add_argument(
         "--allow-api",
@@ -131,7 +135,11 @@ def _build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--judge-profile",
         default="compact",
-        choices=["compact", "detailed"],
+        metavar="PROFILE",
+        help=(
+            "Evaluator profile (default: compact). Metric-specific author profiles "
+            "are validated by the evaluator registry."
+        ),
     )
 
     calibration_parser = subparsers.add_parser(

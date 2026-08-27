@@ -73,10 +73,14 @@ from memory_benchmark.observability.efficiency import (
 
 
 LIGHTMEM_METHOD_DIRECTORY = "LightMem"
-LIGHTMEM_ADAPTER_VERSION = "conversation-qa-v7"
+LIGHTMEM_ADAPTER_VERSION = "conversation-qa-v8"
 LIGHTMEM_MESSAGES_USE_VALUES = ("user_only", "assistant_only", "hybrid")
 LIGHTMEM_LIFECYCLE_PROFILES = ("online_soft", "locomo_offline_consolidated")
 LIGHTMEM_MISSING_TIMESTAMP_POLICIES = ("preserve_none", "require")
+LIGHTMEM_LOCOMO_INPUT_PROFILES = (
+    "framework_shared_v1",
+    "author_harness_v1",
+)
 # Phase 1 已注册的 benchmark 身份；identity 不在此集合时 provenance 记 pending。
 _LIGHTMEM_REGISTERED_BENCHMARKS = frozenset(
     {"locomo", "longmemeval", "halumem", "beam", "membench"}
@@ -100,8 +104,17 @@ LIGHTMEM_MODEL_DOWNLOADS = {
 }
 
 
-def _message_content(turn: Turn) -> str:
-    """仅在存在可渲染 caption 时拼接图片，否则原样保留正文。"""
+def _message_content(turn: Turn, *, locomo_input_profile: str) -> str:
+    """按显式 LoCoMo 输入身份渲染正文与图片 caption。"""
+
+    if locomo_input_profile == "author_harness_v1":
+        content = turn.content
+        for image in turn.images:
+            if image.caption and image.caption.strip():
+                content = (
+                    f"{content} (image description: {image.caption.strip()})"
+                )
+        return content
 
     if any(image.caption and image.caption.strip() for image in turn.images):
         return turn_text_with_images(turn)
@@ -173,6 +186,10 @@ class LightMemConfig:
             profile）。dataclass 默认保持 `user_only`，避免直接构造时暗中改变
             reproduction；TOML 的 smoke 与 official_full 都显式写 `hybrid`。
             backend config 必须从本字段读取，禁止硬编码。
+        locomo_input_profile: LoCoMo adapter 输入映射身份。主表
+            `framework_shared_v1` 使用跨 method 共享图片 wrapper 与规范时间；作者校准
+            `author_harness_v1` 逐字采用 LightMem `add_locomo.py` 的
+            `(image description: ...)` 与 `%Y-%m-%d %H:%M:%S`。
         profile_name: 可审计 profile 名称。
     """
 
@@ -197,6 +214,7 @@ class LightMemConfig:
     lifecycle_profile: str = "online_soft"
     missing_timestamp_policy: str = "require"
     messages_use: str = "user_only"
+    locomo_input_profile: str = "framework_shared_v1"
     profile_name: str = "custom"
 
     def __post_init__(self) -> None:
@@ -262,6 +280,21 @@ class LightMemConfig:
             raise ConfigurationError(
                 f"LightMem messages_use must be one of: {allowed}; "
                 f"got {self.messages_use!r}"
+            )
+        if self.locomo_input_profile not in LIGHTMEM_LOCOMO_INPUT_PROFILES:
+            allowed = ", ".join(LIGHTMEM_LOCOMO_INPUT_PROFILES)
+            raise ConfigurationError(
+                f"LightMem locomo_input_profile must be one of: {allowed}"
+            )
+        if self.locomo_input_profile == "author_harness_v1" and (
+            self.lifecycle_profile != "locomo_offline_consolidated"
+            or self.missing_timestamp_policy != "require"
+            or self.messages_use != "user_only"
+        ):
+            raise ConfigurationError(
+                "LightMem locomo_input_profile='author_harness_v1' requires "
+                "lifecycle_profile='locomo_offline_consolidated', "
+                "missing_timestamp_policy='require', and messages_use='user_only'"
             )
 
     def validate_required_local_resources(self, path_settings: PathSettings) -> None:
@@ -490,6 +523,14 @@ class LightMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
                 "full-library mutation and must not be inferred from data "
                 "shape, path names, or question fields."
             )
+        if (
+            self.config.locomo_input_profile == "author_harness_v1"
+            and self.benchmark_name != "locomo"
+        ):
+            raise ConfigurationError(
+                "LightMem locomo_input_profile='author_harness_v1' requires "
+                f"explicit benchmark_name='locomo'; got {self.benchmark_name!r}"
+            )
 
     def _normalize_session_to_pairs(
         self,
@@ -590,7 +631,10 @@ class LightMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
         )
         return {
             "role": role,
-            "content": _message_content(turn),
+            "content": _message_content(
+                turn,
+                locomo_input_profile=self.config.locomo_input_profile,
+            ),
             "speaker_id": turn.speaker,
             "speaker_name": turn.speaker,
             "time_stamp": timestamp,
@@ -643,14 +687,23 @@ class LightMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
     ) -> list[dict[str, object]]:
         """LoCoMo 官方 named-speaker pair：真实 user + 空 assistant。"""
 
-        timestamp = _turn_timestamp(
-            turn, session, self.config.missing_timestamp_policy
+        timestamp = (
+            _locomo_author_timestamp(turn, session)
+            if self.config.locomo_input_profile == "author_harness_v1"
+            else _turn_timestamp(
+                turn,
+                session,
+                self.config.missing_timestamp_policy,
+            )
         )
         speaker_id = _locomo_speaker_id(conversation, turn)
         speaker_name = turn.speaker
         user_msg: dict[str, object] = {
             "role": "user",
-            "content": _message_content(turn),
+            "content": _message_content(
+                turn,
+                locomo_input_profile=self.config.locomo_input_profile,
+            ),
             "speaker_id": speaker_id,
             "speaker_name": speaker_name,
             "time_stamp": timestamp,
@@ -1885,14 +1938,22 @@ class LightMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
     ) -> str:
         """使用 LightMem LoCoMo `ANSWER_PROMPT` 的 speaker 分组布局。"""
 
-        metadata = self._conversation_metadata.get(question.conversation_id, {})
-        speaker_a = str(metadata.get("speaker_a") or "Speaker 1")
-        speaker_b = str(metadata.get("speaker_b") or "Speaker 2")
-        speaker_a_memories, speaker_b_memories = _split_memories_by_speaker(
-            memories,
-            speaker_a,
-            speaker_b,
-        )
+        if self.config.locomo_input_profile == "author_harness_v1":
+            (
+                speaker_a,
+                speaker_a_memories,
+                speaker_b,
+                speaker_b_memories,
+            ) = _author_locomo_speaker_groups(memories)
+        else:
+            metadata = self._conversation_metadata.get(question.conversation_id, {})
+            speaker_a = str(metadata.get("speaker_a") or "Speaker 1")
+            speaker_b = str(metadata.get("speaker_b") or "Speaker 2")
+            speaker_a_memories, speaker_b_memories = _split_memories_by_speaker(
+                memories,
+                speaker_a,
+                speaker_b,
+            )
         answer_prompt = _load_lightmem_locomo_prompt(
             self.path_settings,
             "ANSWER_PROMPT",
@@ -2083,6 +2144,22 @@ def _turn_timestamp(
     return raw_timestamp
 
 
+def _locomo_author_timestamp(turn: Turn, session: Session) -> str:
+    """逐字复现 LightMem `add_locomo.py::parse_locomo_timestamp()` 的时间输出。"""
+
+    raw_timestamp = turn.turn_time or session.session_time
+    if not raw_timestamp:
+        raise ConfigurationError(
+            f"LightMem author LoCoMo profile requires source time for turn {turn.turn_id}"
+        )
+    normalized = raw_timestamp.strip("()")
+    try:
+        parsed = datetime.strptime(normalized, "%I:%M %p on %d %B, %Y")
+    except (ValueError, TypeError):
+        return normalized
+    return parsed.strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _locomo_time_to_lightmem(raw_time: str) -> str | None:
     """尝试把 LoCoMo 数据集的时间格式转为 LightMem 认可的格式。
 
@@ -2187,6 +2264,40 @@ def _split_memories_by_speaker(
     return (
         "\n\n".join(speaker_a_lines) or "No memories available.",
         "\n\n".join(speaker_b_lines) or "No memories available.",
+    )
+
+
+def _author_locomo_speaker_groups(
+    memories: list[Any],
+) -> tuple[str, str, str, str]:
+    """逐字复现 `search_locomo.py` 按首次命中顺序构造的两个 speaker 槽。"""
+
+    groups: dict[str, list[Any]] = {}
+    for memory in memories:
+        speaker = _memory_speaker_name(memory) or "Unknown"
+        groups.setdefault(speaker, []).append(memory)
+    speakers = list(groups)
+    if not speakers:
+        return (
+            "Speaker 1",
+            "No memories available.",
+            "Speaker 2",
+            "No memories available.",
+        )
+    if len(speakers) == 1:
+        first = speakers[0]
+        return (
+            first,
+            "\n\n".join(_format_lightmem_memory(item) for item in groups[first]),
+            "Speaker 2",
+            "No memories available.",
+        )
+    first, second = speakers[:2]
+    return (
+        first,
+        "\n\n".join(_format_lightmem_memory(item) for item in groups[first]),
+        second,
+        "\n\n".join(_format_lightmem_memory(item) for item in groups[second]),
     )
 
 

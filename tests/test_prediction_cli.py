@@ -50,6 +50,9 @@ from memory_benchmark.methods.config_track import (
 )
 from memory_benchmark.methods.mem0_adapter import Mem0Config
 from memory_benchmark.methods.registry import ResolvedMethodProfile
+from memory_benchmark.prompts.author.lightmem import (
+    build_lightmem_locomo_native_answer_prompt,
+)
 from memory_benchmark.observability.efficiency import (
     ModelDescriptor,
     RetrievalObservationContract,
@@ -194,6 +197,36 @@ def test_new_run_answer_builder_resolver_rejects_unregistered_or_missing_builder
         prediction_cli._resolve_registered_answer_builder(
             answer_builder="benchmark",
             benchmark_registration=SimpleNamespace(name="locomo"),
+        )
+
+
+def test_lightmem_author_locomo_builder_is_explicitly_registered() -> None:
+    """只有精确 builder + LoCoMo 身份能进入 LightMem 作者 answer 路径。"""
+
+    builder = prediction_cli._resolve_registered_answer_builder(
+        answer_builder="lightmem_locomo_paper_native_v1",
+        benchmark_registration=get_benchmark_registration("locomo"),
+    )
+
+    assert builder is build_lightmem_locomo_native_answer_prompt
+    with pytest.raises(ConfigurationError, match="requires benchmark 'locomo'"):
+        prediction_cli._resolve_registered_answer_builder(
+            answer_builder="lightmem_locomo_paper_native_v1",
+            benchmark_registration=get_benchmark_registration("longmemeval"),
+        )
+
+
+def test_author_profile_benchmark_guard_rejects_cross_benchmark_use() -> None:
+    """author-locomo 不得因数据形状相似而静默用在另一 benchmark。"""
+
+    prediction_cli._validate_author_profile_benchmark(
+        profile_name="author-locomo",
+        benchmark_name="locomo",
+    )
+    with pytest.raises(ConfigurationError, match="requires benchmark 'locomo'"):
+        prediction_cli._validate_author_profile_benchmark(
+            profile_name="author-locomo",
+            benchmark_name="longmemeval",
         )
 
 
