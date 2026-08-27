@@ -46,12 +46,13 @@ created: 2026-07-05
   启动其他 method/benchmark、把旧 embedding build 重标为新 controlled identity，或用 lineage 伪造 metric
   资格。2026-08-27 用户明确要求的 answer-prompt serializer v2 迁移已经逐题重建验真并关闭；
   除该有收据迁移外，不得任意改写旧 artifact。
-- **当前动作**：`lm-author-locomo-gpt4omini-r07-th512-postupdate-v1` prediction 已完成
-  10/10 conversations、1,540/1,540 answers、0 failed；420 build + 1,540 answer 调用均为
-  SDK `api_usage`，共 5,148,413 tokens。开跑后发现 author compact artifact 的 runtime
-  `prompt_messages` 依赖，已用 adapter v9 的两个最小结构化字段和 1,540 题零 API prompt parity
-  修复，不退回逐题复制完整模板。下一动作是提交该窄修复，执行全部现有 LoCoMo 离线指标与显式
-  `lightmem_locomo_paper` 官方 judge，并持续写收据。
+- **当前动作**：LightMem LoCoMo author reproduction 已关闭：prediction 10/10 conversations、
+  1,540/1,540 answers、0 failed；official strict judge `1114/1540=72.3377%`，比论文
+  `1108/1540=71.95%` 高 6 题。420 build + 1,540 answer 共 5,148,413 SDK tokens，论文对应
+  5,005,851（+2.85%）；judge 另计 1,540 calls / 631,065 tokens。adapter v9 compact repair
+  已逐题 artifact-only 重建验真，未复制完整模板或重跑 API。完整对表见
+  [author branch](branches/lightmem-author-locomo/README.md)。本授权范围到此用尽，不自动扩到
+  其他 method/benchmark；ws05 下一动作回到用户裁定的后续正式实验/预算路径。
   历史 LightMem 五格累计 8,620,622 个 SDK `api_usage` tokens，详见
   [LightMem 收据](branches/lightmem-mimo-calibration/notes/second-batch-receipt.md)；SimpleMem 同一
   paired cohort 累计 30,894,972 tokens，12,787 次 API LLM observation 全部为 `api_usage`，详见
@@ -83,6 +84,12 @@ created: 2026-07-05
   answer/judge 均使用 LightMem 官方 harness，W10、APILIO/GPT-4o-mini、10 conversation/1,540 QA。
   current script `.6` 与 paper/README `.7` 的冲突已按“复现已报告 row”裁为 `.7`；完整合同见
   [author branch](branches/lightmem-author-locomo/README.md)。
+
+- 2026-08-27：LightMem author row 已验收关闭。`(512,.7)` post-update、GPT-4o-mini、官方
+  answer/judge 得到 `1114/1540=72.3377%`，论文同分母 `1108/1540=71.95%`，仅 +6 题；四类
+  分母逐项一致。prediction 1,960 calls / 5,148,413 SDK tokens，judge 1,540 calls /
+  631,065 SDK tokens，0 failed。开跑后发现并修复 author compact artifact 的重建字段缺口，
+  current 全量零 API门 `2387 passed, 3 deselected, 25 warnings, 29 subtests passed`。
 
 - 2026-08-27：为避免直接烧三个完整 LoCoMo isolation，先执行 5×2 paired synthetic token
   probe。GPT/Mimo prompt ratio 随短请求、英文、中文、结构化抽取与 LoCoMo-style context 在

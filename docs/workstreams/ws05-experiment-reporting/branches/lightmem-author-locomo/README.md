@@ -1,6 +1,6 @@
 # LightMem × LoCoMo GPT-4o-mini 作者复现支线
 
-状态：`in-progress`
+状态：`done`
 
 父任务：[ws05 experiment reporting](../../README.md)
 
@@ -37,18 +37,20 @@
 - [x] 完成 current 全量零 API 回归并锁定源代码身份 `21abf25`；
 - [x] 执行全量 prediction（10 conversation / 1,540 QA / W10，0 failed）；
 - [x] 验收并修复 author compact artifact 的确定性重建字段，1,540 题零 API parity；
-- [ ] 执行官方 author judge 与全部现有 LoCoMo 离线/补充指标；
-- [ ] 验收 SDK usage、失败账、分母、prompt/judge identity 与论文数字差异。
+- [x] 执行官方 author judge 与全部现有 LoCoMo 离线/补充指标；
+- [x] 验收 SDK usage、失败账、分母、prompt/judge identity 与论文数字差异。
 
 ## 当前断点
 
-prediction 已完成：10/10 conversations、1,540/1,540 answers、0 failed、W10 墙钟
-17m37s。420 次 memory-build + 1,540 次 answer LLM 调用全部是 SDK `api_usage`，合计
-5,148,413 tokens。author artifact repair 只增加每条 top-60 item 的
-`speaker_name/weekday`，没有重跑 retrieve/API；1,540/1,540 system prompt 从 artifact-only
-载荷重建通过。下一动作是先提交该窄修复，再执行离线指标与显式官方 author judge，不扩到
-其他 method/benchmark。零 API基线全量门仍为
-`2383 passed, 3 deselected, 25 warnings, 29 subtests passed`；本次 repair 定向门为
-`335 passed, 1 warning`。
+支线已关闭。prediction：10/10 conversations、1,540/1,540 answers、0 failed、W10 墙钟
+17m37s；420 次 memory-build + 1,540 次 answer 全部是 SDK `api_usage`，合计
+5,148,413 tokens。official strict judge：`1114/1540 = 72.3377%`，比论文 71.95%
+高 6 题/0.3896 个百分点；1,540 次 judge 另计 631,065 SDK tokens。artifact repair 没有
+重跑 retrieve/API，1,540/1,540 system prompt 可从 compact artifact 独立重建。
+
+离线补充指标：LoCoMo F1=`0.506778`、通用 F1=`0.495327`、normalized EM=`0.221429`、
+substring EM=`0.331818`；post-update semantic lineage 不可证明，LoCoMo Recall 诚实为 N/A。
+BLEU-1 尚未注册，未伪装成已复现。current repair 后全量零 API门为
+`2387 passed, 3 deselected, 25 warnings, 29 subtests passed in 158.69s`。
 完整证据、可比性边界与运行收据见
 [preflight and run contract](notes/preflight-and-run-contract.md)。

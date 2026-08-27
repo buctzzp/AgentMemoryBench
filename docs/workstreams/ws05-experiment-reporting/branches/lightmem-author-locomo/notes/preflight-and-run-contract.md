@@ -2,7 +2,7 @@
 
 日期：2026-08-27
 
-状态：`PREDICTION_ACCEPTED_JUDGE_PENDING`
+状态：`ACCEPTED`
 
 ## 1. 复现目标与一手身份
 
@@ -153,3 +153,46 @@ run 级 `prompt_track=unified` 在此只表示“registered deterministic builde
 来源必须读 `answer_builder=lightmem_locomo_paper_native_v1`，不能再用旧二元字段推断
 benchmark-vs-author。逐题 metadata 已同步该执行语义，作者来源仍由 builder/profile/official_source
 三字段锁定。
+
+## 9. Evaluation 与论文对表
+
+全部当前可用 LoCoMo evaluator 已执行：
+
+| metric | 结果 | 资格/说明 |
+| --- | ---: | --- |
+| official strict ACC judge | 1114/1540 = 72.3377% | author calibration 主指标 |
+| LoCoMo F1 | 0.506778 | answer-only 补充指标；论文 0.4775 |
+| common token F1 | 0.495327 | 通用补充指标，不冒充论文 LoCoMo F1 |
+| normalized EM | 0.221429 | 通用补充指标 |
+| substring EM | 0.331818 | directional contiguous-token 补充指标 |
+| LoCoMo Recall | N/A | offline update 合并后 semantic source mapping 不可证明 |
+
+BLEU-1 尚未注册，故未生成假结果。官方 strict judge 的 1,540 条 raw response 均为合法 JSON，
+label 只含大小写精确的 `CORRECT/WRONG`；1,114 条 1 分、426 条 0 分，score/prediction/private
+label/question id 集合精确一致。全部 1,540 次 judge observation 都是
+`gpt-4o-mini + api_usage`：620,258 input + 10,807 output = 631,065 tokens，tier 全部为
+`author_calibration`，prompt profile 全部为 `lightmem_locomo_paper_native_judge_v1`。
+
+论文百分比按同一分母反推为 1,108/1,540；本次只多 6 题：
+
+| 类型 | 本次 | 论文百分比反推 | 差异 |
+| --- | ---: | ---: | ---: |
+| Multi / category 1 | 177/282 = 62.77% | 176/282 = 62.41% | +1 |
+| Temporal / category 2 | 240/321 = 74.77% | 238/321 = 74.14% | +2 |
+| Open / category 3 | 47/96 = 48.96% | 43/96 = 44.79% | +4 |
+| Single / category 4 | 650/841 = 77.29% | 651/841 = 77.41% | -1 |
+| **Overall** | **1114/1540 = 72.3377%** | **1108/1540 = 71.9481%** | **+6** |
+
+prediction token 与官方 README 对表：
+
+| 范围 | 本次 SDK tokens | 官方 | 相对差异 |
+| --- | ---: | ---: | ---: |
+| memory construction | 1,004,610 | 997,610 | +0.70% |
+| QA answer | 4,143,803 | 4,008,243 | +3.38% |
+| **build + QA** | **5,148,413** | **5,005,851** | **+2.85%** |
+| build calls | 420 | 415 | +5 |
+
+轻微差异符合非确定 LLM 输出/分段拓扑、APILIO token accounting 与已披露 product-Qdrant vs
+official NumPy retrieval 部署面的共同作用；现有证据不支持把其中任一项单独宣称为唯一因果。
+本机 W10 墙钟 17m37s 也不能与官方 GPU/worker/runtime 直接比较。主 ACC、四类分母、调用量和
+token 均落在窄差异内，本支线判为 `ACCEPTED_AUTHOR_REPRODUCTION`。

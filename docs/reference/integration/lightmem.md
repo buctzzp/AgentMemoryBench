@@ -764,3 +764,13 @@ profile：`author-locomo` = GPT-4o-mini、LoCoMo、paper/README `(r=.7, STM=512)
 
 完整合同与运行收据入口：
 [`lightmem-author-locomo`](../../workstreams/ws05-experiment-reporting/branches/lightmem-author-locomo/README.md)。
+
+该作者校准已于 2026-08-27 完成：官方严格 ACC judge 为
+`1114/1540 = 72.3377%`，论文/README 报告 `1108/1540 = 71.95%`，只差 6 题/
+`+0.3896` percentage points。四类分别为 Multi `177/282`、Temporal `240/321`、
+Open `47/96`、Single `650/841`；论文百分比反推为 `176/282`、`238/321`、
+`43/96`、`651/841`。prediction 的 420 次 build + 1,540 次 answer 调用共
+5,148,413 个 SDK tokens；官方对应 415 calls / 5,005,851 tokens，build/QA/总 token
+分别高约 0.70%/3.38%/2.85%。judge 另有 1,540 calls / 631,065 tokens，不混进论文
+memory-con + QA token 对表。W10 本机墙钟、Qdrant product search 与官方脚本的 NumPy
+search/GPU runtime 不直接对表；它们是已披露的部署差异，不改写为“字节级官方复现”。
