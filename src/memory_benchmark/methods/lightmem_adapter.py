@@ -73,7 +73,7 @@ from memory_benchmark.observability.efficiency import (
 
 
 LIGHTMEM_METHOD_DIRECTORY = "LightMem"
-LIGHTMEM_ADAPTER_VERSION = "conversation-qa-v8"
+LIGHTMEM_ADAPTER_VERSION = "conversation-qa-v9"
 LIGHTMEM_MESSAGES_USE_VALUES = ("user_only", "assistant_only", "hybrid")
 LIGHTMEM_LIFECYCLE_PROFILES = ("online_soft", "locomo_offline_consolidated")
 LIGHTMEM_MISSING_TIMESTAMP_POLICIES = ("preserve_none", "require")
@@ -1846,6 +1846,15 @@ class LightMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
             score = float(raw_score) if isinstance(raw_score, (int, float)) else None
             raw_timestamp = payload.get("time_stamp")
             timestamp = str(raw_timestamp) if raw_timestamp is not None else None
+            item_metadata: dict[str, Any] = {
+                "source": str(memory.get("source") or "vector")
+            }
+            speaker_name = _memory_speaker_name(memory)
+            if speaker_name is not None:
+                item_metadata["speaker_name"] = speaker_name
+            raw_weekday = payload.get("weekday")
+            if raw_weekday is not None:
+                item_metadata["weekday"] = str(raw_weekday)
             items.append(
                 RetrievedItem(
                     item_id=item_id,
@@ -1853,7 +1862,7 @@ class LightMem(BaseMemoryProvider, BaseMemorySystem, MemoryProvider):
                     score=score,
                     timestamp=timestamp,
                     source_turn_ids=tuple(stable_ids),
-                    metadata={"source": str(memory.get("source") or "vector")},
+                    metadata=item_metadata,
                 )
             )
         return tuple(items)

@@ -139,10 +139,10 @@ def test_lightmem_config_accepts_valid_lifecycle_profiles(
     assert config.lifecycle_profile == lifecycle_profile
 
 
-def test_lightmem_config_manifest_includes_lifecycle_profile_and_adapter_version_v8() -> None:
+def test_lightmem_config_manifest_includes_lifecycle_profile_and_adapter_version_v9() -> None:
     """公开 manifest 必须携带 lifecycle_profile、missing_timestamp_policy 与
-    messages_use/LoCoMo 输入身份，adapter_version 升级为 v8：显式区分主表
-    shared renderer 与作者 harness renderer，旧 v7 build 不得跨身份 resume。"""
+    messages_use/LoCoMo 输入身份，adapter_version 升级为 v9：compact author
+    artifact 保留 speaker/weekday 重建字段，旧 v8 readout 不得跨身份 resume。"""
 
     config = LightMemConfig(
         llm_model="gpt-4o-mini",
@@ -161,7 +161,7 @@ def test_lightmem_config_manifest_includes_lifecycle_profile_and_adapter_version
     assert manifest["missing_timestamp_policy"] == "require"
     assert manifest["messages_use"] == "user_only"
     assert manifest["locomo_input_profile"] == "framework_shared_v1"
-    assert manifest["adapter_version"] == LIGHTMEM_ADAPTER_VERSION == "conversation-qa-v8"
+    assert manifest["adapter_version"] == LIGHTMEM_ADAPTER_VERSION == "conversation-qa-v9"
     assert manifest["adapter_version"] != "conversation-qa-v6"
 
 
@@ -292,7 +292,7 @@ def test_lightmem_source_identity_changes_with_sensory_buffer_bytes(
 
     assert before["source_sha256"] != after["source_sha256"]
     assert before["file_count"] == after["file_count"] == len(required_files)
-    assert LIGHTMEM_ADAPTER_VERSION == "conversation-qa-v8"
+    assert LIGHTMEM_ADAPTER_VERSION == "conversation-qa-v9"
 
 
 def test_lightmem_can_import_official_lightmemory_class() -> None:
@@ -5664,6 +5664,9 @@ def test_lightmem_adapter_reads_valid_plural_with_stable_deduplication() -> None
             "score": 0.9,
             "payload": {
                 "memory": "fact",
+                "time_stamp": "2023-05-08T13:56:00.000",
+                "weekday": "Mon",
+                "speaker_name": "Caroline",
                 "source_external_ids": ["u1", "u1", "u2"],
             },
         }
@@ -5673,6 +5676,11 @@ def test_lightmem_adapter_reads_valid_plural_with_stable_deduplication() -> None
 
     assert items is not None
     assert items[0].source_turn_ids == ("u1", "u2")
+    assert items[0].metadata == {
+        "source": "vector",
+        "speaker_name": "Caroline",
+        "weekday": "Mon",
+    }
 
 
 def test_lightmem_offline_insert_writes_plural_without_false_singular() -> None:

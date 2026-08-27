@@ -754,8 +754,13 @@ profile：`author-locomo` = GPT-4o-mini、LoCoMo、paper/README `(r=.7, STM=512)
 - judge：不会由 answer builder 暗换。evaluate 必须显式传
   `--judge-profile lightmem_locomo_paper`，逐字使用官方 ACCURACY_PROMPT，并标
   `metric_tier=author_calibration`；
-- identity：adapter `conversation-qa-v8`、source closure v2、APILIO/GPT-4o-mini runtime、
-  workers 与全部 method 参数进入 manifest/resume；旧 v7/main build 不可 resume。
+- identity：本次正式 prediction 由 adapter `conversation-qa-v8` 生成，source closure v2、
+  APILIO/GPT-4o-mini runtime、workers 与全部 method 参数均进入 manifest。prediction 后机器门
+  发现 author compact artifact 缺少重建动态 speaker/time 的最小字段；current adapter 升为
+  `conversation-qa-v9`，只给 `RetrievedItem.metadata` 增加 `speaker_name/weekday`，author builder
+  从 top-60 item 确定性重建同一 system message，不改 v8 已发生的 build、offline update、
+  retrieval、answer 或分数。旧 v8 readout 不得直接 resume 到 v9；本次完整 run 另有逐题
+  零 API 迁移收据。
 
 完整合同与运行收据入口：
 [`lightmem-author-locomo`](../../workstreams/ws05-experiment-reporting/branches/lightmem-author-locomo/README.md)。

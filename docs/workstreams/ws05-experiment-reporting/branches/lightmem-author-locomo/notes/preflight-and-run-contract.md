@@ -2,7 +2,7 @@
 
 日期：2026-08-27
 
-状态：`ZERO_API_PREFLIGHT_ACCEPTED`
+状态：`PREDICTION_ACCEPTED_JUDGE_PENDING`
 
 ## 1. 复现目标与一手身份
 
@@ -116,3 +116,40 @@ uv run memory-benchmark evaluate \
   `2383 passed, 3 deselected, 25 warnings, 29 subtests passed in 154.68s`；
 - 追加 explicit author-judge/run-identity 双向配对强反例后：`157 passed`；
 - `git diff --check` clean；本环境未安装 ruff，未把工具缺席伪装成通过。
+
+## 8. Prediction 与 compact artifact 修复收据
+
+正式 prediction 由 commit `21abf25` 启动并完成：
+
+- 10/10 conversations、1,540/1,540 answers、0 failed；W10 墙钟 17m37s；
+- 每题实际 `retrieved_items=60`。逐题 `retrieval_query_top_k=10` 是 benchmark query 的
+  通用请求字段，author method config 的 product retrieve limit=60 已真实生效，不得误读为
+  top-10；
+- memory-build：420 calls，796,832 input + 207,778 output = 1,004,610 tokens；
+- answer：1,540 calls，4,133,746 input + 10,057 output = 4,143,803 tokens；
+- 两阶段合计 1,960 calls / 5,148,413 tokens，全部 `token_measurement_source=api_usage`；
+- 15,188 次 embedding observation 仍按本地 tokenizer 估算，未混入上述 API token；
+- 1,540 个公开 question、private label、prediction、answer artifact id 集合精确相同，空答案 0，
+  公开 question 的 gold/private key 负空间通过。
+
+开跑后机器门发现一个只影响 artifact resume/身份、未改变已生成 answer 的缺口：author builder
+虽已注册，但 v2 serializer 删除了逐题 `prompt_messages`；旧 builder 又只透传 runtime 临时
+messages，artifact-only resume 无法重建。修复没有退回逐题复制完整 prompt，而是：
+
+1. adapter v9 给每个结构化 top-60 item 增加 `speaker_name` 与 `weekday`；timestamp、content、
+   score、source ids 原字段不变；
+2. author builder 由 ordered items 确定性重建首次命中 speaker 分组与 pretty-date memory；静态
+   官方模板仍只由 run builder identity 保存一次；
+3. 本次 v8 artifact 从 10 个已关闭的 Qdrant 库只读 4,970 points，给 1,540 行补齐两个字段；
+   零 retrieve、零 embedding、零 API。迁移前后 SHA-256 分别为
+   `9f8fb5f1fc821b57b801d6d1f5a29ede44a953d4d33d08833cf4c123a6a4e198` 与
+   `e58c1f5859113e548a6b85b56badd4c3e3fc3f3fbf28732e06feedb8ea2c7b28`，大小从
+   46,866,045 增至 50,844,933 bytes；其余 prediction artifact hash 全部守恒；
+4. `ALL_AUTHOR_PROMPT_REBUILDS_MATCH rows=1540 conversations=10` 与最终
+   `PREDICTION_AND_COMPACT_REBUILD_GATE_PASS` 均通过。run 内机器收据位于
+   `summaries/author_prompt_artifact_repair.json`。
+
+run 级 `prompt_track=unified` 在此只表示“registered deterministic builder path”；真正的 prompt
+来源必须读 `answer_builder=lightmem_locomo_paper_native_v1`，不能再用旧二元字段推断
+benchmark-vs-author。逐题 metadata 已同步该执行语义，作者来源仍由 builder/profile/official_source
+三字段锁定。

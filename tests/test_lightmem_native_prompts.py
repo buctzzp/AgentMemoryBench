@@ -5,11 +5,19 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 from memory_benchmark.benchmark_adapters.locomo_prompt import (
     build_locomo_unified_answer_prompt,
 )
-from memory_benchmark.core import AnswerResult, GoldAnswerInfo, PromptMessage, Question
-from memory_benchmark.core.provider_protocol import RetrievalResult
+from memory_benchmark.core import (
+    AnswerResult,
+    ConfigurationError,
+    GoldAnswerInfo,
+    PromptMessage,
+    Question,
+)
+from memory_benchmark.core.provider_protocol import RetrievedItem, RetrievalResult
 from memory_benchmark.evaluators.locomo_judge import LoCoMoJudgeEvaluator
 from memory_benchmark.prompts.author.lightmem import (
     LIGHTMEM_LOCOMO_NATIVE_ANSWER_PROMPT,
@@ -20,6 +28,7 @@ from memory_benchmark.prompts.author.lightmem import (
     build_lightmem_longmemeval_native_answer_prompt,
     lightmem_locomo_native_judge_skips_category,
 )
+from memory_benchmark.runners.prediction_answer import _retrieval_result_from_record
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +58,112 @@ def test_locomo_native_answer_matches_runtime_official_ast() -> None:
     assert LIGHTMEM_LOCOMO_NATIVE_ANSWER_PROMPT == official
     assert result.prompt_messages == [PromptMessage(role="system", content=expected)]
     assert result.answer_prompt == expected
+
+
+def test_locomo_author_answer_rebuilds_exactly_from_compact_items() -> None:
+    """v2 artifact 只凭结构化命中也应重建首次 speaker 顺序与 pretty date。"""
+
+    question = Question("q1", "c1", "What happened?")
+    items = (
+        RetrievedItem(
+            item_id="b1",
+            content="2023-05-09T08:30:00.000 Tue Bob memory",
+            score=0.9,
+            timestamp="2023-05-09T08:30:00.000",
+            metadata={"source": "vector", "speaker_name": "Bob", "weekday": "Tue"},
+        ),
+        RetrievedItem(
+            item_id="a1",
+            content="2023-05-08T13:56:00.000 Mon Alice memory",
+            score=0.8,
+            timestamp="2023-05-08T13:56:00.000",
+            metadata={
+                "source": "vector",
+                "speaker_name": "Alice",
+                "weekday": "Mon",
+            },
+        ),
+        RetrievedItem(
+            item_id="b2",
+            content="2023-05-10T10:00:00.000 Wed Bob second memory",
+            score=0.7,
+            timestamp="2023-05-10T10:00:00.000",
+            metadata={"source": "vector", "speaker_name": "Bob", "weekday": "Wed"},
+        ),
+    )
+    result = build_lightmem_locomo_native_answer_prompt(
+        question,
+        RetrievalResult(formatted_memory="product readout", items=items),
+    )
+    expected = LIGHTMEM_LOCOMO_NATIVE_ANSWER_PROMPT.format(
+        speaker_1_name="Bob",
+        speaker_1_memories=(
+            "[Memory recorded on: 09 May 2023, Tue]\nBob memory\n\n"
+            "[Memory recorded on: 10 May 2023, Wed]\nBob second memory"
+        ),
+        speaker_2_name="Alice",
+        speaker_2_memories=(
+            "[Memory recorded on: 08 May 2023, Mon]\nAlice memory"
+        ),
+        question=question.text,
+    )
+
+    assert result.answer_prompt == expected
+    assert result.prompt_messages == [PromptMessage(role="system", content=expected)]
+    assert result.metadata["prompt_track"] == "unified"
+
+
+def test_locomo_author_compact_item_shape_fails_loudly() -> None:
+    """缺 speaker/weekday 的旧 compact item 不得静默生成不同作者 prompt。"""
+
+    item = RetrievedItem(
+        item_id="m1",
+        content="2023-05-08T13:56:00.000 Mon memory",
+        score=0.9,
+        timestamp="2023-05-08T13:56:00.000",
+        metadata={"source": "vector"},
+    )
+    with pytest.raises(ConfigurationError, match="missing speaker_name"):
+        build_lightmem_locomo_native_answer_prompt(
+            Question("q1", "c1", "What happened?"),
+            RetrievalResult(formatted_memory="memory", items=(item,)),
+        )
+
+
+def test_locomo_author_builder_rebuilds_from_json_artifact_shape() -> None:
+    """JSON 往返后的 v2 payload 不依赖已释放 provider 的 prompt_messages。"""
+
+    record = {
+        "formatted_memory": "2023-05-08T13:56:00.000 Mon Alice memory",
+        "retrieved_items": [
+            {
+                "item_id": "a1",
+                "content": "2023-05-08T13:56:00.000 Mon Alice memory",
+                "score": 0.8,
+                "timestamp": "2023-05-08T13:56:00.000",
+                "source_turn_ids": ["D1:1"],
+                "metadata": {
+                    "source": "vector",
+                    "speaker_name": "Alice",
+                    "weekday": "Mon",
+                },
+            }
+        ],
+        "retrieval_metadata": {"method": "lightmem"},
+        "retrieval_evidence": None,
+    }
+    question = Question("q1", "c1", "What happened?")
+
+    result = build_lightmem_locomo_native_answer_prompt(
+        question,
+        _retrieval_result_from_record(record),
+    )
+
+    assert "Memories for user Alice:" in result.answer_prompt
+    assert "[Memory recorded on: 08 May 2023, Mon]\nAlice memory" in (
+        result.answer_prompt
+    )
+    assert "prompt_messages" not in record
 
 
 def test_longmemeval_native_answer_matches_runtime_official_ast() -> None:

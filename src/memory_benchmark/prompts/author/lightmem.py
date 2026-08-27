@@ -7,10 +7,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Callable
 
-from memory_benchmark.core import AnswerPromptResult, ConfigurationError, Question
-from memory_benchmark.core.provider_protocol import RetrievalResult
+from memory_benchmark.core import (
+    AnswerPromptResult,
+    ConfigurationError,
+    PromptMessage,
+    Question,
+)
+from memory_benchmark.core.provider_protocol import RetrievedItem, RetrievalResult
 
 
 LIGHTMEM_LOCOMO_NATIVE_ANSWER_PROMPT = '''
@@ -144,27 +150,41 @@ def build_lightmem_locomo_native_answer_prompt(
     question: Question,
     retrieval_result: RetrievalResult,
 ) -> AnswerPromptResult:
-    """复用 LightMem adapter 已按官方 speaker 分组生成的 LoCoMo system prompt。"""
+    """由结构化 top-60 命中重建 LightMem LoCoMo 官方 system prompt。
 
-    messages = retrieval_result.prompt_messages
-    if (
-        messages is None
-        or len(messages) != 1
-        or messages[0].role != "system"
-        or not messages[0].content.strip()
-    ):
-        raise ConfigurationError(
-            "LightMem LoCoMo native answer requires one adapter-produced system prompt"
+    current v2 artifact 不逐题复制完整 prompt；speaker、weekday、timestamp 与
+    product readout 足以确定性重建作者 harness 的动态部分。旧 v1 artifact 仍可
+    通过 ``prompt_messages`` 逐字回读。
+    """
+
+    if retrieval_result.items is not None:
+        content = _build_lightmem_locomo_prompt_from_items(
+            question=question,
+            items=retrieval_result.items,
         )
-    prompt_messages = list(messages)
+        prompt_messages = [PromptMessage(role="system", content=content)]
+    else:
+        messages = retrieval_result.prompt_messages
+        if (
+            messages is None
+            or len(messages) != 1
+            or messages[0].role != "system"
+            or not messages[0].content.strip()
+        ):
+            raise ConfigurationError(
+                "LightMem LoCoMo author answer requires structured retrieved items "
+                "or one legacy adapter-produced system prompt"
+            )
+        content = messages[0].content
+        prompt_messages = list(messages)
     return AnswerPromptResult(
         question_id=question.question_id,
         conversation_id=question.conversation_id,
-        answer_prompt=messages[0].content,
+        answer_prompt=content,
         prompt_messages=prompt_messages,
         metadata={
             **retrieval_result.metadata,
-            "prompt_track": "native",
+            "prompt_track": "unified",
             "answer_prompt_profile": LIGHTMEM_LOCOMO_NATIVE_ANSWER_PROFILE,
             "official_source": (
                 "third_party/methods/LightMem/experiments/locomo/"
@@ -173,6 +193,90 @@ def build_lightmem_locomo_native_answer_prompt(
             "answer_context": retrieval_result.formatted_memory,
         },
     )
+
+
+def _build_lightmem_locomo_prompt_from_items(
+    *,
+    question: Question,
+    items: tuple[RetrievedItem, ...],
+) -> str:
+    """按首次命中 speaker 顺序从 compact artifact 重建作者 prompt。"""
+
+    groups: dict[str, list[str]] = {}
+    for item in items:
+        speaker = item.metadata.get("speaker_name")
+        weekday = item.metadata.get("weekday")
+        if not isinstance(speaker, str) or not speaker.strip():
+            raise ConfigurationError(
+                "LightMem LoCoMo author item is missing speaker_name: "
+                f"{item.item_id}"
+            )
+        if not isinstance(weekday, str):
+            raise ConfigurationError(
+                "LightMem LoCoMo author item is missing weekday: "
+                f"{item.item_id}"
+            )
+        groups.setdefault(speaker, []).append(
+            _format_lightmem_locomo_author_item(item, weekday=weekday)
+        )
+
+    speakers = list(groups)
+    if not speakers:
+        speaker_1_name = "Speaker 1"
+        speaker_1_memories = "No memories available."
+        speaker_2_name = "Speaker 2"
+        speaker_2_memories = "No memories available."
+    elif len(speakers) == 1:
+        speaker_1_name = speakers[0]
+        speaker_1_memories = "\n\n".join(groups[speaker_1_name])
+        speaker_2_name = "Speaker 2"
+        speaker_2_memories = "No memories available."
+    else:
+        speaker_1_name, speaker_2_name = speakers[:2]
+        speaker_1_memories = "\n\n".join(groups[speaker_1_name])
+        speaker_2_memories = "\n\n".join(groups[speaker_2_name])
+    return LIGHTMEM_LOCOMO_NATIVE_ANSWER_PROMPT.format(
+        speaker_1_name=speaker_1_name,
+        speaker_1_memories=speaker_1_memories,
+        speaker_2_name=speaker_2_name,
+        speaker_2_memories=speaker_2_memories,
+        question=question.text,
+    )
+
+
+def _format_lightmem_locomo_author_item(
+    item: RetrievedItem,
+    *,
+    weekday: str,
+) -> str:
+    """从 product readout 无损还原官方 LoCoMo pretty-date memory。"""
+
+    timestamp = item.timestamp
+    if timestamp is None:
+        raise ConfigurationError(
+            "LightMem LoCoMo author item is missing timestamp: "
+            f"{item.item_id}"
+        )
+    prefix = f"{timestamp} {weekday} "
+    if not item.content.startswith(prefix):
+        raise ConfigurationError(
+            "LightMem LoCoMo author item content does not match its structured "
+            f"timestamp/weekday: {item.item_id}"
+        )
+    memory_text = item.content[len(prefix) :]
+    try:
+        formatted_date = datetime.fromisoformat(
+            timestamp.replace("Z", "+00:00")
+        ).strftime("%d %B %Y")
+    except ValueError as exc:
+        raise ConfigurationError(
+            "LightMem LoCoMo author item has an invalid timestamp: "
+            f"{item.item_id}"
+        ) from exc
+    weekday_text = f", {weekday}" if weekday else ""
+    return (
+        f"[Memory recorded on: {formatted_date}{weekday_text}]\n{memory_text}"
+    ).strip()
 
 
 def build_lightmem_longmemeval_native_answer_prompt(

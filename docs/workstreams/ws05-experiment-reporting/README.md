@@ -46,9 +46,12 @@ created: 2026-07-05
   启动其他 method/benchmark、把旧 embedding build 重标为新 controlled identity，或用 lineage 伪造 metric
   资格。2026-08-27 用户明确要求的 answer-prompt serializer v2 迁移已经逐题重建验真并关闭；
   除该有收据迁移外，不得任意改写旧 artifact。
-- **当前动作**：先完成 author-locomo adapter v8、显式 author judge 与 source/runtime identity 的
-  零 API 全量门；通过后直接启动
-  `lm-author-locomo-gpt4omini-r07-th512-postupdate-v1` prediction/evaluate，并持续写收据。
+- **当前动作**：`lm-author-locomo-gpt4omini-r07-th512-postupdate-v1` prediction 已完成
+  10/10 conversations、1,540/1,540 answers、0 failed；420 build + 1,540 answer 调用均为
+  SDK `api_usage`，共 5,148,413 tokens。开跑后发现 author compact artifact 的 runtime
+  `prompt_messages` 依赖，已用 adapter v9 的两个最小结构化字段和 1,540 题零 API prompt parity
+  修复，不退回逐题复制完整模板。下一动作是提交该窄修复，执行全部现有 LoCoMo 离线指标与显式
+  `lightmem_locomo_paper` 官方 judge，并持续写收据。
   历史 LightMem 五格累计 8,620,622 个 SDK `api_usage` tokens，详见
   [LightMem 收据](branches/lightmem-mimo-calibration/notes/second-batch-receipt.md)；SimpleMem 同一
   paired cohort 累计 30,894,972 tokens，12,787 次 API LLM observation 全部为 `api_usage`，详见

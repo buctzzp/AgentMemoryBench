@@ -376,6 +376,11 @@ estimand/identity；若目标相同，再用最终 effective call 与可复现�
 - artifact cardinality 必须由 evaluator contract 决定，不能默认“一题一 score / 一题一 judge”。
   MemBench source summary 会有多行聚合，BEAM 一题也可能同时触发 event-equivalence 与 rubric
   judge；机器门应核 scope/metric/identity 的集合与计数来源，而不是写死直觉中的 1。
+- compact answer artifact 不能只因“有注册 builder”就删除逐题 prompt。必须用一次真实失败后
+  resume 强反例证明：公开 question + 持久化 retrieval payload 能在 method runtime 已释放后逐字
+  重建最终 messages，且不重新 retrieve。method-author builder 若依赖 provider 临时
+  `prompt_messages`，应先补齐最小结构化动态字段；builder 名称与模板 hash 只能证明静态身份，
+  不能替代动态 speaker/time/order 数据。
 - shell 包装层不能把保留/只读变量当退出码容器（例如 zsh 的 `status`）。执行 machine-plan
   `argv` 时直接保存子进程 return code；CLI 已成功写完整 summary/artifact 后，包装层自身失败不得
   触发付费重跑，先由产物门判定业务是否完成。
